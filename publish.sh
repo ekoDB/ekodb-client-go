@@ -6,24 +6,10 @@ echo "======================="
 
 # Get paths
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-# Load .env file if it exists
-if [ -f "$REPO_ROOT/.env" ]; then
-    echo "🔐 Loading environment variables from .env..."
-    set -a
-    source "$REPO_ROOT/.env"
-    set +a
-    echo "✅ Environment variables loaded"
-    echo ""
-fi
-
-# Navigate to the Go client directory
-cd "$REPO_ROOT/ekodb-client-go"
 
 # Check if we're in the right directory
 if [ ! -f "go.mod" ]; then
-    echo "❌ Error: go.mod not found in ekodb-client-go directory"
+    echo "❌ Error: go.mod not found"
     exit 1
 fi
 
