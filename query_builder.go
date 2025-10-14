@@ -32,7 +32,7 @@ func NewQueryBuilder() *QueryBuilder {
 	}
 }
 
-// Eq adds an equality filter ($eq)
+// Eq adds an equality filter (Eq operator)
 func (qb *QueryBuilder) Eq(field string, value interface{}) *QueryBuilder {
 	qb.filters = append(qb.filters, map[string]interface{}{
 		"type": "Condition",
@@ -45,7 +45,7 @@ func (qb *QueryBuilder) Eq(field string, value interface{}) *QueryBuilder {
 	return qb
 }
 
-// Ne adds a not-equal filter ($ne)
+// Ne adds a not-equal filter (Ne operator)
 func (qb *QueryBuilder) Ne(field string, value interface{}) *QueryBuilder {
 	qb.filters = append(qb.filters, map[string]interface{}{
 		"type": "Condition",
@@ -58,7 +58,7 @@ func (qb *QueryBuilder) Ne(field string, value interface{}) *QueryBuilder {
 	return qb
 }
 
-// Gt adds a greater-than filter ($gt)
+// Gt adds a greater-than filter (Gt operator)
 func (qb *QueryBuilder) Gt(field string, value interface{}) *QueryBuilder {
 	qb.filters = append(qb.filters, map[string]interface{}{
 		"type": "Condition",
@@ -71,7 +71,7 @@ func (qb *QueryBuilder) Gt(field string, value interface{}) *QueryBuilder {
 	return qb
 }
 
-// Gte adds a greater-than-or-equal filter ($gte)
+// Gte adds a greater-than-or-equal filter (Gte operator)
 func (qb *QueryBuilder) Gte(field string, value interface{}) *QueryBuilder {
 	qb.filters = append(qb.filters, map[string]interface{}{
 		"type": "Condition",
@@ -84,7 +84,7 @@ func (qb *QueryBuilder) Gte(field string, value interface{}) *QueryBuilder {
 	return qb
 }
 
-// Lt adds a less-than filter ($lt)
+// Lt adds a less-than filter (Lt operator)
 func (qb *QueryBuilder) Lt(field string, value interface{}) *QueryBuilder {
 	qb.filters = append(qb.filters, map[string]interface{}{
 		"type": "Condition",
@@ -97,7 +97,7 @@ func (qb *QueryBuilder) Lt(field string, value interface{}) *QueryBuilder {
 	return qb
 }
 
-// Lte adds a less-than-or-equal filter ($lte)
+// Lte adds a less-than-or-equal filter (Lte operator)
 func (qb *QueryBuilder) Lte(field string, value interface{}) *QueryBuilder {
 	qb.filters = append(qb.filters, map[string]interface{}{
 		"type": "Condition",
@@ -110,7 +110,7 @@ func (qb *QueryBuilder) Lte(field string, value interface{}) *QueryBuilder {
 	return qb
 }
 
-// In adds an in-array filter ($in)
+// In adds an in-array filter (In operator)
 func (qb *QueryBuilder) In(field string, values []interface{}) *QueryBuilder {
 	qb.filters = append(qb.filters, map[string]interface{}{
 		"type": "Condition",
@@ -123,7 +123,7 @@ func (qb *QueryBuilder) In(field string, values []interface{}) *QueryBuilder {
 	return qb
 }
 
-// Nin adds a not-in-array filter ($nin)
+// Nin adds a not-in-array filter (NotIn operator)
 func (qb *QueryBuilder) Nin(field string, values []interface{}) *QueryBuilder {
 	qb.filters = append(qb.filters, map[string]interface{}{
 		"type": "Condition",
