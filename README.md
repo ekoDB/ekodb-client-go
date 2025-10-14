@@ -1,16 +1,20 @@
-# ekoDB Go Client
+# ekoDB Go Client 🔷
 
-Official Go client library for ekoDB.
+[![Go Reference](https://pkg.go.dev/badge/github.com/ekoDB/ekodb-client-go.svg)](https://pkg.go.dev/github.com/ekoDB/ekodb-client-go)
+[![Go Report Card](https://goreportcard.com/badge/github.com/ekoDB/ekodb-client-go)](https://goreportcard.com/report/github.com/ekoDB/ekodb-client-go)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Installation
+Official Go client library for ekoDB - a high-performance document database.
+
+## 📦 Installation
 
 ```bash
 go get github.com/ekoDB/ekodb-client-go
 ```
 
-## Usage
+## 🚀 Quick Start
 
-### Basic Usage (Backward Compatible)
+### Basic Usage
 
 ```go
 package main
@@ -64,7 +68,7 @@ func intPtr(i int) *int {
 }
 ```
 
-### Advanced Usage with Configuration
+### Advanced Configuration
 
 ```go
 package main
@@ -117,7 +121,7 @@ func main() {
 }
 ```
 
-## Features
+## ✨ Features
 
 - ✅ CRUD operations
 - ✅ Batch operations
@@ -137,7 +141,7 @@ func main() {
 - ✅ **Configurable retry behavior**
 - ✅ **Retry-After header support**
 
-## Usage Examples
+## 📖 Usage Examples
 
 ### Query Builder
 
@@ -242,7 +246,7 @@ query := ekodb.NewQueryBuilder().
 results, err := client.Find("users", query)
 ```
 
-## API Reference
+## 📚 API Reference
 
 ### Client Creation
 
@@ -323,21 +327,67 @@ results, err := client.Find("users", query)
 - `FindAll(collection string) ([]Record, error)`
 - `Close() error`
 
-## Examples
+## 💡 Examples
 
-See the
-[examples directory](https://github.com/ekoDB/ekodb/tree/main/examples/go) for
-complete working examples:
+For complete, runnable examples, visit the [ekoDB Examples Repository](https://github.com/ekoDB/ekodb-client/tree/main/examples/go).
 
-- `client_simple_crud.go` - Basic CRUD operations
-- `client_query_builder.go` - Complex queries with QueryBuilder
-- `client_search.go` - Full-text search operations
-- `client_schema.go` - Schema management
-- `client_joins.go` - Join operations
-- `client_batch_operations.go` - Batch operations
-- `client_kv_operations.go` - Key-value operations
-- And more...
+The repository contains **12 working Go examples**:
 
-## License
+### Basic Operations
+- **[client_simple_crud.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_simple_crud.go)** - Basic CRUD operations
+- **[client_collection_management.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_collection_management.go)** - Collection management
+- **[client_kv_operations.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_kv_operations.go)** - Key-value operations
 
-MIT
+### Advanced Queries
+- **[client_query_builder.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_query_builder.go)** - Complex queries with QueryBuilder
+- **[client_search.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_search.go)** - Full-text search operations
+- **[client_joins.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_joins.go)** - Join operations
+
+### Schema & Batch
+- **[client_schema.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_schema.go)** - Schema management
+- **[client_batch_operations.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_batch_operations.go)** - Batch operations
+
+### Real-time & TTL
+- **[client_simple_websocket.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_simple_websocket.go)** - WebSocket queries
+- **[client_websocket_ttl.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_websocket_ttl.go)** - WebSocket with TTL
+- **[client_document_ttl.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_document_ttl.go)** - Document TTL
+
+### Chat Examples
+- **[client_chat_basic.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_chat_basic.go)** - Basic chat application
+- **[client_chat_sessions.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_chat_sessions.go)** - Chat with sessions
+- **[client_chat_advanced.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_chat_advanced.go)** - Advanced chat features
+
+### Running Examples
+
+```bash
+# Clone the examples repository
+git clone https://github.com/ekoDB/ekodb-client.git
+cd ekodb-client/examples/go
+
+# Set up environment
+cp ../.env.example ../.env
+# Edit ../.env with your API URL and key
+
+# Run an example
+go run client_simple_crud.go
+```
+
+## 📚 Documentation
+
+- **[Official Documentation](https://docs.ekodb.io)** - Complete guides and tutorials
+- **[API Reference](https://pkg.go.dev/github.com/ekoDB/ekodb-client-go)** - Go package documentation
+- **[Examples Repository](https://github.com/ekoDB/ekodb-client/tree/main/examples)** - 78 examples across all languages
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 📄 License
+
+MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 💬 Support
+
+- 📧 Email: [support@ekodb.io](mailto:support@ekodb.io)
+- 🐛 Issues: [GitHub Issues](https://github.com/ekoDB/ekodb-client-go/issues)
+- 📖 Documentation: [docs.ekodb.io](https://docs.ekodb.io)

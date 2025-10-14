@@ -175,6 +175,19 @@ func (qb *QueryBuilder) EndsWith(field string, suffix string) *QueryBuilder {
 	return qb
 }
 
+// Regex adds a regex pattern match filter
+func (qb *QueryBuilder) Regex(field string, pattern string) *QueryBuilder {
+	qb.filters = append(qb.filters, map[string]interface{}{
+		"type": "Condition",
+		"content": map[string]interface{}{
+			"field":    field,
+			"operator": "Regex",
+			"value":    pattern,
+		},
+	})
+	return qb
+}
+
 // And combines filters with AND logic
 func (qb *QueryBuilder) And(conditions []map[string]interface{}) *QueryBuilder {
 	qb.filters = append(qb.filters, map[string]interface{}{
