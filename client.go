@@ -11,6 +11,18 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	"github.com/vmihailenco/msgpack/v5"
+)
+
+// SerializationFormat represents the serialization format for client-server communication
+type SerializationFormat int
+
+const (
+	// MessagePack format (binary, 2-3x faster) - DEFAULT for best performance
+	MessagePack SerializationFormat = iota
+	// JSON format (human-readable, opt-in for debugging)
+	JSON
 )
 
 // RateLimitInfo contains rate limit information from the server
@@ -51,11 +63,12 @@ func (e *RateLimitError) Error() string {
 
 // ClientConfig contains configuration options for the client
 type ClientConfig struct {
-	BaseURL     string        // Base URL of the ekoDB server
-	APIKey      string        // API key for authentication
-	ShouldRetry bool          // Enable automatic retries (default: true)
-	MaxRetries  int           // Maximum number of retry attempts (default: 3)
-	Timeout     time.Duration // Request timeout (default: 30s)
+	BaseURL     string               // Base URL of the ekoDB server
+	APIKey      string               // API key for authentication
+	ShouldRetry bool                 // Enable automatic retries (default: true)
+	MaxRetries  int                  // Maximum number of retry attempts (default: 3)
+	Timeout     time.Duration        // Request timeout (default: 30s)
+	Format      SerializationFormat  // Serialization format (default: MessagePack for best performance, use JSON for debugging)
 }
 
 // Client represents an ekoDB client
@@ -66,6 +79,7 @@ type Client struct {
 	httpClient    *http.Client
 	shouldRetry   bool
 	maxRetries    int
+	format        SerializationFormat
 	rateLimitInfo *RateLimitInfo
 }
 
@@ -100,13 +114,18 @@ func NewClientWithConfig(config ClientConfig) (*Client, error) {
 		config.MaxRetries = 3
 	}
 
+	// Create HTTP client with automatic gzip compression support
+	// The default transport handles Accept-Encoding and decompression automatically
 	client := &Client{
 		baseURL:     config.BaseURL,
 		apiKey:      config.APIKey,
 		shouldRetry: config.ShouldRetry,
 		maxRetries:  config.MaxRetries,
+		format:      config.Format, // Default is JSON (0 value)
 		httpClient: &http.Client{
 			Timeout: config.Timeout,
+			// Using nil transport enables default transport with automatic compression
+			Transport: nil,
 		},
 	}
 
@@ -196,12 +215,34 @@ func (c *Client) makeRequest(method, path string, data interface{}) ([]byte, err
 // makeRequestWithRetry makes an HTTP request with retry logic
 func (c *Client) makeRequestWithRetry(method, path string, data interface{}, attempt int) ([]byte, error) {
 	var body io.Reader
+	var contentType string
+	
+	// Check if this path should always use JSON (metadata endpoints)
+	forceJSON := shouldUseJSON(path)
+	
+	// Set content type based on client format (unless forced to JSON)
+	if !forceJSON && c.format == MessagePack {
+		contentType = "application/msgpack"
+	} else {
+		contentType = "application/json"
+	}
+	
 	if data != nil {
-		jsonData, err := json.Marshal(data)
+		var serializedData []byte
+		var err error
+		
+		if !forceJSON && c.format == MessagePack {
+			// Serialize to MessagePack
+			serializedData, err = msgpack.Marshal(data)
+		} else {
+			// Serialize to JSON (default)
+			serializedData, err = json.Marshal(data)
+		}
+		
 		if err != nil {
 			return nil, err
 		}
-		body = bytes.NewBuffer(jsonData)
+		body = bytes.NewBuffer(serializedData)
 	}
 
 	req, err := http.NewRequest(method, c.baseURL+path, body)
@@ -210,7 +251,8 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Accept", contentType)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -271,6 +313,40 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 	return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(responseBody))
 }
 
+// unmarshal deserializes data based on the client's format and path
+func (c *Client) unmarshal(path string, data []byte, v interface{}) error {
+	// Use JSON if the path requires it or if client is set to JSON
+	if shouldUseJSON(path) || c.format == JSON {
+		return json.Unmarshal(data, v)
+	}
+	return msgpack.Unmarshal(data, v)
+}
+
+// shouldUseJSON determines if a path should use JSON
+// Only CRUD operations (insert/update/delete/batch) use MessagePack
+// Everything else uses JSON for compatibility
+func shouldUseJSON(path string) bool {
+	// ONLY these operations support MessagePack
+	msgpackPaths := []string{
+		"/api/insert/",
+		"/api/batch_insert/",
+		"/api/update/",
+		"/api/batch_update/",
+		"/api/delete/",
+		"/api/batch_delete/",
+	}
+	
+	// Check if path starts with any MessagePack-supported operation
+	for _, prefix := range msgpackPaths {
+		if len(path) >= len(prefix) && path[:len(prefix)] == prefix {
+			return false // Use MessagePack
+		}
+	}
+	
+	// Everything else uses JSON
+	return true
+}
+
 // Insert inserts a document into a collection
 func (c *Client) Insert(collection string, record Record, ttl ...string) (Record, error) {
 	// Add TTL if provided
@@ -278,13 +354,14 @@ func (c *Client) Insert(collection string, record Record, ttl ...string) (Record
 		record["ttl_duration"] = ttl[0]
 	}
 
-	respBody, err := c.makeRequest("POST", "/api/insert/"+collection, record)
+	path := "/api/insert/" + collection
+	respBody, err := c.makeRequest("POST", path, record)
 	if err != nil {
 		return nil, err
 	}
 
 	var result Record
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := c.unmarshal(path, respBody, &result); err != nil {
 		return nil, err
 	}
 
@@ -293,13 +370,14 @@ func (c *Client) Insert(collection string, record Record, ttl ...string) (Record
 
 // Find finds documents in a collection
 func (c *Client) Find(collection string, query interface{}) ([]Record, error) {
-	respBody, err := c.makeRequest("POST", "/api/find/"+collection, query)
+	path := "/api/find/" + collection
+	respBody, err := c.makeRequest("POST", path, query)
 	if err != nil {
 		return nil, err
 	}
 
 	var results []Record
-	if err := json.Unmarshal(respBody, &results); err != nil {
+	if err := c.unmarshal(path, respBody, &results); err != nil {
 		return nil, err
 	}
 
@@ -308,13 +386,14 @@ func (c *Client) Find(collection string, query interface{}) ([]Record, error) {
 
 // FindByID finds a document by ID
 func (c *Client) FindByID(collection, id string) (Record, error) {
-	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/find/%s/%s", collection, id), nil)
+	path := fmt.Sprintf("/api/find/%s/%s", collection, id)
+	respBody, err := c.makeRequest("GET", path, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	var result Record
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := c.unmarshal(path, respBody, &result); err != nil {
 		return nil, err
 	}
 
@@ -323,13 +402,14 @@ func (c *Client) FindByID(collection, id string) (Record, error) {
 
 // Update updates a document
 func (c *Client) Update(collection, id string, record Record) (Record, error) {
-	respBody, err := c.makeRequest("PUT", fmt.Sprintf("/api/update/%s/%s", collection, id), record)
+	path := fmt.Sprintf("/api/update/%s/%s", collection, id)
+	respBody, err := c.makeRequest("PUT", path, record)
 	if err != nil {
 		return nil, err
 	}
 
 	var result Record
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := c.unmarshal(path, respBody, &result); err != nil {
 		return nil, err
 	}
 
@@ -338,18 +418,28 @@ func (c *Client) Update(collection, id string, record Record) (Record, error) {
 
 // Delete deletes a document
 func (c *Client) Delete(collection, id string) error {
-	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/delete/%s/%s", collection, id), nil)
-	return err
+	path := fmt.Sprintf("/api/delete/%s/%s", collection, id)
+	respBody, err := c.makeRequest("DELETE", path, nil)
+	if err != nil {
+		return err
+	}
+
+	var result map[string]interface{}
+	if err := c.unmarshal(path, respBody, &result); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // BatchInsert inserts multiple documents
 func (c *Client) BatchInsert(collection string, records []Record) ([]Record, error) {
 	// Convert to server format
 	type batchInsertItem struct {
-		Data Record `json:"data"`
+		Data Record `json:"data" msgpack:"data"`
 	}
 	type batchInsertQuery struct {
-		Inserts []batchInsertItem `json:"inserts"`
+		Inserts []batchInsertItem `json:"inserts" msgpack:"inserts"`
 	}
 
 	inserts := make([]batchInsertItem, len(records))
@@ -359,18 +449,19 @@ func (c *Client) BatchInsert(collection string, records []Record) ([]Record, err
 
 	query := batchInsertQuery{Inserts: inserts}
 
-	respBody, err := c.makeRequest("POST", "/api/batch/insert/"+collection, query)
+	path := "/api/batch/insert/" + collection
+	respBody, err := c.makeRequest("POST", path, query)
 	if err != nil {
 		return nil, err
 	}
 
 	type batchResult struct {
-		Successful []string      `json:"successful"`
-		Failed     []interface{} `json:"failed"`
+		Successful []string      `json:"successful" msgpack:"successful"`
+		Failed     []interface{} `json:"failed" msgpack:"failed"`
 	}
 
 	var result batchResult
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := c.unmarshal(path, respBody, &result); err != nil {
 		return nil, err
 	}
 
@@ -387,11 +478,11 @@ func (c *Client) BatchInsert(collection string, records []Record) ([]Record, err
 func (c *Client) BatchUpdate(collection string, updates map[string]Record) ([]Record, error) {
 	// Convert to server format
 	type batchUpdateItem struct {
-		ID   string `json:"id"`
-		Data Record `json:"data"`
+		ID   string `json:"id" msgpack:"id"`
+		Data Record `json:"data" msgpack:"data"`
 	}
 	type batchUpdateQuery struct {
-		Updates []batchUpdateItem `json:"updates"`
+		Updates []batchUpdateItem `json:"updates" msgpack:"updates"`
 	}
 
 	items := make([]batchUpdateItem, 0, len(updates))
@@ -401,18 +492,19 @@ func (c *Client) BatchUpdate(collection string, updates map[string]Record) ([]Re
 
 	query := batchUpdateQuery{Updates: items}
 
-	respBody, err := c.makeRequest("PUT", "/api/batch/update/"+collection, query)
+	path := "/api/batch/update/" + collection
+	respBody, err := c.makeRequest("PUT", path, query)
 	if err != nil {
 		return nil, err
 	}
 
 	type batchResult struct {
-		Successful []string      `json:"successful"`
-		Failed     []interface{} `json:"failed"`
+		Successful []string      `json:"successful" msgpack:"successful"`
+		Failed     []interface{} `json:"failed" msgpack:"failed"`
 	}
 
 	var result batchResult
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := c.unmarshal(path, respBody, &result); err != nil {
 		return nil, err
 	}
 
@@ -429,10 +521,10 @@ func (c *Client) BatchUpdate(collection string, updates map[string]Record) ([]Re
 func (c *Client) BatchDelete(collection string, ids []string) (int, error) {
 	// Convert to server format
 	type batchDeleteItem struct {
-		ID string `json:"id"`
+		ID string `json:"id" msgpack:"id"`
 	}
 	type batchDeleteQuery struct {
-		Deletes []batchDeleteItem `json:"deletes"`
+		Deletes []batchDeleteItem `json:"deletes" msgpack:"deletes"`
 	}
 
 	deletes := make([]batchDeleteItem, len(ids))
@@ -442,18 +534,19 @@ func (c *Client) BatchDelete(collection string, ids []string) (int, error) {
 
 	query := batchDeleteQuery{Deletes: deletes}
 
-	respBody, err := c.makeRequest("DELETE", "/api/batch/delete/"+collection, query)
+	path := "/api/batch/delete/" + collection
+	respBody, err := c.makeRequest("DELETE", path, query)
 	if err != nil {
 		return 0, err
 	}
 
 	type batchResult struct {
-		Successful []string      `json:"successful"`
-		Failed     []interface{} `json:"failed"`
+		Successful []string      `json:"successful" msgpack:"successful"`
+		Failed     []interface{} `json:"failed" msgpack:"failed"`
 	}
 
 	var result batchResult
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := c.unmarshal(path, respBody, &result); err != nil {
 		return 0, err
 	}
 
@@ -498,6 +591,7 @@ func (c *Client) ListCollections() ([]string, error) {
 	var result struct {
 		Collections []string `json:"collections"`
 	}
+	// Always use JSON for metadata endpoints
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, err
 	}
