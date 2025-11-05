@@ -323,7 +323,7 @@ func (c *Client) unmarshal(path string, data []byte, v interface{}) error {
 }
 
 // shouldUseJSON determines if a path should use JSON
-// Only CRUD operations (insert/update/delete/batch) use MessagePack
+// Only CRUD operations (insert/update/delete/find/batch) use MessagePack
 // Everything else uses JSON for compatibility
 func shouldUseJSON(path string) bool {
 	// ONLY these operations support MessagePack
@@ -334,6 +334,7 @@ func shouldUseJSON(path string) bool {
 		"/api/batch_update/",
 		"/api/delete/",
 		"/api/batch_delete/",
+		"/api/find/",
 	}
 	
 	// Check if path starts with any MessagePack-supported operation
@@ -603,4 +604,25 @@ func (c *Client) ListCollections() ([]string, error) {
 func (c *Client) DeleteCollection(collection string) error {
 	_, err := c.makeRequest("DELETE", "/api/collections/"+collection, nil)
 	return err
+}
+
+// Health checks if the ekoDB server is healthy
+func (c *Client) Health() error {
+	respBody, err := c.makeRequest("GET", "/api/health", nil)
+	if err != nil {
+		return err
+	}
+	
+	var result map[string]interface{}
+	// Always use JSON for health endpoint
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return err
+	}
+	
+	// Check if status is "ok"
+	if status, ok := result["status"].(string); ok && status == "ok" {
+		return nil
+	}
+	
+	return fmt.Errorf("health check failed: unexpected response")
 }
