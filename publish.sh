@@ -79,10 +79,26 @@ if [[ ! $NEW_VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     exit 1
 fi
 
-# Create and push tag
-echo ""
-echo "🏷️  Creating tag $NEW_VERSION..."
-git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
+# Check if tag already exists
+TAG_EXISTED=false
+if git rev-parse "$NEW_VERSION" >/dev/null 2>&1; then
+    TAG_EXISTED=true
+    echo ""
+    echo "⚠️  Tag $NEW_VERSION already exists locally"
+    echo ""
+    read -p "Do you want to use the existing tag? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "❌ Publication cancelled"
+        exit 1
+    fi
+    echo "✅ Using existing tag $NEW_VERSION"
+else
+    # Create tag
+    echo ""
+    echo "🏷️  Creating tag $NEW_VERSION..."
+    git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
+fi
 
 echo ""
 echo "⚠️  Ready to push tag $NEW_VERSION to remote"
@@ -90,7 +106,10 @@ read -p "Do you want to continue? (y/N): " -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "❌ Publication cancelled"
-    git tag -d "$NEW_VERSION"
+    # Only delete tag if we just created it
+    if [ "$TAG_EXISTED" = false ]; then
+        git tag -d "$NEW_VERSION"
+    fi
     exit 1
 fi
 
