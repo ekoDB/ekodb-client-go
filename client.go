@@ -63,12 +63,12 @@ func (e *RateLimitError) Error() string {
 
 // ClientConfig contains configuration options for the client
 type ClientConfig struct {
-	BaseURL     string               // Base URL of the ekoDB server
-	APIKey      string               // API key for authentication
-	ShouldRetry bool                 // Enable automatic retries (default: true)
-	MaxRetries  int                  // Maximum number of retry attempts (default: 3)
-	Timeout     time.Duration        // Request timeout (default: 30s)
-	Format      SerializationFormat  // Serialization format (default: MessagePack for best performance, use JSON for debugging)
+	BaseURL     string              // Base URL of the ekoDB server
+	APIKey      string              // API key for authentication
+	ShouldRetry bool                // Enable automatic retries (default: true)
+	MaxRetries  int                 // Maximum number of retry attempts (default: 3)
+	Timeout     time.Duration       // Request timeout (default: 30s)
+	Format      SerializationFormat // Serialization format (default: MessagePack for best performance, use JSON for debugging)
 }
 
 // Client represents an ekoDB client
@@ -216,21 +216,21 @@ func (c *Client) makeRequest(method, path string, data interface{}) ([]byte, err
 func (c *Client) makeRequestWithRetry(method, path string, data interface{}, attempt int) ([]byte, error) {
 	var body io.Reader
 	var contentType string
-	
+
 	// Check if this path should always use JSON (metadata endpoints)
 	forceJSON := shouldUseJSON(path)
-	
+
 	// Set content type based on client format (unless forced to JSON)
 	if !forceJSON && c.format == MessagePack {
 		contentType = "application/msgpack"
 	} else {
 		contentType = "application/json"
 	}
-	
+
 	if data != nil {
 		var serializedData []byte
 		var err error
-		
+
 		if !forceJSON && c.format == MessagePack {
 			// Serialize to MessagePack
 			serializedData, err = msgpack.Marshal(data)
@@ -238,7 +238,7 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 			// Serialize to JSON (default)
 			serializedData, err = json.Marshal(data)
 		}
-		
+
 		if err != nil {
 			return nil, err
 		}
@@ -323,7 +323,7 @@ func (c *Client) unmarshal(path string, data []byte, v interface{}) error {
 }
 
 // shouldUseJSON determines if a path should use JSON
-// Only CRUD operations (insert/update/delete/batch) use MessagePack
+// Only CRUD operations (insert/update/delete/find/batch) use MessagePack
 // Everything else uses JSON for compatibility
 func shouldUseJSON(path string) bool {
 	// ONLY these operations support MessagePack
@@ -334,15 +334,16 @@ func shouldUseJSON(path string) bool {
 		"/api/batch_update/",
 		"/api/delete/",
 		"/api/batch_delete/",
+		"/api/find/",
 	}
-	
+
 	// Check if path starts with any MessagePack-supported operation
 	for _, prefix := range msgpackPaths {
 		if len(path) >= len(prefix) && path[:len(prefix)] == prefix {
 			return false // Use MessagePack
 		}
 	}
-	
+
 	// Everything else uses JSON
 	return true
 }
@@ -603,4 +604,25 @@ func (c *Client) ListCollections() ([]string, error) {
 func (c *Client) DeleteCollection(collection string) error {
 	_, err := c.makeRequest("DELETE", "/api/collections/"+collection, nil)
 	return err
+}
+
+// Health checks if the ekoDB server is healthy
+func (c *Client) Health() error {
+	respBody, err := c.makeRequest("GET", "/api/health", nil)
+	if err != nil {
+		return err
+	}
+
+	var result map[string]interface{}
+	// Always use JSON for health endpoint
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return err
+	}
+
+	// Check if status is "ok"
+	if status, ok := result["status"].(string); ok && status == "ok" {
+		return nil
+	}
+
+	return fmt.Errorf("health check failed: unexpected response")
 }
