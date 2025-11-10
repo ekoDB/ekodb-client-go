@@ -6,17 +6,18 @@ import (
 	"time"
 )
 
-// SavedFunction represents a server-side data processing pipeline
-type SavedFunction struct {
-	Label       string                          `json:"label"`
-	Name        string                          `json:"name"`
-	Description *string                         `json:"description,omitempty"`
-	Version     string                          `json:"version"`
-	Parameters  map[string]ParameterDefinition  `json:"parameters"`
-	Pipeline    []FunctionStageConfig           `json:"pipeline"`
-	Tags        []string                        `json:"tags"`
-	CreatedAt   *time.Time                      `json:"created_at,omitempty"`
-	UpdatedAt   *time.Time                      `json:"updated_at,omitempty"`
+// Script represents a server-side data processing script
+type Script struct {
+	Label       string                         `json:"label"`
+	Name        string                         `json:"name"`
+	Description *string                        `json:"description,omitempty"`
+	Version     string                         `json:"version"`
+	Parameters  map[string]ParameterDefinition `json:"parameters"`
+	Functions   []FunctionStageConfig          `json:"functions"`
+	Tags        []string                       `json:"tags"`
+	ID          *string                        `json:"id,omitempty"`
+	CreatedAt   *time.Time                     `json:"created_at,omitempty"`
+	UpdatedAt   *time.Time                     `json:"updated_at,omitempty"`
 }
 
 // ParameterDefinition for function parameters
@@ -26,21 +27,7 @@ type ParameterDefinition struct {
 	Description string      `json:"description,omitempty"`
 }
 
-// ParameterValue represents a literal or parameter reference
-type ParameterValue struct {
-	Type  string      `json:"type"`
-	Value interface{} `json:"value"`
-}
-
-// NewLiteralValue creates a literal parameter value
-func NewLiteralValue(value interface{}) ParameterValue {
-	return ParameterValue{Type: "Literal", Value: value}
-}
-
-// NewParameterReference creates a parameter reference
-func NewParameterReference(name string) ParameterValue {
-	return ParameterValue{Type: "Parameter", Value: name}
-}
+// ParameterValue removed - use direct values or string interpolation "{{param}}" instead
 
 // FunctionStageConfig represents a pipeline stage
 type FunctionStageConfig struct {
@@ -66,20 +53,38 @@ func StageFindAll(collection string) FunctionStageConfig {
 	}
 }
 
-func StageQuery(collection string, expression map[string]interface{}) FunctionStageConfig {
+// StageQuery queries a collection with optional filter, sort, limit, skip
+func StageQuery(collection string, filter interface{}, sort []SortFieldConfig, limit, skip *int) FunctionStageConfig {
+	data := map[string]interface{}{
+		"collection": collection,
+	}
+	if filter != nil {
+		data["filter"] = filter
+	}
+	if sort != nil {
+		data["sort"] = sort
+	}
+	if limit != nil {
+		data["limit"] = limit
+	}
+	if skip != nil {
+		data["skip"] = skip
+	}
 	return FunctionStageConfig{
 		Stage: "Query",
-		Data: map[string]interface{}{
-			"collection": collection,
-			"expression": expression,
-		},
+		Data:  data,
 	}
 }
 
-func StageProject(fields []string) FunctionStageConfig {
+// StageProject selects or excludes specific fields from results
+// exclude=false means include only these fields, exclude=true means exclude these fields
+func StageProject(fields []string, exclude bool) FunctionStageConfig {
 	return FunctionStageConfig{
 		Stage: "Project",
-		Data:  map[string]interface{}{"fields": fields},
+		Data: map[string]interface{}{
+			"fields":  fields,
+			"exclude": exclude,
+		},
 	}
 }
 
@@ -93,32 +98,56 @@ func StageGroup(by_fields []string, functions []GroupFunctionConfig) FunctionSta
 	}
 }
 
-func StageCount() FunctionStageConfig {
-	return FunctionStageConfig{Stage: "Count", Data: map[string]interface{}{}}
+func StageCount(outputField string) FunctionStageConfig {
+	if outputField == "" {
+		outputField = "count"
+	}
+	return FunctionStageConfig{Stage: "Count", Data: map[string]interface{}{
+		"output_field": outputField,
+	}}
 }
 
-func StageInsert(collection string, data map[string]interface{}, bypassRipple bool) FunctionStageConfig {
+// StageInsert inserts a single record into a collection
+func StageInsert(collection string, record map[string]interface{}, bypassRipple bool, ttl *int64) FunctionStageConfig {
+	data := map[string]interface{}{
+		"collection":    collection,
+		"record":        record,
+		"bypass_ripple": bypassRipple,
+	}
+	if ttl != nil {
+		data["ttl"] = ttl
+	}
 	return FunctionStageConfig{
 		Stage: "Insert",
-		Data: map[string]interface{}{
-			"collection":    collection,
-			"data":          data,
-			"bypass_ripple": bypassRipple,
-		},
+		Data:  data,
 	}
 }
 
-func StageDelete(collection string, id ParameterValue, bypassRipple bool) FunctionStageConfig {
+// StageDelete deletes records matching a filter (use StageDeleteById for ID-based deletion)
+func StageDelete(collection string, filter interface{}, bypassRipple bool) FunctionStageConfig {
 	return FunctionStageConfig{
 		Stage: "Delete",
 		Data: map[string]interface{}{
 			"collection":    collection,
-			"id":            id,
+			"filter":        filter,
 			"bypass_ripple": bypassRipple,
 		},
 	}
 }
 
+// StageDeleteById deletes a specific record by ID
+func StageDeleteById(collection string, recordId string, bypassRipple bool) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "DeleteById",
+		Data: map[string]interface{}{
+			"collection":    collection,
+			"record_id":     recordId,
+			"bypass_ripple": bypassRipple,
+		},
+	}
+}
+
+// StageBatchInsert inserts multiple records into a collection
 func StageBatchInsert(collection string, records []map[string]interface{}, bypassRipple bool) FunctionStageConfig {
 	return FunctionStageConfig{
 		Stage: "BatchInsert",
@@ -130,7 +159,7 @@ func StageBatchInsert(collection string, records []map[string]interface{}, bypas
 	}
 }
 
-func StageBatchDelete(collection string, ids []ParameterValue, bypassRipple bool) FunctionStageConfig {
+func StageBatchDelete(collection string, ids []string, bypassRipple bool) FunctionStageConfig {
 	return FunctionStageConfig{
 		Stage: "BatchDelete",
 		Data: map[string]interface{}{
@@ -155,36 +184,50 @@ func StageHttpRequest(url, method string, headers map[string]string, body interf
 	return FunctionStageConfig{Stage: "HttpRequest", Data: data}
 }
 
-func StageVectorSearch(collection string, queryVector []float64, options map[string]interface{}) FunctionStageConfig {
+// StageVectorSearch performs vector similarity search
+func StageVectorSearch(collection string, queryVector []float64, limit *int, threshold *float64) FunctionStageConfig {
 	data := map[string]interface{}{
 		"collection":   collection,
 		"query_vector": queryVector,
 	}
-	if options != nil {
-		data["options"] = options
+	if limit != nil {
+		data["limit"] = limit
+	}
+	if threshold != nil {
+		data["threshold"] = threshold
 	}
 	return FunctionStageConfig{Stage: "VectorSearch", Data: data}
 }
 
-func StageTextSearch(collection string, query string, options map[string]interface{}) FunctionStageConfig {
+func StageTextSearch(collection string, queryText string, options map[string]interface{}) FunctionStageConfig {
 	data := map[string]interface{}{
 		"collection": collection,
-		"query":      query,
+		"query_text": queryText,
 	}
 	if options != nil {
-		data["options"] = options
+		if fields, ok := options["fields"].([]string); ok {
+			data["fields"] = fields
+		}
+		if limit, ok := options["limit"]; ok {
+			data["limit"] = limit
+		}
+		if fuzzy, ok := options["fuzzy"].(bool); ok {
+			data["fuzzy"] = fuzzy
+		}
 	}
 	return FunctionStageConfig{Stage: "TextSearch", Data: data}
 }
 
-func StageHybridSearch(collection string, textQuery string, vectorQuery []float64, options map[string]interface{}) FunctionStageConfig {
+func StageHybridSearch(collection string, queryText string, queryVector []float64, options map[string]interface{}) FunctionStageConfig {
 	data := map[string]interface{}{
 		"collection":   collection,
-		"text_query":   textQuery,
-		"vector_query": vectorQuery,
+		"query_text":   queryText,
+		"query_vector": queryVector,
 	}
 	if options != nil {
-		data["options"] = options
+		if limit, ok := options["limit"]; ok {
+			data["limit"] = limit
+		}
 	}
 	return FunctionStageConfig{Stage: "HybridSearch", Data: data}
 }
@@ -210,15 +253,15 @@ func StageEmbed(texts interface{}, model *string) FunctionStageConfig {
 
 // ChatMessage for AI operations
 type ChatMessage struct {
-	Role    ParameterValue `json:"role"`
-	Content ParameterValue `json:"content"`
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
-// NewChatMessage creates a chat message with literal values
+// NewChatMessage creates a chat message
 func NewChatMessage(role, content string) ChatMessage {
 	return ChatMessage{
-		Role:    NewLiteralValue(role),
-		Content: NewLiteralValue(content),
+		Role:    role,
+		Content: content,
 	}
 }
 
@@ -271,11 +314,11 @@ type StageStats struct {
 	ExecutionTimeMs int64  `json:"execution_time_ms"`
 }
 
-// Client methods for saved functions
+// Client methods for scripts
 
-// SaveFunction creates a new saved function
-func (c *Client) SaveFunction(function SavedFunction) (string, error) {
-	respBody, err := c.makeRequest("POST", "/api/functions", function)
+// SaveScript creates a new script
+func (c *Client) SaveScript(script Script) (string, error) {
+	respBody, err := c.makeRequest("POST", "/api/functions", script)
 	if err != nil {
 		return "", err
 	}
@@ -291,23 +334,23 @@ func (c *Client) SaveFunction(function SavedFunction) (string, error) {
 	return result.ID, nil
 }
 
-// GetFunction retrieves a function by label
-func (c *Client) GetFunction(label string) (*SavedFunction, error) {
-	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/functions/%s", label), nil)
+// GetScript retrieves a script by ID
+func (c *Client) GetScript(id string) (*Script, error) {
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/functions/%s", id), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	var function SavedFunction
-	if err := json.Unmarshal(respBody, &function); err != nil {
+	var script Script
+	if err := json.Unmarshal(respBody, &script); err != nil {
 		return nil, err
 	}
 
-	return &function, nil
+	return &script, nil
 }
 
-// ListFunctions lists all functions, optionally filtered by tags
-func (c *Client) ListFunctions(tags []string) ([]SavedFunction, error) {
+// ListScripts lists all scripts, optionally filtered by tags
+func (c *Client) ListScripts(tags []string) ([]Script, error) {
 	url := "/api/functions"
 	if len(tags) > 0 {
 		url += "?tags=" + joinStrings(tags, ",")
@@ -318,34 +361,34 @@ func (c *Client) ListFunctions(tags []string) ([]SavedFunction, error) {
 		return nil, err
 	}
 
-	var functions []SavedFunction
-	if err := json.Unmarshal(respBody, &functions); err != nil {
+	var scripts []Script
+	if err := json.Unmarshal(respBody, &scripts); err != nil {
 		return nil, err
 	}
 
-	return functions, nil
+	return scripts, nil
 }
 
-// UpdateFunction updates an existing function
-func (c *Client) UpdateFunction(label string, function SavedFunction) error {
-	_, err := c.makeRequest("PUT", fmt.Sprintf("/api/functions/%s", label), function)
+// UpdateScript updates an existing script by ID
+func (c *Client) UpdateScript(id string, script Script) error {
+	_, err := c.makeRequest("PUT", fmt.Sprintf("/api/functions/%s", id), script)
 	return err
 }
 
-// DeleteFunction deletes a function by label
-func (c *Client) DeleteFunction(label string) error {
-	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/functions/%s", label), nil)
+// DeleteScript deletes a script by ID
+func (c *Client) DeleteScript(id string) error {
+	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/functions/%s", id), nil)
 	return err
 }
 
-// CallFunction executes a saved function
-func (c *Client) CallFunction(label string, params map[string]interface{}) (*FunctionResult, error) {
+// CallScript executes a script by label or ID
+func (c *Client) CallScript(labelOrID string, params map[string]interface{}) (*FunctionResult, error) {
 	// Convert nil params to empty map to avoid sending JSON null
 	if params == nil {
 		params = make(map[string]interface{})
 	}
-	
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/functions/%s", label), params)
+
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/functions/%s", labelOrID), params)
 	if err != nil {
 		return nil, err
 	}
