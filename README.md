@@ -329,10 +329,13 @@ results, err := client.Find("users", query)
 
 ## 💡 Examples
 
+<!-- Example counts sourced from: https://github.com/ekoDB/ekodb-client/blob/main/examples_list.txt -->
+<!-- Run 'make examples-ls' in ekodb-client repo to regenerate counts -->
+
 For complete, runnable examples, visit the
 [ekoDB Examples Repository](https://github.com/ekoDB/ekodb-client/tree/main/examples/go).
 
-The repository contains **12 working Go examples**:
+The repository contains **25 working Go examples** (15 client library + 10 direct API):
 
 ### Basic Operations
 
@@ -399,7 +402,7 @@ go run client_simple_crud.go
 - **[API Reference](https://pkg.go.dev/github.com/ekoDB/ekodb-client-go)** - Go
   package documentation
 - **[Examples Repository](https://github.com/ekoDB/ekodb-client/tree/main/examples)** -
-  78 examples across all languages
+  129 examples across all 6 languages (89 client library + 40 direct API)
 
 ## 🤝 Contributing
 
