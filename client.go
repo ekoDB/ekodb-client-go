@@ -165,7 +165,8 @@ func (c *Client) refreshToken() error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("auth failed with status: %d", resp.StatusCode)
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("auth failed with status: %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	var result map[string]interface{}
@@ -298,6 +299,19 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 		return nil, &RateLimitError{
 			RetryAfterSecs: retryAfter,
 			Message:        string(responseBody),
+		}
+	}
+
+	// Handle unauthorized (401) or token errors - try refreshing token
+	if resp.StatusCode == http.StatusUnauthorized ||
+		(resp.StatusCode == http.StatusInternalServerError && bytes.Contains(responseBody, []byte("Invalid token"))) {
+		if attempt == 0 { // Only try token refresh once
+			log.Printf("Authentication failed, refreshing token...")
+			if err := c.refreshToken(); err != nil {
+				return nil, fmt.Errorf("failed to refresh token: %w", err)
+			}
+			// Retry with new token
+			return c.makeRequestWithRetry(method, path, data, attempt+1)
 		}
 	}
 
