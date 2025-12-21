@@ -313,6 +313,8 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 			// Retry with new token
 			return c.makeRequestWithRetry(method, path, data, attempt+1)
 		}
+		// Authentication is still failing after a token refresh attempt; return a clear auth error.
+		return nil, fmt.Errorf("authentication failed after token refresh (status %d): %s", resp.StatusCode, string(responseBody))
 	}
 
 	// Handle service unavailable (503)

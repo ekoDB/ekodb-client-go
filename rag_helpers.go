@@ -23,7 +23,7 @@ import (
 //	}
 //	fmt.Printf("Generated %d dimensions\n", len(embedding))
 func (c *Client) Embed(text, model string) ([]float64, error) {
-	tempCollection := fmt.Sprintf("embed_temp_%d_%d", time.Now().UnixNano(), time.Now().Unix())
+	tempCollection := fmt.Sprintf("embed_temp_%d", time.Now().UnixNano())
 
 	// Insert temporary record with the text
 	record := Record{"text": text}
@@ -32,7 +32,7 @@ func (c *Client) Embed(text, model string) ([]float64, error) {
 	}
 
 	// Create Script with FindAll + Embed Functions
-	tempLabel := fmt.Sprintf("embed_script_%d_%d", time.Now().UnixNano(), time.Now().Unix())
+	tempLabel := fmt.Sprintf("embed_script_%d", time.Now().UnixNano())
 	script := &Script{
 		Label:      tempLabel,
 		Name:       "Generate Embedding",
