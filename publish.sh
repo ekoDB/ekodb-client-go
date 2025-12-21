@@ -42,7 +42,6 @@ fi
 
 # Get latest git tag
 LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
-echo "📌 Latest tag: $LATEST_TAG"
 
 # Run tests
 echo ""
@@ -71,7 +70,7 @@ fi
 
 # Prompt for new version
 echo ""
-read -p "Enter new version (e.g., v0.1.0): " NEW_VERSION
+read -p "Enter new version (e.g. the latest tag: '$LATEST_TAG'): " NEW_VERSION
 
 # Validate version format
 if [[ ! $NEW_VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then

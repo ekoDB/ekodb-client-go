@@ -252,7 +252,7 @@ bump-version:
 	@echo ""
 	@LATEST_TAG=$$(git describe --tags --abbrev=0 2>/dev/null || echo "none"); \
 	echo ""; \
-	read -p "Enter new version (e.g., $(YELLOW)Latest tag: $$LATEST_TAG$(RESET)): " NEW_VERSION; \
+	read -p "Enter new version (e.g. the latest tag: '$$LATEST_TAG'): " NEW_VERSION; \
 	if [ -z "$$NEW_VERSION" ]; then \
 		echo "$(RED)❌ No version provided$(RESET)"; \
 		exit 1; \
