@@ -325,7 +325,25 @@ func StageFindOneAndUpdate(collection string, recordId string, updates map[strin
 	}
 }
 
-// StageUpdateWithAction updates a record with a specific action (increment, push, etc.)
+// UpdateAction represents valid actions for StageUpdateWithAction
+type UpdateAction string
+
+const (
+	// UpdateActionPush appends a value to an array field
+	UpdateActionPush UpdateAction = "push"
+	// UpdateActionPop removes the last element from an array field
+	UpdateActionPop UpdateAction = "pop"
+	// UpdateActionIncrement adds a numeric value to a field
+	UpdateActionIncrement UpdateAction = "increment"
+	// UpdateActionDecrement subtracts a numeric value from a field
+	UpdateActionDecrement UpdateAction = "decrement"
+	// UpdateActionRemove removes a specific value from an array field
+	UpdateActionRemove UpdateAction = "remove"
+)
+
+// StageUpdateWithAction updates a record with a specific action (push, pop, increment, decrement, remove).
+// Use the UpdateAction constants for type safety: UpdateActionPush, UpdateActionPop, UpdateActionIncrement,
+// UpdateActionDecrement, UpdateActionRemove.
 func StageUpdateWithAction(collection string, recordId string, action string, field string, value interface{}, bypassRipple bool) FunctionStageConfig {
 	return FunctionStageConfig{
 		Stage: "UpdateWithAction",
@@ -340,49 +358,78 @@ func StageUpdateWithAction(collection string, recordId string, action string, fi
 	}
 }
 
-// ScriptCondition represents a condition for If statements
+// ScriptCondition represents a conditional expression for If stages in Scripts.
+// Conditions are evaluated against the current pipeline state (records, counts, field values)
+// and can be composed using logical operators (And, Or, Not).
+//
+// Example usage:
+//
+//	cond := ConditionAnd([]ScriptCondition{
+//		ConditionHasRecords(),
+//		ConditionCountGreaterThan(5),
+//	})
+//	StageIf(cond, thenFunctions, elseFunctions)
 type ScriptCondition struct {
-	Type       string            `json:"type"`
-	Field      string            `json:"field,omitempty"`
-	Value      interface{}       `json:"value,omitempty"`
-	Count      int               `json:"count,omitempty"`
-	Conditions []ScriptCondition `json:"conditions,omitempty"`
-	Condition  *ScriptCondition  `json:"condition,omitempty"`
+	Type       string            `json:"type"`                 // Condition type (HasRecords, FieldEquals, CountEquals, And, Or, Not, etc.)
+	Field      string            `json:"field,omitempty"`      // Field name for field-based conditions
+	Value      interface{}       `json:"value,omitempty"`      // Expected value for comparison conditions
+	Count      int               `json:"count,omitempty"`      // Count threshold for count-based conditions
+	Conditions []ScriptCondition `json:"conditions,omitempty"` // Child conditions for And/Or operators
+	Condition  *ScriptCondition  `json:"condition,omitempty"`  // Single child condition for Not operator
 }
 
 // Condition builders
+
+// ConditionHasRecords creates a condition that is satisfied when the current pipeline
+// stage has one or more records. Useful for checking if a query returned any results.
 func ConditionHasRecords() ScriptCondition {
 	return ScriptCondition{Type: "HasRecords"}
 }
 
+// ConditionFieldEquals creates a condition that is satisfied when the specified field
+// in the current record(s) equals the provided value. Field comparison is type-aware.
 func ConditionFieldEquals(field string, value interface{}) ScriptCondition {
 	return ScriptCondition{Type: "FieldEquals", Field: field, Value: value}
 }
 
+// ConditionFieldExists creates a condition that is satisfied when the specified field
+// exists in the current record(s), regardless of its value (including null).
 func ConditionFieldExists(field string) ScriptCondition {
 	return ScriptCondition{Type: "FieldExists", Field: field}
 }
 
+// ConditionCountEquals creates a condition that is satisfied when the number of
+// records in the current pipeline stage exactly equals the provided count.
 func ConditionCountEquals(count int) ScriptCondition {
 	return ScriptCondition{Type: "CountEquals", Count: count}
 }
 
+// ConditionCountGreaterThan creates a condition that is satisfied when the number
+// of records in the current pipeline stage is strictly greater than the provided count.
 func ConditionCountGreaterThan(count int) ScriptCondition {
 	return ScriptCondition{Type: "CountGreaterThan", Count: count}
 }
 
+// ConditionCountLessThan creates a condition that is satisfied when the number
+// of records in the current pipeline stage is strictly less than the provided count.
 func ConditionCountLessThan(count int) ScriptCondition {
 	return ScriptCondition{Type: "CountLessThan", Count: count}
 }
 
+// ConditionAnd creates a condition that requires all of the provided child conditions
+// to be satisfied (logical AND). All conditions are evaluated and must pass.
 func ConditionAnd(conditions []ScriptCondition) ScriptCondition {
 	return ScriptCondition{Type: "And", Conditions: conditions}
 }
 
+// ConditionOr creates a condition that is satisfied when at least one of the provided
+// child conditions is satisfied (logical OR). Evaluation may short-circuit.
 func ConditionOr(conditions []ScriptCondition) ScriptCondition {
 	return ScriptCondition{Type: "Or", Conditions: conditions}
 }
 
+// ConditionNot creates a condition that inverts the result of the provided child
+// condition (logical NOT). Returns true when the child condition is false.
 func ConditionNot(condition ScriptCondition) ScriptCondition {
 	return ScriptCondition{Type: "Not", Condition: &condition}
 }
