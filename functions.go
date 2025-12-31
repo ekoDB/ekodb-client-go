@@ -11,10 +11,10 @@ type Script struct {
 	Label       string                         `json:"label"`
 	Name        string                         `json:"name"`
 	Description *string                        `json:"description,omitempty"`
-	Version     string                         `json:"version"`
+	Version     *string                        `json:"version,omitempty"`
 	Parameters  map[string]ParameterDefinition `json:"parameters"`
 	Functions   []FunctionStageConfig          `json:"functions"`
-	Tags        []string                       `json:"tags"`
+	Tags        []string                       `json:"tags,omitempty"`
 	ID          *string                        `json:"id,omitempty"`
 	CreatedAt   *time.Time                     `json:"created_at,omitempty"`
 	UpdatedAt   *time.Time                     `json:"updated_at,omitempty"`
@@ -249,6 +249,258 @@ func StageEmbed(texts interface{}, model *string) FunctionStageConfig {
 		data["model"] = model
 	}
 	return FunctionStageConfig{Stage: "Embed", Data: data}
+}
+
+// StageFindById finds a specific record by ID
+func StageFindById(collection string, recordId string) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "FindById",
+		Data: map[string]interface{}{
+			"collection": collection,
+			"record_id":  recordId,
+		},
+	}
+}
+
+// StageFindOne finds one record by key/value pair
+func StageFindOne(collection string, key string, value interface{}) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "FindOne",
+		Data: map[string]interface{}{
+			"collection": collection,
+			"key":        key,
+			"value":      value,
+		},
+	}
+}
+
+// StageUpdate updates records matching a filter
+func StageUpdate(collection string, filter interface{}, updates map[string]interface{}, bypassRipple bool, ttl *int64) FunctionStageConfig {
+	data := map[string]interface{}{
+		"collection":    collection,
+		"filter":        filter,
+		"updates":       updates,
+		"bypass_ripple": bypassRipple,
+	}
+	if ttl != nil {
+		data["ttl"] = ttl
+	}
+	return FunctionStageConfig{
+		Stage: "Update",
+		Data:  data,
+	}
+}
+
+// StageUpdateById updates a specific record by ID
+func StageUpdateById(collection string, recordId string, updates map[string]interface{}, bypassRipple bool, ttl *int64) FunctionStageConfig {
+	data := map[string]interface{}{
+		"collection":    collection,
+		"record_id":     recordId,
+		"updates":       updates,
+		"bypass_ripple": bypassRipple,
+	}
+	if ttl != nil {
+		data["ttl"] = ttl
+	}
+	return FunctionStageConfig{
+		Stage: "UpdateById",
+		Data:  data,
+	}
+}
+
+// StageFindOneAndUpdate finds and updates a record atomically
+func StageFindOneAndUpdate(collection string, recordId string, updates map[string]interface{}, bypassRipple bool, ttl *int64) FunctionStageConfig {
+	data := map[string]interface{}{
+		"collection":    collection,
+		"record_id":     recordId,
+		"updates":       updates,
+		"bypass_ripple": bypassRipple,
+	}
+	if ttl != nil {
+		data["ttl"] = ttl
+	}
+	return FunctionStageConfig{
+		Stage: "FindOneAndUpdate",
+		Data:  data,
+	}
+}
+
+// UpdateAction represents valid actions for StageUpdateWithAction
+type UpdateAction string
+
+const (
+	// UpdateActionPush appends a value to an array field
+	UpdateActionPush UpdateAction = "push"
+	// UpdateActionPop removes the last element from an array field
+	UpdateActionPop UpdateAction = "pop"
+	// UpdateActionIncrement adds a numeric value to a field
+	UpdateActionIncrement UpdateAction = "increment"
+	// UpdateActionDecrement subtracts a numeric value from a field
+	UpdateActionDecrement UpdateAction = "decrement"
+	// UpdateActionRemove removes a specific value from an array field
+	UpdateActionRemove UpdateAction = "remove"
+)
+
+// StageUpdateWithAction updates a record with a specific action (push, pop, increment, decrement, remove).
+// Use the UpdateAction constants for type safety: UpdateActionPush, UpdateActionPop, UpdateActionIncrement,
+// UpdateActionDecrement, UpdateActionRemove.
+func StageUpdateWithAction(collection string, recordId string, action string, field string, value interface{}, bypassRipple bool) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "UpdateWithAction",
+		Data: map[string]interface{}{
+			"collection":    collection,
+			"record_id":     recordId,
+			"action":        action,
+			"field":         field,
+			"value":         value,
+			"bypass_ripple": bypassRipple,
+		},
+	}
+}
+
+// ScriptCondition represents a conditional expression for If stages in Scripts.
+// Conditions are evaluated against the current pipeline state (records, counts, field values)
+// and can be composed using logical operators (And, Or, Not).
+//
+// Example usage:
+//
+//	cond := ConditionAnd([]ScriptCondition{
+//		ConditionHasRecords(),
+//		ConditionCountGreaterThan(5),
+//	})
+//	StageIf(cond, thenFunctions, elseFunctions)
+type ScriptCondition struct {
+	Type       string            `json:"type"`                 // Condition type (HasRecords, FieldEquals, CountEquals, And, Or, Not, etc.)
+	Field      string            `json:"field,omitempty"`      // Field name for field-based conditions
+	Value      interface{}       `json:"value,omitempty"`      // Expected value for comparison conditions
+	Count      int               `json:"count,omitempty"`      // Count threshold for count-based conditions
+	Conditions []ScriptCondition `json:"conditions,omitempty"` // Child conditions for And/Or operators
+	Condition  *ScriptCondition  `json:"condition,omitempty"`  // Single child condition for Not operator
+}
+
+// Condition builders
+
+// ConditionHasRecords creates a condition that is satisfied when the current pipeline
+// stage has one or more records. Useful for checking if a query returned any results.
+func ConditionHasRecords() ScriptCondition {
+	return ScriptCondition{Type: "HasRecords"}
+}
+
+// ConditionFieldEquals creates a condition that is satisfied when the specified field
+// in the current record(s) equals the provided value. Field comparison is type-aware.
+func ConditionFieldEquals(field string, value interface{}) ScriptCondition {
+	return ScriptCondition{Type: "FieldEquals", Field: field, Value: value}
+}
+
+// ConditionFieldExists creates a condition that is satisfied when the specified field
+// exists in the current record(s), regardless of its value (including null).
+func ConditionFieldExists(field string) ScriptCondition {
+	return ScriptCondition{Type: "FieldExists", Field: field}
+}
+
+// ConditionCountEquals creates a condition that is satisfied when the number of
+// records in the current pipeline stage exactly equals the provided count.
+func ConditionCountEquals(count int) ScriptCondition {
+	return ScriptCondition{Type: "CountEquals", Count: count}
+}
+
+// ConditionCountGreaterThan creates a condition that is satisfied when the number
+// of records in the current pipeline stage is strictly greater than the provided count.
+func ConditionCountGreaterThan(count int) ScriptCondition {
+	return ScriptCondition{Type: "CountGreaterThan", Count: count}
+}
+
+// ConditionCountLessThan creates a condition that is satisfied when the number
+// of records in the current pipeline stage is strictly less than the provided count.
+func ConditionCountLessThan(count int) ScriptCondition {
+	return ScriptCondition{Type: "CountLessThan", Count: count}
+}
+
+// ConditionAnd creates a condition that requires all of the provided child conditions
+// to be satisfied (logical AND). All conditions are evaluated and must pass.
+func ConditionAnd(conditions []ScriptCondition) ScriptCondition {
+	return ScriptCondition{Type: "And", Conditions: conditions}
+}
+
+// ConditionOr creates a condition that is satisfied when at least one of the provided
+// child conditions is satisfied (logical OR). Evaluation may short-circuit.
+func ConditionOr(conditions []ScriptCondition) ScriptCondition {
+	return ScriptCondition{Type: "Or", Conditions: conditions}
+}
+
+// ConditionNot creates a condition that inverts the result of the provided child
+// condition (logical NOT). Returns true when the child condition is false.
+func ConditionNot(condition ScriptCondition) ScriptCondition {
+	return ScriptCondition{Type: "Not", Condition: &condition}
+}
+
+// StageIf executes functions conditionally
+func StageIf(condition ScriptCondition, thenFunctions []FunctionStageConfig, elseFunctions []FunctionStageConfig) FunctionStageConfig {
+	data := map[string]interface{}{
+		"condition":      condition,
+		"then_functions": thenFunctions,
+	}
+	if elseFunctions != nil && len(elseFunctions) > 0 {
+		data["else_functions"] = elseFunctions
+	}
+	return FunctionStageConfig{
+		Stage: "If",
+		Data:  data,
+	}
+}
+
+// StageForEach executes functions for each record
+func StageForEach(functions []FunctionStageConfig) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "ForEach",
+		Data: map[string]interface{}{
+			"functions": functions,
+		},
+	}
+}
+
+// StageCallFunction calls a saved UserFunction by label
+func StageCallFunction(functionLabel string, params map[string]interface{}) FunctionStageConfig {
+	data := map[string]interface{}{
+		"function_label": functionLabel,
+	}
+	if params != nil {
+		data["params"] = params
+	}
+	return FunctionStageConfig{
+		Stage: "CallFunction",
+		Data:  data,
+	}
+}
+
+// StageCreateSavepoint creates a savepoint for partial rollback
+func StageCreateSavepoint(name string) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "CreateSavepoint",
+		Data: map[string]interface{}{
+			"name": name,
+		},
+	}
+}
+
+// StageRollbackToSavepoint rolls back to a specific savepoint
+func StageRollbackToSavepoint(name string) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "RollbackToSavepoint",
+		Data: map[string]interface{}{
+			"name": name,
+		},
+	}
+}
+
+// StageReleaseSavepoint releases a savepoint
+func StageReleaseSavepoint(name string) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "ReleaseSavepoint",
+		Data: map[string]interface{}{
+			"name": name,
+		},
+	}
 }
 
 // ChatMessage for AI operations
