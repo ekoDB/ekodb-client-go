@@ -33,10 +33,11 @@ func (c *Client) Embed(text, model string) ([]float64, error) {
 
 	// Create Script with FindAll + Embed Functions
 	tempLabel := fmt.Sprintf("embed_script_%d", time.Now().UnixNano())
+	version := "1.0"
 	script := &Script{
 		Label:      tempLabel,
 		Name:       "Generate Embedding",
-		Version:    "1.0",
+		Version:    &version,
 		Parameters: map[string]ParameterDefinition{},
 		Functions: []FunctionStageConfig{
 			StageFindAll(tempCollection),

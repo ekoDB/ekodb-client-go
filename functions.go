@@ -11,10 +11,10 @@ type Script struct {
 	Label       string                         `json:"label"`
 	Name        string                         `json:"name"`
 	Description *string                        `json:"description,omitempty"`
-	Version     string                         `json:"version"`
+	Version     *string                        `json:"version,omitempty"`
 	Parameters  map[string]ParameterDefinition `json:"parameters"`
 	Functions   []FunctionStageConfig          `json:"functions"`
-	Tags        []string                       `json:"tags"`
+	Tags        []string                       `json:"tags,omitempty"`
 	ID          *string                        `json:"id,omitempty"`
 	CreatedAt   *time.Time                     `json:"created_at,omitempty"`
 	UpdatedAt   *time.Time                     `json:"updated_at,omitempty"`
