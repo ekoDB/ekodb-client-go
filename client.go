@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/vmihailenco/msgpack/v5"
@@ -365,10 +366,11 @@ func shouldUseJSON(path string) bool {
 }
 
 // Insert inserts a document into a collection
+// ttl is optional and supports: duration strings ("1h", "30m"), seconds ("3600"), or ISO8601 timestamps
 func (c *Client) Insert(collection string, record Record, ttl ...string) (Record, error) {
 	// Add TTL if provided
 	if len(ttl) > 0 && ttl[0] != "" {
-		record["ttl_duration"] = ttl[0]
+		record["ttl"] = ttl[0]
 	}
 
 	path := "/api/insert/" + collection
@@ -595,6 +597,97 @@ func (c *Client) KVGet(key string) (interface{}, error) {
 // KVDelete deletes a key
 func (c *Client) KVDelete(key string) error {
 	_, err := c.makeRequest("DELETE", "/api/kv/delete/"+url.PathEscape(key), nil)
+	return err
+}
+
+// KVExists checks if a key exists
+func (c *Client) KVExists(key string) (bool, error) {
+	_, err := c.KVGet(key)
+	if err != nil {
+		// Check if it's a "not found" error
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// KVFind queries/finds KV entries with pattern matching
+func (c *Client) KVFind(pattern string, includeExpired bool) ([]map[string]interface{}, error) {
+	data := map[string]interface{}{
+		"include_expired": includeExpired,
+	}
+	if pattern != "" {
+		data["pattern"] = pattern
+	}
+
+	respBody, err := c.makeRequest("POST", "/api/kv/find", data)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// KVQuery is an alias for KVFind - queries KV store with pattern
+func (c *Client) KVQuery(pattern string, includeExpired bool) ([]map[string]interface{}, error) {
+	return c.KVFind(pattern, includeExpired)
+}
+
+// ============================================================================
+// Transaction Operations
+// ============================================================================
+
+// BeginTransaction begins a new transaction
+func (c *Client) BeginTransaction(isolationLevel string) (string, error) {
+	data := map[string]interface{}{
+		"isolation_level": isolationLevel,
+	}
+	respBody, err := c.makeRequest("POST", "/api/transactions", data)
+	if err != nil {
+		return "", err
+	}
+
+	var result struct {
+		TransactionID string `json:"transaction_id"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", err
+	}
+
+	return result.TransactionID, nil
+}
+
+// GetTransactionStatus gets the status of a transaction
+func (c *Client) GetTransactionStatus(transactionID string) (map[string]interface{}, error) {
+	respBody, err := c.makeRequest("GET", "/api/transactions/"+transactionID, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// CommitTransaction commits a transaction
+func (c *Client) CommitTransaction(transactionID string) error {
+	_, err := c.makeRequest("POST", "/api/transactions/"+transactionID+"/commit", nil)
+	return err
+}
+
+// RollbackTransaction rolls back a transaction
+func (c *Client) RollbackTransaction(transactionID string) error {
+	_, err := c.makeRequest("POST", "/api/transactions/"+transactionID+"/rollback", nil)
 	return err
 }
 
