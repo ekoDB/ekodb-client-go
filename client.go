@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/vmihailenco/msgpack/v5"
@@ -60,6 +59,21 @@ func (e *RateLimitError) Error() string {
 		return e.Message
 	}
 	return fmt.Sprintf("rate limit exceeded, retry after %d seconds", e.RetryAfterSecs)
+}
+
+// HTTPError represents an HTTP error with status code
+type HTTPError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("request failed with status %d: %s", e.StatusCode, e.Message)
+}
+
+// IsNotFound checks if the error is a 404 Not Found error
+func (e *HTTPError) IsNotFound() bool {
+	return e.StatusCode == 404
 }
 
 // ClientConfig contains configuration options for the client
@@ -327,7 +341,10 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 	}
 
 	// Handle other errors
-	return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(responseBody))
+	return nil, &HTTPError{
+		StatusCode: resp.StatusCode,
+		Message:    string(responseBody),
+	}
 }
 
 // unmarshal deserializes data based on the client's format and path
@@ -587,7 +604,7 @@ func (c *Client) KVGet(key string) (interface{}, error) {
 	}
 
 	var result map[string]interface{}
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := c.unmarshal("/api/kv/get/"+url.PathEscape(key), respBody, &result); err != nil {
 		return nil, err
 	}
 
@@ -604,8 +621,8 @@ func (c *Client) KVDelete(key string) error {
 func (c *Client) KVExists(key string) (bool, error) {
 	_, err := c.KVGet(key)
 	if err != nil {
-		// Check if it's a "not found" error
-		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+		// Check if it's a "not found" error using structured error type
+		if httpErr, ok := err.(*HTTPError); ok && httpErr.IsNotFound() {
 			return false, nil
 		}
 		return false, err
@@ -613,7 +630,10 @@ func (c *Client) KVExists(key string) (bool, error) {
 	return true, nil
 }
 
-// KVFind queries/finds KV entries with pattern matching
+// KVFind queries/finds KV entries with pattern matching. The pattern supports
+// simple wildcards where '*' matches any sequence of characters in a key.
+// If includeExpired is true, results will also include entries that are past
+// their configured TTL but may still be present in the store.
 func (c *Client) KVFind(pattern string, includeExpired bool) ([]map[string]interface{}, error) {
 	data := map[string]interface{}{
 		"include_expired": includeExpired,
@@ -628,7 +648,7 @@ func (c *Client) KVFind(pattern string, includeExpired bool) ([]map[string]inter
 	}
 
 	var result []map[string]interface{}
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := c.unmarshal("/api/kv/find", respBody, &result); err != nil {
 		return nil, err
 	}
 
@@ -644,8 +664,19 @@ func (c *Client) KVQuery(pattern string, includeExpired bool) ([]map[string]inte
 // Transaction Operations
 // ============================================================================
 
-// BeginTransaction begins a new transaction
+// BeginTransaction starts a new transaction on the server with the given isolation level.
+// The isolationLevel parameter must be one of: "READ_UNCOMMITTED", "READ_COMMITTED",
+// "REPEATABLE_READ", or "SERIALIZABLE". It returns the server-assigned transaction ID
+// as a string, or an error if the transaction could not be created.
 func (c *Client) BeginTransaction(isolationLevel string) (string, error) {
+	// Validate isolation level to prevent runtime errors from typos or unsupported values
+	switch isolationLevel {
+	case "READ_UNCOMMITTED", "READ_COMMITTED", "REPEATABLE_READ", "SERIALIZABLE":
+		// Valid isolation level
+	default:
+		return "", fmt.Errorf("invalid isolation level: %s (must be one of: READ_UNCOMMITTED, READ_COMMITTED, REPEATABLE_READ, SERIALIZABLE)", isolationLevel)
+	}
+
 	data := map[string]interface{}{
 		"isolation_level": isolationLevel,
 	}
@@ -657,7 +688,7 @@ func (c *Client) BeginTransaction(isolationLevel string) (string, error) {
 	var result struct {
 		TransactionID string `json:"transaction_id"`
 	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := c.unmarshal("/api/transactions", respBody, &result); err != nil {
 		return "", err
 	}
 
