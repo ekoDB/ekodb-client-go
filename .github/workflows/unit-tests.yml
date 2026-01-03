@@ -1,0 +1,36 @@
+name: Unit Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-tests:
+    name: Go Client Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Test summary
+        if: always()
+        run: |
+          echo "## Go Client Unit Tests" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "72 tests covering:" >> $GITHUB_STEP_SUMMARY
+          echo "- Client configuration and operations" >> $GITHUB_STEP_SUMMARY
+          echo "- QueryBuilder fluent API" >> $GITHUB_STEP_SUMMARY
+          echo "- HTTP mocking and error handling" >> $GITHUB_STEP_SUMMARY
