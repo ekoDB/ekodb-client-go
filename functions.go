@@ -503,6 +503,77 @@ func StageReleaseSavepoint(name string) FunctionStageConfig {
 	}
 }
 
+// ============================================================================
+// KV Store Operations
+// ============================================================================
+
+// StageKvGet retrieves a value from the KV store
+func StageKvGet(key string, outputField *string) FunctionStageConfig {
+	data := map[string]interface{}{
+		"key": key,
+	}
+	if outputField != nil {
+		data["output_field"] = *outputField
+	}
+	return FunctionStageConfig{
+		Stage: "KvGet",
+		Data:  data,
+	}
+}
+
+// StageKvSet stores a value in the KV store
+func StageKvSet(key string, value interface{}, ttl *int64) FunctionStageConfig {
+	data := map[string]interface{}{
+		"key":   key,
+		"value": value,
+	}
+	if ttl != nil {
+		data["ttl"] = *ttl
+	}
+	return FunctionStageConfig{
+		Stage: "KvSet",
+		Data:  data,
+	}
+}
+
+// StageKvDelete deletes a key from the KV store
+func StageKvDelete(key string) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "KvDelete",
+		Data: map[string]interface{}{
+			"key": key,
+		},
+	}
+}
+
+// StageKvExists checks if a key exists in the KV store
+func StageKvExists(key string, outputField *string) FunctionStageConfig {
+	data := map[string]interface{}{
+		"key": key,
+	}
+	if outputField != nil {
+		data["output_field"] = *outputField
+	}
+	return FunctionStageConfig{
+		Stage: "KvExists",
+		Data:  data,
+	}
+}
+
+// StageKvQuery queries the KV store with a pattern
+func StageKvQuery(pattern *string, includeExpired bool) FunctionStageConfig {
+	data := map[string]interface{}{
+		"include_expired": includeExpired,
+	}
+	if pattern != nil {
+		data["pattern"] = *pattern
+	}
+	return FunctionStageConfig{
+		Stage: "KvQuery",
+		Data:  data,
+	}
+}
+
 // ChatMessage for AI operations
 type ChatMessage struct {
 	Role    string `json:"role"`

@@ -6,6 +6,172 @@ import (
 	"time"
 )
 
+// ============================================================================
+// Wrapped Type Builders
+// ============================================================================
+// These functions create wrapped type objects for sending to ekoDB.
+// Use these when inserting/updating records with special field types.
+//
+// Example:
+//   client.Insert("orders", map[string]interface{}{
+//       "id":         FieldUUID("550e8400-e29b-41d4-a716-446655440000"),
+//       "total":      FieldDecimal("99.99"),
+//       "created_at": FieldDateTime(time.Now()),
+//       "tags":       FieldSet([]string{"sale", "featured"}),
+//   })
+
+// FieldUUID creates a UUID field value
+func FieldUUID(value string) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "UUID",
+		"value": value,
+	}
+}
+
+// FieldDecimal creates a Decimal field value for precise numeric values
+func FieldDecimal(value string) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "Decimal",
+		"value": value,
+	}
+}
+
+// FieldDateTime creates a DateTime field value
+func FieldDateTime(value time.Time) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "DateTime",
+		"value": value.Format(time.RFC3339),
+	}
+}
+
+// FieldDateTimeString creates a DateTime field value from an RFC3339 string
+func FieldDateTimeString(value string) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "DateTime",
+		"value": value,
+	}
+}
+
+// FieldDuration creates a Duration field value
+func FieldDuration(milliseconds int64) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "Duration",
+		"value": milliseconds,
+	}
+}
+
+// FieldDurationFromGo creates a Duration field value from a Go time.Duration
+func FieldDurationFromGo(d time.Duration) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "Duration",
+		"value": d.Milliseconds(),
+	}
+}
+
+// FieldNumber creates a Number field value (flexible numeric type)
+func FieldNumber(value interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "Number",
+		"value": value,
+	}
+}
+
+// FieldSet creates a Set field value (unique elements)
+func FieldSet(values interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "Set",
+		"value": values,
+	}
+}
+
+// FieldVector creates a Vector field value (for embeddings/similarity search)
+func FieldVector(values []float64) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "Vector",
+		"value": values,
+	}
+}
+
+// FieldBinary creates a Binary field value from bytes
+func FieldBinary(value []byte) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "Binary",
+		"value": base64.StdEncoding.EncodeToString(value),
+	}
+}
+
+// FieldBinaryBase64 creates a Binary field value from a base64 string
+func FieldBinaryBase64(value string) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "Binary",
+		"value": value,
+	}
+}
+
+// FieldBytes creates a Bytes field value from bytes
+func FieldBytes(value []byte) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "Bytes",
+		"value": base64.StdEncoding.EncodeToString(value),
+	}
+}
+
+// FieldBytesBase64 creates a Bytes field value from a base64 string
+func FieldBytesBase64(value string) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "Bytes",
+		"value": value,
+	}
+}
+
+// FieldArray creates an Array field value
+func FieldArray(values interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "Array",
+		"value": values,
+	}
+}
+
+// FieldObject creates an Object field value
+func FieldObject(value map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "Object",
+		"value": value,
+	}
+}
+
+// FieldString creates a String field value (explicit wrapping)
+func FieldString(value string) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "String",
+		"value": value,
+	}
+}
+
+// FieldInteger creates an Integer field value (explicit wrapping)
+func FieldInteger(value int64) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "Integer",
+		"value": value,
+	}
+}
+
+// FieldFloat creates a Float field value (explicit wrapping)
+func FieldFloat(value float64) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "Float",
+		"value": value,
+	}
+}
+
+// FieldBoolean creates a Boolean field value (explicit wrapping)
+func FieldBoolean(value bool) map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "Boolean",
+		"value": value,
+	}
+}
+
 // FieldValue represents an ekoDB field with type and value
 type FieldValue struct {
 	Type  string      `json:"type"`

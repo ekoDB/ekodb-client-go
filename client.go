@@ -61,6 +61,21 @@ func (e *RateLimitError) Error() string {
 	return fmt.Sprintf("rate limit exceeded, retry after %d seconds", e.RetryAfterSecs)
 }
 
+// HTTPError represents an HTTP error with status code
+type HTTPError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("request failed with status %d: %s", e.StatusCode, e.Message)
+}
+
+// IsNotFound checks if the error is a 404 Not Found error
+func (e *HTTPError) IsNotFound() bool {
+	return e.StatusCode == 404
+}
+
 // ClientConfig contains configuration options for the client
 type ClientConfig struct {
 	BaseURL     string              // Base URL of the ekoDB server
@@ -326,7 +341,10 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 	}
 
 	// Handle other errors
-	return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(responseBody))
+	return nil, &HTTPError{
+		StatusCode: resp.StatusCode,
+		Message:    string(responseBody),
+	}
 }
 
 // unmarshal deserializes data based on the client's format and path
@@ -365,10 +383,11 @@ func shouldUseJSON(path string) bool {
 }
 
 // Insert inserts a document into a collection
+// ttl is optional and supports: duration strings ("1h", "30m"), seconds ("3600"), or ISO8601 timestamps
 func (c *Client) Insert(collection string, record Record, ttl ...string) (Record, error) {
 	// Add TTL if provided
 	if len(ttl) > 0 && ttl[0] != "" {
-		record["ttl_duration"] = ttl[0]
+		record["ttl"] = ttl[0]
 	}
 
 	path := "/api/insert/" + collection
@@ -585,7 +604,7 @@ func (c *Client) KVGet(key string) (interface{}, error) {
 	}
 
 	var result map[string]interface{}
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := c.unmarshal("/api/kv/get/"+url.PathEscape(key), respBody, &result); err != nil {
 		return nil, err
 	}
 
@@ -595,6 +614,111 @@ func (c *Client) KVGet(key string) (interface{}, error) {
 // KVDelete deletes a key
 func (c *Client) KVDelete(key string) error {
 	_, err := c.makeRequest("DELETE", "/api/kv/delete/"+url.PathEscape(key), nil)
+	return err
+}
+
+// KVExists checks if a key exists
+func (c *Client) KVExists(key string) (bool, error) {
+	_, err := c.KVGet(key)
+	if err != nil {
+		// Check if it's a "not found" error using structured error type
+		if httpErr, ok := err.(*HTTPError); ok && httpErr.IsNotFound() {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// KVFind queries/finds KV entries with pattern matching. The pattern supports
+// simple wildcards where '*' matches any sequence of characters in a key.
+// If includeExpired is true, results will also include entries that are past
+// their configured TTL but may still be present in the store.
+func (c *Client) KVFind(pattern string, includeExpired bool) ([]map[string]interface{}, error) {
+	data := map[string]interface{}{
+		"include_expired": includeExpired,
+	}
+	if pattern != "" {
+		data["pattern"] = pattern
+	}
+
+	respBody, err := c.makeRequest("POST", "/api/kv/find", data)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []map[string]interface{}
+	if err := c.unmarshal("/api/kv/find", respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// KVQuery is an alias for KVFind - queries KV store with pattern
+func (c *Client) KVQuery(pattern string, includeExpired bool) ([]map[string]interface{}, error) {
+	return c.KVFind(pattern, includeExpired)
+}
+
+// ============================================================================
+// Transaction Operations
+// ============================================================================
+
+// BeginTransaction starts a new transaction on the server with the given isolation level.
+// The isolationLevel parameter must be one of: "READ_UNCOMMITTED", "READ_COMMITTED",
+// "REPEATABLE_READ", or "SERIALIZABLE". It returns the server-assigned transaction ID
+// as a string, or an error if the transaction could not be created.
+func (c *Client) BeginTransaction(isolationLevel string) (string, error) {
+	// Validate isolation level to prevent runtime errors from typos or unsupported values
+	switch isolationLevel {
+	case "READ_UNCOMMITTED", "READ_COMMITTED", "REPEATABLE_READ", "SERIALIZABLE":
+		// Valid isolation level
+	default:
+		return "", fmt.Errorf("invalid isolation level: %s (must be one of: READ_UNCOMMITTED, READ_COMMITTED, REPEATABLE_READ, SERIALIZABLE)", isolationLevel)
+	}
+
+	data := map[string]interface{}{
+		"isolation_level": isolationLevel,
+	}
+	respBody, err := c.makeRequest("POST", "/api/transactions", data)
+	if err != nil {
+		return "", err
+	}
+
+	var result struct {
+		TransactionID string `json:"transaction_id"`
+	}
+	if err := c.unmarshal("/api/transactions", respBody, &result); err != nil {
+		return "", err
+	}
+
+	return result.TransactionID, nil
+}
+
+// GetTransactionStatus gets the status of a transaction
+func (c *Client) GetTransactionStatus(transactionID string) (map[string]interface{}, error) {
+	respBody, err := c.makeRequest("GET", "/api/transactions/"+transactionID, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// CommitTransaction commits a transaction
+func (c *Client) CommitTransaction(transactionID string) error {
+	_, err := c.makeRequest("POST", "/api/transactions/"+transactionID+"/commit", nil)
+	return err
+}
+
+// RollbackTransaction rolls back a transaction
+func (c *Client) RollbackTransaction(transactionID string) error {
+	_, err := c.makeRequest("POST", "/api/transactions/"+transactionID+"/rollback", nil)
 	return err
 }
 
