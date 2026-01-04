@@ -669,16 +669,21 @@ func (c *Client) KVQuery(pattern string, includeExpired bool) ([]map[string]inte
 // "REPEATABLE_READ", or "SERIALIZABLE". It returns the server-assigned transaction ID
 // as a string, or an error if the transaction could not be created.
 func (c *Client) BeginTransaction(isolationLevel string) (string, error) {
-	// Validate isolation level to prevent runtime errors from typos or unsupported values
-	switch isolationLevel {
-	case "READ_UNCOMMITTED", "READ_COMMITTED", "REPEATABLE_READ", "SERIALIZABLE":
-		// Valid isolation level
-	default:
+	// Map user-friendly uppercase format to server's PascalCase format
+	isolationMap := map[string]string{
+		"READ_UNCOMMITTED": "ReadUncommitted",
+		"READ_COMMITTED":   "ReadCommitted",
+		"REPEATABLE_READ":  "RepeatableRead",
+		"SERIALIZABLE":     "Serializable",
+	}
+
+	serverIsolation, valid := isolationMap[isolationLevel]
+	if !valid {
 		return "", fmt.Errorf("invalid isolation level: %s (must be one of: READ_UNCOMMITTED, READ_COMMITTED, REPEATABLE_READ, SERIALIZABLE)", isolationLevel)
 	}
 
 	data := map[string]interface{}{
-		"isolation_level": isolationLevel,
+		"isolation_level": serverIsolation,
 	}
 	respBody, err := c.makeRequest("POST", "/api/transactions", data)
 	if err != nil {
