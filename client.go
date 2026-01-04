@@ -751,6 +751,35 @@ func (c *Client) DeleteCollection(collection string) error {
 	return err
 }
 
+// RestoreRecord restores a deleted record from trash
+// Records remain in trash for 30 days before permanent deletion
+func (c *Client) RestoreRecord(collection, id string) error {
+	path := fmt.Sprintf("/api/trash/%s/%s", collection, id)
+	_, err := c.makeRequest("POST", path, nil)
+	return err
+}
+
+// RestoreCollection restores all deleted records in a collection from trash
+// Records remain in trash for 30 days before permanent deletion
+func (c *Client) RestoreCollection(collection string) (int, error) {
+	path := fmt.Sprintf("/api/trash/%s", collection)
+	respBody, err := c.makeRequest("POST", path, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	var result struct {
+		Status          string `json:"status"`
+		Collection      string `json:"collection"`
+		RecordsRestored int    `json:"records_restored"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return 0, err
+	}
+
+	return result.RecordsRestored, nil
+}
+
 // Health checks if the ekoDB server is healthy
 func (c *Client) Health() error {
 	respBody, err := c.makeRequest("GET", "/api/health", nil)

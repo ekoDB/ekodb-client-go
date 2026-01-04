@@ -95,8 +95,15 @@ build:
 # Run tests
 test:
 	@echo "🧪 $(CYAN)Running tests...$(RESET)"
-	@$(GO) test ./... -race
-	@echo "✅ $(GREEN)Tests complete!$(RESET)"
+	@TEST_OUTPUT=$$($(GO) test ./... -race -v 2>&1); \
+	echo "$$TEST_OUTPUT"; \
+	TEST_COUNT=$$(echo "$$TEST_OUTPUT" | grep -c "^--- PASS:" || echo "0"); \
+	echo ""; \
+	echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"; \
+	echo "✅ $(GREEN)All tests complete!$(RESET)"; \
+	echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"; \
+	printf "  🔷 Go:         %3d tests\n" "$$TEST_COUNT"; \
+	echo ""
 
 # Run tests with verbose output
 test-verbose:
