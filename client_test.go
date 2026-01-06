@@ -344,7 +344,7 @@ func TestInsertWithTTL(t *testing.T) {
 
 	client := createTestClient(t, server)
 	record := Record{"name": "John"}
-	_, err := client.Insert("users", record, "1h")
+	_, err := client.Insert("users", record, InsertOptions{TTL: "1h"})
 	if err != nil {
 		t.Fatalf("Insert with TTL failed: %v", err)
 	}
