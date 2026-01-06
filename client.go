@@ -382,15 +382,43 @@ func shouldUseJSON(path string) bool {
 	return true
 }
 
+// InsertOptions contains optional parameters for Insert
+type InsertOptions struct {
+	TTL           string
+	BypassRipple  *bool
+	TransactionId *string
+	BypassCache   *bool
+}
+
 // Insert inserts a document into a collection
-// ttl is optional and supports: duration strings ("1h", "30m"), seconds ("3600"), or ISO8601 timestamps
-func (c *Client) Insert(collection string, record Record, ttl ...string) (Record, error) {
+// Usage:
+//
+//	Insert(collection, record)                                    // basic insert
+//	Insert(collection, record, InsertOptions{TTL: "1h"})          // with TTL
+//	Insert(collection, record, InsertOptions{BypassRipple: &t})   // bypass ripple
+func (c *Client) Insert(collection string, record Record, opts ...InsertOptions) (Record, error) {
 	// Add TTL if provided
-	if len(ttl) > 0 && ttl[0] != "" {
-		record["ttl"] = ttl[0]
+	if len(opts) > 0 && opts[0].TTL != "" {
+		record["ttl"] = opts[0].TTL
 	}
 
+	// Build query parameters
 	path := "/api/insert/" + collection
+	if len(opts) > 0 {
+		params := url.Values{}
+		if opts[0].BypassRipple != nil {
+			params.Add("bypass_ripple", fmt.Sprintf("%t", *opts[0].BypassRipple))
+		}
+		if opts[0].TransactionId != nil {
+			params.Add("transaction_id", *opts[0].TransactionId)
+		}
+		if opts[0].BypassCache != nil {
+			params.Add("bypass_cache", fmt.Sprintf("%t", *opts[0].BypassCache))
+		}
+		if len(params) > 0 {
+			path = fmt.Sprintf("%s?%s", path, params.Encode())
+		}
+	}
 	respBody, err := c.makeRequest("POST", path, record)
 	if err != nil {
 		return nil, err
@@ -404,8 +432,21 @@ func (c *Client) Insert(collection string, record Record, ttl ...string) (Record
 	return result, nil
 }
 
+// FindOptions contains optional parameters for Find
+type FindOptions struct {
+	Filter        interface{}
+	Sort          interface{}
+	Limit         *int
+	Skip          *int
+	Join          interface{}
+	BypassCache   *bool
+	BypassRipple  *bool
+	SelectFields  []string
+	ExcludeFields []string
+}
+
 // Find finds documents in a collection
-func (c *Client) Find(collection string, query interface{}) ([]Record, error) {
+func (c *Client) Find(collection string, query interface{}, opts ...FindOptions) ([]Record, error) {
 	path := "/api/find/" + collection
 	respBody, err := c.makeRequest("POST", path, query)
 	if err != nil {
@@ -436,9 +477,44 @@ func (c *Client) FindByID(collection, id string) (Record, error) {
 	return result, nil
 }
 
+// UpdateOptions contains optional parameters for Update
+type UpdateOptions struct {
+	BypassRipple  *bool
+	TransactionId *string
+	BypassCache   *bool
+	SelectFields  []string
+	ExcludeFields []string
+}
+
 // Update updates a document
-func (c *Client) Update(collection, id string, record Record) (Record, error) {
+func (c *Client) Update(collection, id string, record Record, opts ...UpdateOptions) (Record, error) {
+	// Build query parameters
 	path := fmt.Sprintf("/api/update/%s/%s", collection, id)
+	if len(opts) > 0 {
+		params := url.Values{}
+		if opts[0].BypassRipple != nil {
+			params.Add("bypass_ripple", fmt.Sprintf("%t", *opts[0].BypassRipple))
+		}
+		if opts[0].TransactionId != nil {
+			params.Add("transaction_id", *opts[0].TransactionId)
+		}
+		if opts[0].BypassCache != nil {
+			params.Add("bypass_cache", fmt.Sprintf("%t", *opts[0].BypassCache))
+		}
+		if len(opts[0].SelectFields) > 0 {
+			for _, field := range opts[0].SelectFields {
+				params.Add("select_fields", field)
+			}
+		}
+		if len(opts[0].ExcludeFields) > 0 {
+			for _, field := range opts[0].ExcludeFields {
+				params.Add("exclude_fields", field)
+			}
+		}
+		if len(params) > 0 {
+			path = fmt.Sprintf("%s?%s", path, params.Encode())
+		}
+	}
 	respBody, err := c.makeRequest("PUT", path, record)
 	if err != nil {
 		return nil, err
@@ -452,9 +528,28 @@ func (c *Client) Update(collection, id string, record Record) (Record, error) {
 	return result, nil
 }
 
+// DeleteOptions contains optional parameters for Delete
+type DeleteOptions struct {
+	BypassRipple  *bool
+	TransactionId *string
+}
+
 // Delete deletes a document
-func (c *Client) Delete(collection, id string) error {
+func (c *Client) Delete(collection, id string, opts ...DeleteOptions) error {
+	// Build query parameters
 	path := fmt.Sprintf("/api/delete/%s/%s", collection, id)
+	if len(opts) > 0 {
+		params := url.Values{}
+		if opts[0].BypassRipple != nil {
+			params.Add("bypass_ripple", fmt.Sprintf("%t", *opts[0].BypassRipple))
+		}
+		if opts[0].TransactionId != nil {
+			params.Add("transaction_id", *opts[0].TransactionId)
+		}
+		if len(params) > 0 {
+			path = fmt.Sprintf("%s?%s", path, params.Encode())
+		}
+	}
 	respBody, err := c.makeRequest("DELETE", path, nil)
 	if err != nil {
 		return err
@@ -468,11 +563,22 @@ func (c *Client) Delete(collection, id string) error {
 	return nil
 }
 
+// BatchInsertOptions contains optional parameters for BatchInsert
+type BatchInsertOptions struct {
+	BypassRipple  *bool
+	TransactionId *string
+}
+
 // BatchInsert inserts multiple documents
-func (c *Client) BatchInsert(collection string, records []Record) ([]Record, error) {
+func (c *Client) BatchInsert(collection string, records []Record, opts ...BatchInsertOptions) ([]Record, error) {
+	var bypassRipple *bool
+	if len(opts) > 0 {
+		bypassRipple = opts[0].BypassRipple
+	}
 	// Convert to server format
 	type batchInsertItem struct {
-		Data Record `json:"data" msgpack:"data"`
+		Data         Record `json:"data" msgpack:"data"`
+		BypassRipple *bool  `json:"bypass_ripple,omitempty" msgpack:"bypass_ripple,omitempty"`
 	}
 	type batchInsertQuery struct {
 		Inserts []batchInsertItem `json:"inserts" msgpack:"inserts"`
@@ -480,7 +586,7 @@ func (c *Client) BatchInsert(collection string, records []Record) ([]Record, err
 
 	inserts := make([]batchInsertItem, len(records))
 	for i, r := range records {
-		inserts[i] = batchInsertItem{Data: r}
+		inserts[i] = batchInsertItem{Data: r, BypassRipple: bypassRipple}
 	}
 
 	query := batchInsertQuery{Inserts: inserts}
@@ -510,12 +616,23 @@ func (c *Client) BatchInsert(collection string, records []Record) ([]Record, err
 	return results, nil
 }
 
+// BatchUpdateOptions contains optional parameters for BatchUpdate
+type BatchUpdateOptions struct {
+	BypassRipple  *bool
+	TransactionId *string
+}
+
 // BatchUpdate updates multiple documents
-func (c *Client) BatchUpdate(collection string, updates map[string]Record) ([]Record, error) {
+func (c *Client) BatchUpdate(collection string, updates map[string]Record, opts ...BatchUpdateOptions) ([]Record, error) {
+	var bypassRipple *bool
+	if len(opts) > 0 {
+		bypassRipple = opts[0].BypassRipple
+	}
 	// Convert to server format
 	type batchUpdateItem struct {
-		ID   string `json:"id" msgpack:"id"`
-		Data Record `json:"data" msgpack:"data"`
+		ID           string `json:"id" msgpack:"id"`
+		Data         Record `json:"data" msgpack:"data"`
+		BypassRipple *bool  `json:"bypass_ripple,omitempty" msgpack:"bypass_ripple,omitempty"`
 	}
 	type batchUpdateQuery struct {
 		Updates []batchUpdateItem `json:"updates" msgpack:"updates"`
@@ -523,7 +640,7 @@ func (c *Client) BatchUpdate(collection string, updates map[string]Record) ([]Re
 
 	items := make([]batchUpdateItem, 0, len(updates))
 	for id, data := range updates {
-		items = append(items, batchUpdateItem{ID: id, Data: data})
+		items = append(items, batchUpdateItem{ID: id, Data: data, BypassRipple: bypassRipple})
 	}
 
 	query := batchUpdateQuery{Updates: items}
@@ -553,11 +670,22 @@ func (c *Client) BatchUpdate(collection string, updates map[string]Record) ([]Re
 	return results, nil
 }
 
+// BatchDeleteOptions contains optional parameters for BatchDelete
+type BatchDeleteOptions struct {
+	BypassRipple  *bool
+	TransactionId *string
+}
+
 // BatchDelete deletes multiple documents
-func (c *Client) BatchDelete(collection string, ids []string) (int, error) {
+func (c *Client) BatchDelete(collection string, ids []string, opts ...BatchDeleteOptions) (int, error) {
+	var bypassRipple *bool
+	if len(opts) > 0 {
+		bypassRipple = opts[0].BypassRipple
+	}
 	// Convert to server format
 	type batchDeleteItem struct {
-		ID string `json:"id" msgpack:"id"`
+		ID           string `json:"id" msgpack:"id"`
+		BypassRipple *bool  `json:"bypass_ripple,omitempty" msgpack:"bypass_ripple,omitempty"`
 	}
 	type batchDeleteQuery struct {
 		Deletes []batchDeleteItem `json:"deletes" msgpack:"deletes"`
@@ -565,7 +693,7 @@ func (c *Client) BatchDelete(collection string, ids []string) (int, error) {
 
 	deletes := make([]batchDeleteItem, len(ids))
 	for i, id := range ids {
-		deletes[i] = batchDeleteItem{ID: id}
+		deletes[i] = batchDeleteItem{ID: id, BypassRipple: bypassRipple}
 	}
 
 	query := batchDeleteQuery{Deletes: deletes}
@@ -587,6 +715,108 @@ func (c *Client) BatchDelete(collection string, ids []string) (int, error) {
 	}
 
 	return len(result.Successful), nil
+}
+
+// ========== Convenience Methods ==========
+
+// UpsertOptions contains optional parameters for Upsert
+type UpsertOptions struct {
+	TTL           string
+	BypassRipple  *bool
+	TransactionId *string
+	BypassCache   *bool
+}
+
+// Upsert inserts or updates a document (atomic insert-or-update)
+// Attempts to update first. If the record doesn't exist (404), it will be inserted.
+func (c *Client) Upsert(collection, id string, record Record, opts ...UpsertOptions) (Record, error) {
+	var bypassRipple *bool
+	var transactionId *string
+	var bypassCache *bool
+	var ttl string
+	if len(opts) > 0 {
+		bypassRipple = opts[0].BypassRipple
+		transactionId = opts[0].TransactionId
+		bypassCache = opts[0].BypassCache
+		ttl = opts[0].TTL
+	}
+
+	// Try update first
+	updateOpts := UpdateOptions{
+		BypassRipple:  bypassRipple,
+		TransactionId: transactionId,
+		BypassCache:   bypassCache,
+	}
+	result, err := c.Update(collection, id, record, updateOpts)
+	if err != nil {
+		// Check if it's a 404 Not Found error
+		if httpErr, ok := err.(*HTTPError); ok && httpErr.IsNotFound() {
+			// Record doesn't exist, insert it with the intended id
+			record["id"] = id
+			insertOpts := InsertOptions{
+				TTL:           ttl,
+				BypassRipple:  bypassRipple,
+				TransactionId: transactionId,
+				BypassCache:   bypassCache,
+			}
+			return c.Insert(collection, record, insertOpts)
+		}
+		// Other error, propagate it
+		return nil, err
+	}
+	return result, nil
+}
+
+// FindOne finds a single record by field value
+// Returns nil if no record matches, or the first matching record.
+func (c *Client) FindOne(collection, field string, value interface{}) (Record, error) {
+	query := NewQueryBuilder().Eq(field, value).Limit(1).Build()
+
+	results, err := c.Find(collection, query)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(results) == 0 {
+		return nil, nil
+	}
+
+	return results[0], nil
+}
+
+// Exists checks if a record exists by ID
+// Returns true if the record exists, false if it doesn't.
+func (c *Client) Exists(collection, id string) (bool, error) {
+	_, err := c.FindByID(collection, id)
+	if err != nil {
+		// Check if it's a 404 Not Found error
+		if httpErr, ok := err.(*HTTPError); ok && httpErr.IsNotFound() {
+			return false, nil
+		}
+		// Other error, propagate it
+		return false, err
+	}
+	return true, nil
+}
+
+// Paginate retrieves records with pagination (1-indexed page numbers)
+// Page 1 = first page, Page 2 = second page, etc.
+// Returns an error if page < 1 or pageSize < 1.
+func (c *Client) Paginate(collection string, page, pageSize int) ([]Record, error) {
+	// Validate input parameters
+	if page < 1 {
+		return nil, fmt.Errorf("page must be >= 1, got %d", page)
+	}
+	if pageSize < 1 {
+		return nil, fmt.Errorf("pageSize must be >= 1, got %d", pageSize)
+	}
+
+	// Page 1 = offset 0, Page 2 = offset pageSize, etc.
+	offset := (page - 1) * pageSize
+
+	query := NewQueryBuilder().Limit(pageSize).Skip(offset).Build()
+
+	return c.Find(collection, query)
 }
 
 // KVSet sets a key-value pair
@@ -749,6 +979,35 @@ func (c *Client) ListCollections() ([]string, error) {
 func (c *Client) DeleteCollection(collection string) error {
 	_, err := c.makeRequest("DELETE", "/api/collections/"+collection, nil)
 	return err
+}
+
+// RestoreRecord restores a deleted record from trash
+// Records remain in trash for 30 days before permanent deletion
+func (c *Client) RestoreRecord(collection, id string) error {
+	path := fmt.Sprintf("/api/trash/%s/%s", collection, id)
+	_, err := c.makeRequest("POST", path, nil)
+	return err
+}
+
+// RestoreCollection restores all deleted records in a collection from trash
+// Records remain in trash for 30 days before permanent deletion
+func (c *Client) RestoreCollection(collection string) (int, error) {
+	path := fmt.Sprintf("/api/trash/%s", collection)
+	respBody, err := c.makeRequest("POST", path, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	var result struct {
+		Status          string `json:"status"`
+		Collection      string `json:"collection"`
+		RecordsRestored int    `json:"records_restored"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return 0, err
+	}
+
+	return result.RecordsRestored, nil
 }
 
 // Health checks if the ekoDB server is healthy

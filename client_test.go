@@ -344,7 +344,7 @@ func TestInsertWithTTL(t *testing.T) {
 
 	client := createTestClient(t, server)
 	record := Record{"name": "John"}
-	_, err := client.Insert("users", record, "1h")
+	_, err := client.Insert("users", record, InsertOptions{TTL: "1h"})
 	if err != nil {
 		t.Fatalf("Insert with TTL failed: %v", err)
 	}
@@ -929,5 +929,807 @@ func TestIsNearRateLimit(t *testing.T) {
 	// Check near limit
 	if !client.IsNearRateLimit() {
 		t.Error("Expected IsNearRateLimit() = true with 5% remaining")
+	}
+}
+
+// ============================================================================
+// Restore Operations Tests
+// ============================================================================
+
+func TestRestoreRecordSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/trash/users/record_123": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"status": "restored"})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	err := client.RestoreRecord("users", "record_123")
+	if err != nil {
+		t.Errorf("RestoreRecord failed: %v", err)
+	}
+}
+
+func TestRestoreCollectionSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/trash/users": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":           "restored",
+				"collection":       "users",
+				"records_restored": 5,
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	count, err := client.RestoreCollection("users")
+	if err != nil {
+		t.Fatalf("RestoreCollection failed: %v", err)
+	}
+	if count != 5 {
+		t.Errorf("RestoreCollection returned count %d, want 5", count)
+	}
+}
+
+// ============================================================================
+// Collection Management Tests
+// ============================================================================
+
+func TestCreateCollectionSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/collections/new_collection": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"status": "created"})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	schema := NewSchemaBuilder().
+		AddField("name", NewFieldTypeSchemaBuilder("String").Build()).
+		AddField("age", NewFieldTypeSchemaBuilder("Integer").Build()).
+		Build()
+	err := client.CreateCollection("new_collection", schema)
+	if err != nil {
+		t.Errorf("CreateCollection failed: %v", err)
+	}
+}
+
+func TestGetCollectionSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/collections/users": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"collection": map[string]interface{}{
+					"fields": map[string]interface{}{
+						"name": map[string]string{"field_type": "String"},
+					},
+				},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	info, err := client.GetCollection("users")
+	if err != nil {
+		t.Fatalf("GetCollection failed: %v", err)
+	}
+	if info == nil {
+		t.Error("GetCollection returned nil")
+	}
+}
+
+func TestGetSchemaSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/collections/users": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"collection": map[string]interface{}{
+					"fields": map[string]interface{}{
+						"name":  map[string]string{"field_type": "String"},
+						"email": map[string]string{"field_type": "String"},
+					},
+				},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	schema, err := client.GetSchema("users")
+	if err != nil {
+		t.Fatalf("GetSchema failed: %v", err)
+	}
+	if schema == nil {
+		t.Error("GetSchema returned nil")
+	}
+}
+
+// ============================================================================
+// Search Tests
+// ============================================================================
+
+func TestSearchSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/search/documents": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"results": []map[string]interface{}{
+					{"id": "doc_1", "score": 0.95, "title": "Result 1"},
+					{"id": "doc_2", "score": 0.85, "title": "Result 2"},
+				},
+				"total": 2,
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	query := NewSearchQueryBuilder("search terms").Limit(10).Build()
+	result, err := client.Search("documents", query)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(result.Results) != 2 {
+		t.Errorf("Search returned %d results, want 2", len(result.Results))
+	}
+}
+
+func TestTextSearchSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/search/documents": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"results": []map[string]interface{}{
+					{"id": "doc_1", "title": "Matching document"},
+				},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	results, err := client.TextSearch("documents", "matching text", 10)
+	if err != nil {
+		t.Fatalf("TextSearch failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("TextSearch returned %d results, want 1", len(results))
+	}
+}
+
+func TestHybridSearchSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/search/documents": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"results": []map[string]interface{}{
+					{"id": "doc_1", "score": 0.9},
+					{"id": "doc_2", "score": 0.8},
+				},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	vector := []float64{0.1, 0.2, 0.3, 0.4}
+	results, err := client.HybridSearch("documents", "query text", vector, 10)
+	if err != nil {
+		t.Fatalf("HybridSearch failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("HybridSearch returned %d results, want 2", len(results))
+	}
+}
+
+func TestSearchQueryBuilderSelectFields(t *testing.T) {
+	fields := []string{"title", "content"}
+	query := NewSearchQueryBuilder("test query").
+		SelectFields(fields).
+		Build()
+
+	if query.SelectFields == nil {
+		t.Fatal("SelectFields not set")
+	}
+	if len(query.SelectFields) != 2 {
+		t.Errorf("SelectFields length = %d, want 2", len(query.SelectFields))
+	}
+	if query.SelectFields[0] != "title" {
+		t.Errorf("SelectFields[0] = %s, want title", query.SelectFields[0])
+	}
+	if query.SelectFields[1] != "content" {
+		t.Errorf("SelectFields[1] = %s, want content", query.SelectFields[1])
+	}
+}
+
+func TestSearchQueryBuilderExcludeFields(t *testing.T) {
+	fields := []string{"metadata", "internal_id"}
+	query := NewSearchQueryBuilder("test query").
+		ExcludeFields(fields).
+		Build()
+
+	if query.ExcludeFields == nil {
+		t.Fatal("ExcludeFields not set")
+	}
+	if len(query.ExcludeFields) != 2 {
+		t.Errorf("ExcludeFields length = %d, want 2", len(query.ExcludeFields))
+	}
+	if query.ExcludeFields[0] != "metadata" {
+		t.Errorf("ExcludeFields[0] = %s, want metadata", query.ExcludeFields[0])
+	}
+	if query.ExcludeFields[1] != "internal_id" {
+		t.Errorf("ExcludeFields[1] = %s, want internal_id", query.ExcludeFields[1])
+	}
+}
+
+// ============================================================================
+// KV Find/Query Tests
+// ============================================================================
+
+func TestKVFindSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/kv/find": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"key": "user:1", "value": map[string]string{"name": "Alice"}},
+				{"key": "user:2", "value": map[string]string{"name": "Bob"}},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	results, err := client.KVFind("user:*", false)
+	if err != nil {
+		t.Fatalf("KVFind failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("KVFind returned %d results, want 2", len(results))
+	}
+}
+
+// ============================================================================
+// Embed Tests
+// ============================================================================
+
+// Note: Embed tests require complex mock setup (temp record insertion + search)
+// Skipping unit test - covered by integration tests
+
+// ============================================================================
+// Functions/Scripts Tests
+// ============================================================================
+
+func TestSaveScriptSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/functions": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":    "func_123",
+				"label": "my_function",
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	script := Script{
+		Label: "my_function",
+		Name:  "my_function",
+		Functions: []FunctionStageConfig{
+			StageFindAll("users"),
+		},
+	}
+	result, err := client.SaveScript(script)
+	if err != nil {
+		t.Fatalf("SaveScript failed: %v", err)
+	}
+	if result == "" {
+		t.Error("SaveScript returned empty result")
+	}
+}
+
+func TestCallScriptSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/functions/my_function": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"results": []map[string]interface{}{
+					{"id": "user_1", "name": "Alice"},
+				},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	params := map[string]interface{}{"limit": 10}
+	result, err := client.CallScript("my_function", params)
+	if err != nil {
+		t.Fatalf("CallScript failed: %v", err)
+	}
+	if result == nil {
+		t.Error("Expected non-nil result from CallScript")
+	}
+}
+
+func TestGetScriptSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/functions/func_123": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":    "func_123",
+				"label": "my_function",
+				"name":  "my_function",
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.GetScript("func_123")
+	if err != nil {
+		t.Fatalf("GetScript failed: %v", err)
+	}
+	if result == nil {
+		t.Error("GetScript returned nil")
+	}
+}
+
+func TestListScriptsSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/functions": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"id": "func_1", "label": "function_1", "name": "function_1"},
+				{"id": "func_2", "label": "function_2", "name": "function_2"},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	results, err := client.ListScripts(nil)
+	if err != nil {
+		t.Fatalf("ListScripts failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("ListScripts returned %d scripts, want 2", len(results))
+	}
+}
+
+func TestDeleteScriptSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"DELETE /api/functions/func_123": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	err := client.DeleteScript("func_123")
+	if err != nil {
+		t.Errorf("DeleteScript failed: %v", err)
+	}
+}
+
+// ============================================================================
+// Chat Tests
+// ============================================================================
+
+func TestCreateChatSessionSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/chat": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"chat_id":    "chat_123",
+				"message_id": "msg_001",
+				"responses":  []string{"Hello! How can I help you?"},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	request := CreateChatSessionRequest{
+		LLMProvider: "openai",
+		LLMModel:    strPtr("gpt-4"),
+	}
+	result, err := client.CreateChatSession(request)
+	if err != nil {
+		t.Fatalf("CreateChatSession failed: %v", err)
+	}
+	if result == nil {
+		t.Error("CreateChatSession returned nil")
+	}
+}
+
+func TestChatMessageSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/chat/chat_123/messages": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"chat_id":    "chat_123",
+				"message_id": "msg_002",
+				"responses":  []string{"Here's my response to your question."},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	request := ChatMessageRequest{Message: "What is the answer?"}
+	result, err := client.ChatMessage("chat_123", request)
+	if err != nil {
+		t.Fatalf("ChatMessage failed: %v", err)
+	}
+	if result == nil {
+		t.Error("ChatMessage returned nil")
+	}
+}
+
+func TestListChatSessionsSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/chat": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"sessions": []map[string]interface{}{
+					{"id": "chat_1", "created_at": "2024-01-01T00:00:00Z"},
+					{"id": "chat_2", "created_at": "2024-01-02T00:00:00Z"},
+				},
+				"total": 2,
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.ListChatSessions(nil)
+	if err != nil {
+		t.Fatalf("ListChatSessions failed: %v", err)
+	}
+	if result == nil {
+		t.Error("ListChatSessions returned nil")
+	}
+}
+
+func TestGetChatSessionSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/chat/chat_123": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":         "chat_123",
+				"created_at": "2024-01-01T00:00:00Z",
+				"messages":   []interface{}{},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.GetChatSession("chat_123")
+	if err != nil {
+		t.Fatalf("GetChatSession failed: %v", err)
+	}
+	if result == nil {
+		t.Error("GetChatSession returned nil")
+	}
+}
+
+func TestDeleteChatSessionSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"DELETE /api/chat/chat_123": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	err := client.DeleteChatSession("chat_123")
+	if err != nil {
+		t.Errorf("DeleteChatSession failed: %v", err)
+	}
+}
+
+// Helper function for string pointers in tests
+func strPtr(s string) *string {
+	return &s
+}
+
+// ============================================================================
+// Missing Method Tests - Added Jan 4, 2026
+// ============================================================================
+
+func TestFindAllSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"id": "user_1", "name": "Alice"},
+				{"id": "user_2", "name": "Bob"},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	results, err := client.FindAll("users", 100)
+	if err != nil {
+		t.Fatalf("FindAll failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("FindAll returned %d results, want 2", len(results))
+	}
+}
+
+func TestKVQuerySuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/kv/find": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"key": "config:app", "value": map[string]string{"setting": "value1"}},
+				{"key": "config:db", "value": map[string]string{"setting": "value2"}},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	results, err := client.KVQuery("config:*", false)
+	if err != nil {
+		t.Fatalf("KVQuery failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("KVQuery returned %d results, want 2", len(results))
+	}
+}
+
+func TestGetTransactionStatusSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/transactions/tx_123": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"transaction_id": "tx_123",
+				"status":         "active",
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	status, err := client.GetTransactionStatus("tx_123")
+	if err != nil {
+		t.Fatalf("GetTransactionStatus failed: %v", err)
+	}
+	if status["status"] != "active" {
+		t.Errorf("GetTransactionStatus status = %v, want active", status["status"])
+	}
+}
+
+func TestUpdateScriptSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"PUT /api/functions/func_123": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":    "func_123",
+				"label": "updated_function",
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	script := Script{
+		Label: "updated_function",
+		Name:  "updated_function",
+		Functions: []FunctionStageConfig{
+			StageFindAll("users"),
+		},
+	}
+	err := client.UpdateScript("func_123", script)
+	if err != nil {
+		t.Errorf("UpdateScript failed: %v", err)
+	}
+}
+
+func TestBranchChatSessionSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/chat/branch": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"chat_id":       "chat_456",
+				"branched_from": "chat_123",
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	request := CreateChatSessionRequest{
+		LLMProvider: "openai",
+	}
+	result, err := client.BranchChatSession(request)
+	if err != nil {
+		t.Fatalf("BranchChatSession failed: %v", err)
+	}
+	if result == nil {
+		t.Error("BranchChatSession returned nil")
+	}
+}
+
+func TestMergeChatSessionsSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/chat/merge": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"chat_id": "chat_123",
+				"merged":  true,
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	request := MergeSessionsRequest{
+		SourceChatIDs: []string{"chat_456"},
+		TargetChatID:  "chat_123",
+	}
+	result, err := client.MergeChatSessions(request)
+	if err != nil {
+		t.Fatalf("MergeChatSessions failed: %v", err)
+	}
+	if result == nil {
+		t.Error("MergeChatSessions returned nil")
+	}
+}
+
+func TestUpdateChatSessionSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"PUT /api/chat/chat_123": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"chat_id": "chat_123",
+				"updated": true,
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	title := "New Title"
+	request := UpdateSessionRequest{Title: &title}
+	result, err := client.UpdateChatSession("chat_123", request)
+	if err != nil {
+		t.Fatalf("UpdateChatSession failed: %v", err)
+	}
+	if result == nil {
+		t.Error("UpdateChatSession returned nil")
+	}
+}
+
+func TestGetChatSessionMessagesSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/chat/chat_123/messages": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"messages": []map[string]interface{}{
+					{"id": "msg_1", "role": "user", "content": "Hello"},
+					{"id": "msg_2", "role": "assistant", "content": "Hi there"},
+				},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.GetChatSessionMessages("chat_123", nil)
+	if err != nil {
+		t.Fatalf("GetChatSessionMessages failed: %v", err)
+	}
+	if result == nil {
+		t.Error("GetChatSessionMessages returned nil")
+	}
+}
+
+func TestDeleteChatMessageSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"DELETE /api/chat/chat_123/messages/msg_001": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	err := client.DeleteChatMessage("chat_123", "msg_001")
+	if err != nil {
+		t.Errorf("DeleteChatMessage failed: %v", err)
+	}
+}
+
+func TestUpdateChatMessageSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"PUT /api/chat/chat_123/messages/msg_001": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	err := client.UpdateChatMessage("chat_123", "msg_001", "Updated content")
+	if err != nil {
+		t.Errorf("UpdateChatMessage failed: %v", err)
+	}
+}
+
+func TestRegenerateChatMessageSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/chat/chat_123/messages/msg_001/regenerate": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"message_id": "msg_002",
+				"content":    "Regenerated response",
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.RegenerateChatMessage("chat_123", "msg_001")
+	if err != nil {
+		t.Fatalf("RegenerateChatMessage failed: %v", err)
+	}
+	if result == nil {
+		t.Error("RegenerateChatMessage returned nil")
+	}
+}
+
+func TestToggleForgottenMessageSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"PATCH /api/chat/chat_123/messages/msg_001/forgotten": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	err := client.ToggleForgottenMessage("chat_123", "msg_001", true)
+	if err != nil {
+		t.Errorf("ToggleForgottenMessage failed: %v", err)
 	}
 }

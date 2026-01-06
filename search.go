@@ -36,6 +36,10 @@ type SearchQuery struct {
 	BypassRipple *bool `json:"bypass_ripple,omitempty"`
 	BypassCache  *bool `json:"bypass_cache,omitempty"`
 	Limit        *int  `json:"limit,omitempty"`
+
+	// Field projection
+	SelectFields  []string `json:"select_fields,omitempty"`
+	ExcludeFields []string `json:"exclude_fields,omitempty"`
 }
 
 // SearchResult represents a single search result
@@ -177,6 +181,18 @@ func (sb *SearchQueryBuilder) BypassCache(bypass bool) *SearchQueryBuilder {
 // Limit sets maximum number of results to return
 func (sb *SearchQueryBuilder) Limit(limit int) *SearchQueryBuilder {
 	sb.query.Limit = &limit
+	return sb
+}
+
+// SelectFields selects specific fields to return
+func (sb *SearchQueryBuilder) SelectFields(fields []string) *SearchQueryBuilder {
+	sb.query.SelectFields = fields
+	return sb
+}
+
+// ExcludeFields excludes specific fields from results
+func (sb *SearchQueryBuilder) ExcludeFields(fields []string) *SearchQueryBuilder {
+	sb.query.ExcludeFields = fields
 	return sb
 }
 
