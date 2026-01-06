@@ -29,6 +29,7 @@ and this project adheres to
   - `UpsertOptions` - TTL, BypassRipple, TransactionID, BypassCache
   - `DeleteOptions` - BypassRipple, TransactionID
   - `FindOptions` - BypassCache, TransactionID
+  - `BatchInsertOptions`, `BatchUpdateOptions`, `BatchDeleteOptions` - options for batch operations
 - Variadic options pattern for idiomatic Go API
 
 #### Testing & Quality
