@@ -1136,6 +1136,46 @@ func TestHybridSearchSuccess(t *testing.T) {
 	}
 }
 
+func TestSearchQueryBuilderSelectFields(t *testing.T) {
+	fields := []string{"title", "content"}
+	query := NewSearchQueryBuilder("test query").
+		SelectFields(fields).
+		Build()
+
+	if query.SelectFields == nil {
+		t.Fatal("SelectFields not set")
+	}
+	if len(query.SelectFields) != 2 {
+		t.Errorf("SelectFields length = %d, want 2", len(query.SelectFields))
+	}
+	if query.SelectFields[0] != "title" {
+		t.Errorf("SelectFields[0] = %s, want title", query.SelectFields[0])
+	}
+	if query.SelectFields[1] != "content" {
+		t.Errorf("SelectFields[1] = %s, want content", query.SelectFields[1])
+	}
+}
+
+func TestSearchQueryBuilderExcludeFields(t *testing.T) {
+	fields := []string{"metadata", "internal_id"}
+	query := NewSearchQueryBuilder("test query").
+		ExcludeFields(fields).
+		Build()
+
+	if query.ExcludeFields == nil {
+		t.Fatal("ExcludeFields not set")
+	}
+	if len(query.ExcludeFields) != 2 {
+		t.Errorf("ExcludeFields length = %d, want 2", len(query.ExcludeFields))
+	}
+	if query.ExcludeFields[0] != "metadata" {
+		t.Errorf("ExcludeFields[0] = %s, want metadata", query.ExcludeFields[0])
+	}
+	if query.ExcludeFields[1] != "internal_id" {
+		t.Errorf("ExcludeFields[1] = %s, want internal_id", query.ExcludeFields[1])
+	}
+}
+
 // ============================================================================
 // KV Find/Query Tests
 // ============================================================================

@@ -412,6 +412,9 @@ func (c *Client) Insert(collection string, record Record, opts ...InsertOptions)
 		if opts[0].TransactionId != nil {
 			params.Add("transaction_id", *opts[0].TransactionId)
 		}
+		if opts[0].BypassCache != nil {
+			params.Add("bypass_cache", fmt.Sprintf("%t", *opts[0].BypassCache))
+		}
 		if len(params) > 0 {
 			path = fmt.Sprintf("%s?%s", path, params.Encode())
 		}
@@ -494,6 +497,19 @@ func (c *Client) Update(collection, id string, record Record, opts ...UpdateOpti
 		}
 		if opts[0].TransactionId != nil {
 			params.Add("transaction_id", *opts[0].TransactionId)
+		}
+		if opts[0].BypassCache != nil {
+			params.Add("bypass_cache", fmt.Sprintf("%t", *opts[0].BypassCache))
+		}
+		if len(opts[0].SelectFields) > 0 {
+			for _, field := range opts[0].SelectFields {
+				params.Add("select_fields", field)
+			}
+		}
+		if len(opts[0].ExcludeFields) > 0 {
+			for _, field := range opts[0].ExcludeFields {
+				params.Add("exclude_fields", field)
+			}
 		}
 		if len(params) > 0 {
 			path = fmt.Sprintf("%s?%s", path, params.Encode())
@@ -715,18 +731,34 @@ type UpsertOptions struct {
 // Attempts to update first. If the record doesn't exist (404), it will be inserted.
 func (c *Client) Upsert(collection, id string, record Record, opts ...UpsertOptions) (Record, error) {
 	var bypassRipple *bool
+	var transactionId *string
+	var bypassCache *bool
+	var ttl string
 	if len(opts) > 0 {
 		bypassRipple = opts[0].BypassRipple
+		transactionId = opts[0].TransactionId
+		bypassCache = opts[0].BypassCache
+		ttl = opts[0].TTL
 	}
 
 	// Try update first
-	updateOpts := UpdateOptions{BypassRipple: bypassRipple}
+	updateOpts := UpdateOptions{
+		BypassRipple:  bypassRipple,
+		TransactionId: transactionId,
+		BypassCache:   bypassCache,
+	}
 	result, err := c.Update(collection, id, record, updateOpts)
 	if err != nil {
 		// Check if it's a 404 Not Found error
 		if httpErr, ok := err.(*HTTPError); ok && httpErr.IsNotFound() {
-			// Record doesn't exist, insert it
-			insertOpts := InsertOptions{BypassRipple: bypassRipple}
+			// Record doesn't exist, insert it with the intended id
+			record["id"] = id
+			insertOpts := InsertOptions{
+				TTL:           ttl,
+				BypassRipple:  bypassRipple,
+				TransactionId: transactionId,
+				BypassCache:   bypassCache,
+			}
 			return c.Insert(collection, record, insertOpts)
 		}
 		// Other error, propagate it
@@ -769,12 +801,18 @@ func (c *Client) Exists(collection, id string) (bool, error) {
 
 // Paginate retrieves records with pagination (1-indexed page numbers)
 // Page 1 = first page, Page 2 = second page, etc.
+// Returns an error if page < 1 or pageSize < 1.
 func (c *Client) Paginate(collection string, page, pageSize int) ([]Record, error) {
-	// Page 1 = offset 0, Page 2 = offset pageSize, etc.
-	offset := 0
-	if page > 0 {
-		offset = (page - 1) * pageSize
+	// Validate input parameters
+	if page < 1 {
+		return nil, fmt.Errorf("page must be >= 1, got %d", page)
 	}
+	if pageSize < 1 {
+		return nil, fmt.Errorf("pageSize must be >= 1, got %d", pageSize)
+	}
+
+	// Page 1 = offset 0, Page 2 = offset pageSize, etc.
+	offset := (page - 1) * pageSize
 
 	query := NewQueryBuilder().Limit(pageSize).Skip(offset).Build()
 

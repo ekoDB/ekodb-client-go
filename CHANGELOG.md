@@ -24,8 +24,9 @@ and this project adheres to
 
 - **Options structs** for cleaner method signatures:
   - `InsertOptions` - TTL, BypassRipple, TransactionID, BypassCache
-  - `UpdateOptions` - BypassRipple, TransactionID, BypassCache
-  - `UpsertOptions` - BypassRipple, TransactionID
+  - `UpdateOptions` - BypassRipple, TransactionID, BypassCache, SelectFields,
+    ExcludeFields
+  - `UpsertOptions` - TTL, BypassRipple, TransactionID, BypassCache
   - `DeleteOptions` - BypassRipple, TransactionID
   - `FindOptions` - BypassCache, TransactionID
 - Variadic options pattern for idiomatic Go API
