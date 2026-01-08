@@ -574,6 +574,57 @@ func StageKvQuery(pattern *string, includeExpired bool) FunctionStageConfig {
 	}
 }
 
+// StageSWR creates a Stale-While-Revalidate pattern for external API caching.
+// Automatically handles: KV cache check → HTTP request → KV cache set → optional audit storage.
+//
+// Parameters:
+//   - cacheKey: KV key for caching (supports parameter substitution like "user:{{user_id}}")
+//   - ttl: Cache TTL - supports duration strings ("15m", "1h"), integers (seconds), or ISO timestamps (use interface{} for flexibility)
+//   - url: HTTP URL to fetch from (supports parameter substitution)
+//   - method: HTTP method (e.g., "GET", "POST")
+//   - headers: Optional HTTP headers
+//   - body: Optional HTTP request body
+//   - timeoutSeconds: Optional HTTP timeout
+//   - outputField: Field name for response in enriched params (nil defaults to "response")
+//   - collection: Optional collection for audit trail storage
+func StageSWR(
+	cacheKey string,
+	ttl interface{},
+	url string,
+	method string,
+	headers map[string]string,
+	body interface{},
+	timeoutSeconds *int,
+	outputField *string,
+	collection *string,
+) FunctionStageConfig {
+	data := map[string]interface{}{
+		"cache_key": cacheKey,
+		"ttl":       ttl,
+		"url":       url,
+		"method":    method,
+	}
+	if headers != nil {
+		data["headers"] = headers
+	}
+	if body != nil {
+		data["body"] = body
+	}
+	if timeoutSeconds != nil {
+		data["timeout_seconds"] = *timeoutSeconds
+	}
+	if outputField != nil {
+		data["output_field"] = *outputField
+	}
+	if collection != nil {
+		data["collection"] = *collection
+	}
+	return FunctionStageConfig{
+		Stage: "SWR",
+		Data:  data,
+	}
+}
+
 // ChatMessage for AI operations
 type ChatMessage struct {
 	Role    string `json:"role"`
