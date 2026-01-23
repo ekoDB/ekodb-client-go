@@ -847,6 +847,82 @@ func (c *Client) KVDelete(key string) error {
 	return err
 }
 
+// KVBatchGet retrieves multiple keys in a single request
+func (c *Client) KVBatchGet(keys []string) ([]map[string]interface{}, error) {
+	data := map[string]interface{}{
+		"keys": keys,
+	}
+
+	respBody, err := c.makeRequest("POST", "/api/kv/batch/get", data)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []map[string]interface{}
+	if err := c.unmarshal("/api/kv/batch/get", respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// KVBatchSet sets multiple key-value pairs in a single request
+func (c *Client) KVBatchSet(entries []map[string]interface{}) ([][]interface{}, error) {
+	keys := make([]string, len(entries))
+	values := make([]map[string]interface{}, len(entries))
+	var ttl *int64
+
+	for i, entry := range entries {
+		keys[i] = entry["key"].(string)
+		values[i] = map[string]interface{}{"value": entry["value"]}
+		// Use TTL from first entry if provided
+		if ttl == nil {
+			if entryTTL, ok := entry["ttl"].(int64); ok {
+				ttl = &entryTTL
+			}
+		}
+	}
+
+	data := map[string]interface{}{
+		"keys":   keys,
+		"values": values,
+	}
+	if ttl != nil {
+		data["ttl"] = *ttl
+	}
+
+	respBody, err := c.makeRequest("POST", "/api/kv/batch/set", data)
+	if err != nil {
+		return nil, err
+	}
+
+	var result [][]interface{}
+	if err := c.unmarshal("/api/kv/batch/set", respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// KVBatchDelete deletes multiple keys in a single request
+func (c *Client) KVBatchDelete(keys []string) ([][]interface{}, error) {
+	data := map[string]interface{}{
+		"keys": keys,
+	}
+
+	respBody, err := c.makeRequest("DELETE", "/api/kv/batch/delete", data)
+	if err != nil {
+		return nil, err
+	}
+
+	var result [][]interface{}
+	if err := c.unmarshal("/api/kv/batch/delete", respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 // KVExists checks if a key exists
 func (c *Client) KVExists(key string) (bool, error) {
 	_, err := c.KVGet(key)
