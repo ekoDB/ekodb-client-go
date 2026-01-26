@@ -118,7 +118,14 @@ func TestSWRStageWithPOSTBody(t *testing.T) {
 		t.Errorf("Expected method 'POST', got %v", result["method"])
 	}
 
-	bodyMap := result["body"].(map[string]interface{})
+	bodyVal, ok := result["body"]
+	if !ok {
+		t.Fatalf("Expected 'body' field in result, got: %v", result)
+	}
+	bodyMap, ok := bodyVal.(map[string]interface{})
+	if !ok {
+		t.Fatalf("Expected 'body' to be a map[string]interface{}, got: %T (%v)", bodyVal, bodyVal)
+	}
 	if bodyMap["query"] != "{{search_term}}" {
 		t.Errorf("Expected body.query '{{search_term}}', got %v", bodyMap["query"])
 	}
