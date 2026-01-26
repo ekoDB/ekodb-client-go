@@ -15,13 +15,15 @@ const (
 
 // QueryBuilder provides a fluent API for building complex queries
 type QueryBuilder struct {
-	filters      []map[string]interface{}
-	sortFields   []map[string]interface{}
-	limit        *int
-	skip         *int
-	join         map[string]interface{}
-	bypassCache  bool
-	bypassRipple bool
+	filters       []map[string]interface{}
+	sortFields    []map[string]interface{}
+	limit         *int
+	skip          *int
+	join          map[string]interface{}
+	bypassCache   bool
+	bypassRipple  bool
+	selectFields  []string
+	excludeFields []string
 }
 
 // NewQueryBuilder creates a new QueryBuilder
@@ -280,6 +282,20 @@ func (qb *QueryBuilder) BypassRipple(bypass bool) *QueryBuilder {
 	return qb
 }
 
+// SelectFields specifies which fields to return (projection)
+// Only these fields will be included in results (plus 'id' which is always included)
+func (qb *QueryBuilder) SelectFields(fields ...string) *QueryBuilder {
+	qb.selectFields = fields
+	return qb
+}
+
+// ExcludeFields specifies which fields to exclude from results
+// All fields except these will be included in results
+func (qb *QueryBuilder) ExcludeFields(fields ...string) *QueryBuilder {
+	qb.excludeFields = fields
+	return qb
+}
+
 // Build builds the final query map
 func (qb *QueryBuilder) Build() map[string]interface{} {
 	query := make(map[string]interface{})
@@ -323,6 +339,14 @@ func (qb *QueryBuilder) Build() map[string]interface{} {
 	}
 	if qb.bypassRipple {
 		query["bypass_ripple"] = true
+	}
+
+	if len(qb.selectFields) > 0 {
+		query["select_fields"] = qb.selectFields
+	}
+
+	if len(qb.excludeFields) > 0 {
+		query["exclude_fields"] = qb.excludeFields
 	}
 
 	return query

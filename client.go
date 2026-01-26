@@ -477,6 +477,33 @@ func (c *Client) FindByID(collection, id string) (Record, error) {
 	return result, nil
 }
 
+// FindByIDWithProjection finds a document by ID with field projection
+// selectFields: only return these fields (plus 'id')
+// excludeFields: exclude these fields from results
+func (c *Client) FindByIDWithProjection(collection, id string, selectFields, excludeFields []string) (Record, error) {
+	// Build query with projection using Find endpoint
+	query := NewQueryBuilder().Eq("id", id).Limit(1)
+
+	if len(selectFields) > 0 {
+		query.SelectFields(selectFields...)
+	}
+
+	if len(excludeFields) > 0 {
+		query.ExcludeFields(excludeFields...)
+	}
+
+	results, err := c.Find(collection, query.Build())
+	if err != nil {
+		return nil, err
+	}
+
+	if len(results) == 0 {
+		return nil, fmt.Errorf("document not found")
+	}
+
+	return results[0], nil
+}
+
 // UpdateOptions contains optional parameters for Update
 type UpdateOptions struct {
 	BypassRipple  *bool
