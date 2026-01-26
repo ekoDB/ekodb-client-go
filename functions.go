@@ -370,12 +370,60 @@ func StageUpdateWithAction(collection string, recordId string, action string, fi
 //	})
 //	StageIf(cond, thenFunctions, elseFunctions)
 type ScriptCondition struct {
-	Type       string            `json:"type"`                 // Condition type (HasRecords, FieldEquals, CountEquals, And, Or, Not, etc.)
-	Field      string            `json:"field,omitempty"`      // Field name for field-based conditions
-	Value      interface{}       `json:"value,omitempty"`      // Expected value for comparison conditions
-	Count      int               `json:"count,omitempty"`      // Count threshold for count-based conditions
-	Conditions []ScriptCondition `json:"conditions,omitempty"` // Child conditions for And/Or operators
-	Condition  *ScriptCondition  `json:"condition,omitempty"`  // Single child condition for Not operator
+	Type       string            // Condition type (HasRecords, FieldEquals, CountEquals, And, Or, Not, etc.)
+	Field      string            // Field name for field-based conditions
+	FieldValue interface{}       // Expected value for comparison conditions (FieldEquals)
+	Count      int               // Count threshold for count-based conditions
+	Conditions []ScriptCondition // Child conditions for And/Or operators
+	Condition  *ScriptCondition  // Single child condition for Not operator
+}
+
+// MarshalJSON implements adjacently-tagged serialization for ScriptCondition.
+// Format: { "type": "...", "value": { ...data } } for variants with data
+// Unit variants like HasRecords have no value field.
+func (c ScriptCondition) MarshalJSON() ([]byte, error) {
+	switch c.Type {
+	case "HasRecords":
+		return json.Marshal(map[string]string{"type": c.Type})
+	case "FieldEquals":
+		return json.Marshal(map[string]interface{}{
+			"type": c.Type,
+			"value": map[string]interface{}{
+				"field": c.Field,
+				"value": c.FieldValue,
+			},
+		})
+	case "FieldExists":
+		return json.Marshal(map[string]interface{}{
+			"type": c.Type,
+			"value": map[string]interface{}{
+				"field": c.Field,
+			},
+		})
+	case "CountEquals", "CountGreaterThan", "CountLessThan":
+		return json.Marshal(map[string]interface{}{
+			"type": c.Type,
+			"value": map[string]interface{}{
+				"count": c.Count,
+			},
+		})
+	case "And", "Or":
+		return json.Marshal(map[string]interface{}{
+			"type": c.Type,
+			"value": map[string]interface{}{
+				"conditions": c.Conditions,
+			},
+		})
+	case "Not":
+		return json.Marshal(map[string]interface{}{
+			"type": c.Type,
+			"value": map[string]interface{}{
+				"condition": c.Condition,
+			},
+		})
+	default:
+		return json.Marshal(map[string]string{"type": c.Type})
+	}
 }
 
 // Condition builders
@@ -389,7 +437,7 @@ func ConditionHasRecords() ScriptCondition {
 // ConditionFieldEquals creates a condition that is satisfied when the specified field
 // in the current record(s) equals the provided value. Field comparison is type-aware.
 func ConditionFieldEquals(field string, value interface{}) ScriptCondition {
-	return ScriptCondition{Type: "FieldEquals", Field: field, Value: value}
+	return ScriptCondition{Type: "FieldEquals", Field: field, FieldValue: value}
 }
 
 // ConditionFieldExists creates a condition that is satisfied when the specified field
@@ -579,13 +627,13 @@ func StageKvQuery(pattern *string, includeExpired bool) FunctionStageConfig {
 //
 // Parameters:
 //   - cacheKey: KV key for caching (supports parameter substitution like "user:{{user_id}}")
-//   - ttl: Cache TTL - supports duration strings ("15m", "1h"), integers (seconds), or ISO timestamps (use interface{} for flexibility)
+//   - ttl: Cache TTL - server accepts duration strings ("15m", "1h"), integers (seconds), or ISO timestamps
 //   - url: HTTP URL to fetch from (supports parameter substitution)
 //   - method: HTTP method (e.g., "GET", "POST")
 //   - headers: Optional HTTP headers
 //   - body: Optional HTTP request body
 //   - timeoutSeconds: Optional HTTP timeout
-//   - outputField: Field name for response in enriched params (nil defaults to "response")
+//   - outputField: Field name for response in enriched params (nil uses server default "response")
 //   - collection: Optional collection for audit trail storage
 func StageSWR(
 	cacheKey string,

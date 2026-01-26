@@ -134,6 +134,7 @@ func TestSWRStageTTLFormats(t *testing.T) {
 		{"Duration string", "30m", "30m"},
 		{"Integer seconds", 1800, float64(1800)}, // JSON numbers are float64
 		{"String seconds", "1800", "1800"},
+		{"ISO timestamp", "2026-01-27T12:00:00Z", "2026-01-27T12:00:00Z"}, // Server parses ISO timestamps
 	}
 
 	for _, tt := range tests {
