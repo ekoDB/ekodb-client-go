@@ -282,15 +282,18 @@ func (qb *QueryBuilder) BypassRipple(bypass bool) *QueryBuilder {
 	return qb
 }
 
-// SelectFields specifies which fields to return (projection)
-// Only these fields will be included in results (plus 'id' which is always included)
+// SelectFields specifies which fields to return (projection).
+// Only these fields will be included in results (plus 'id' which is always included).
+// When used with ExcludeFields, select is applied first, then exclude removes
+// fields from the selected set (useful for nested fields like "metadata.internal").
 func (qb *QueryBuilder) SelectFields(fields ...string) *QueryBuilder {
 	qb.selectFields = fields
 	return qb
 }
 
-// ExcludeFields specifies which fields to exclude from results
-// All fields except these will be included in results
+// ExcludeFields specifies which fields to exclude from results.
+// All fields except these will be included in results.
+// When used with SelectFields, exclude removes fields from the selected set.
 func (qb *QueryBuilder) ExcludeFields(fields ...string) *QueryBuilder {
 	qb.excludeFields = fields
 	return qb

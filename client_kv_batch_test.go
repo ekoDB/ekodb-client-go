@@ -95,8 +95,8 @@ func TestKVBatchSetWithTTL(t *testing.T) {
 
 	client := createTestClient(t, server)
 	entries := []map[string]interface{}{
-		{"key": "key1", "value": map[string]interface{}{"data": "value1"}, "ttl": 3600},
-		{"key": "key2", "value": map[string]interface{}{"data": "value2"}, "ttl": 3600},
+		{"key": "key1", "value": map[string]interface{}{"data": "value1"}, "ttl": int64(3600)},
+		{"key": "key2", "value": map[string]interface{}{"data": "value2"}, "ttl": int64(3600)},
 	}
 	results, err := client.KVBatchSet(entries)
 	if err != nil {

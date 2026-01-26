@@ -1,7 +1,11 @@
 package ekodb
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // TestQueryBuilderSelectFields tests the SelectFields method
@@ -60,7 +64,10 @@ func TestQueryBuilderExcludeFields(t *testing.T) {
 	}
 }
 
-// TestQueryBuilderBothProjections tests using both select and exclude
+// TestQueryBuilderBothProjections tests using both select and exclude.
+// When both are used, select is applied first, then exclude removes fields
+// from the selected set. This is useful for selecting a group of fields
+// but excluding specific nested fields (e.g., select "metadata" but exclude "metadata.internal").
 func TestQueryBuilderBothProjections(t *testing.T) {
 	query := NewQueryBuilder().
 		Eq("status", "active").
@@ -173,4 +180,144 @@ func TestEmptyProjection(t *testing.T) {
 		}
 	}
 	// Test passes if select_fields is nil or empty
+}
+
+// ============================================================================
+// FindByIDWithProjection Client Tests
+// ============================================================================
+
+// createProjectionTestServer creates a test server with auth handling for projection tests
+func createProjectionTestServer(t *testing.T, handlers map[string]http.HandlerFunc) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Handle token endpoint
+		if r.URL.Path == "/api/auth/token" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"token": "test-jwt-token"})
+			return
+		}
+
+		// Check for auth header on non-token requests
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer test-jwt-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Unauthorized"))
+			return
+		}
+
+		// Find matching handler
+		key := r.Method + " " + r.URL.Path
+		if handler, ok := handlers[key]; ok {
+			handler(w, r)
+			return
+		}
+
+		t.Errorf("Unexpected request: %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+}
+
+func TestFindByIDWithProjectionSelectFields(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			// Return only the selected fields
+			json.NewEncoder(w).Encode([]Record{
+				{"id": "user_123", "name": "Alice", "email": "alice@example.com"},
+			})
+		},
+	}
+
+	server := createProjectionTestServer(t, handlers)
+	defer server.Close()
+
+	client, err := NewClientWithConfig(ClientConfig{
+		BaseURL:     server.URL,
+		APIKey:      "test-api-key",
+		ShouldRetry: false,
+		Timeout:     5 * time.Second,
+		Format:      JSON,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+	result, err := client.FindByIDWithProjection("users", "user_123", []string{"name", "email"}, nil)
+	if err != nil {
+		t.Fatalf("FindByIDWithProjection failed: %v", err)
+	}
+	if result["id"] != "user_123" {
+		t.Errorf("Expected id user_123, got %v", result["id"])
+	}
+	if result["name"] != "Alice" {
+		t.Errorf("Expected name Alice, got %v", result["name"])
+	}
+}
+
+func TestFindByIDWithProjectionExcludeFields(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			// Return record without excluded fields
+			json.NewEncoder(w).Encode([]Record{
+				{"id": "user_123", "name": "Alice"},
+			})
+		},
+	}
+
+	server := createProjectionTestServer(t, handlers)
+	defer server.Close()
+
+	client, err := NewClientWithConfig(ClientConfig{
+		BaseURL:     server.URL,
+		APIKey:      "test-api-key",
+		ShouldRetry: false,
+		Timeout:     5 * time.Second,
+		Format:      JSON,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+	result, err := client.FindByIDWithProjection("users", "user_123", nil, []string{"password", "secret"})
+	if err != nil {
+		t.Fatalf("FindByIDWithProjection failed: %v", err)
+	}
+	if result["id"] != "user_123" {
+		t.Errorf("Expected id user_123, got %v", result["id"])
+	}
+}
+
+func TestFindByIDWithProjectionNotFound(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			// Return empty array for not found
+			json.NewEncoder(w).Encode([]Record{})
+		},
+	}
+
+	server := createProjectionTestServer(t, handlers)
+	defer server.Close()
+
+	client, err := NewClientWithConfig(ClientConfig{
+		BaseURL:     server.URL,
+		APIKey:      "test-api-key",
+		ShouldRetry: false,
+		Timeout:     5 * time.Second,
+		Format:      JSON,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+	_, err = client.FindByIDWithProjection("users", "nonexistent", []string{"name"}, nil)
+	if err == nil {
+		t.Fatal("Expected error for not found document")
+	}
+
+	// Verify it returns HTTPError with 404 for consistency with FindByID
+	httpErr, ok := err.(*HTTPError)
+	if !ok {
+		t.Fatalf("Expected HTTPError, got %T", err)
+	}
+	if !httpErr.IsNotFound() {
+		t.Errorf("Expected 404 status, got %d", httpErr.StatusCode)
+	}
 }

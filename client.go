@@ -498,7 +498,10 @@ func (c *Client) FindByIDWithProjection(collection, id string, selectFields, exc
 	}
 
 	if len(results) == 0 {
-		return nil, fmt.Errorf("document not found")
+		return nil, &HTTPError{
+			StatusCode: http.StatusNotFound,
+			Message:    "document not found",
+		}
 	}
 
 	return results[0], nil
@@ -893,19 +896,28 @@ func (c *Client) KVBatchGet(keys []string) ([]map[string]interface{}, error) {
 	return result, nil
 }
 
-// KVBatchSet sets multiple key-value pairs in a single request
+// KVBatchSet sets multiple key-value pairs in a single request.
+// TTL from the first entry with a valid TTL is applied to all entries (server limitation).
 func (c *Client) KVBatchSet(entries []map[string]interface{}) ([][]interface{}, error) {
 	keys := make([]string, len(entries))
 	values := make([]map[string]interface{}, len(entries))
 	var ttl *int64
 
 	for i, entry := range entries {
-		keys[i] = entry["key"].(string)
+		// Safe type assertion for key
+		key, ok := entry["key"].(string)
+		if !ok {
+			return nil, fmt.Errorf("KVBatchSet: entry %d has non-string or missing key", i)
+		}
+		keys[i] = key
 		values[i] = map[string]interface{}{"value": entry["value"]}
-		// Use TTL from first entry if provided
+		// Use TTL from first entry if provided (supports both int and int64)
 		if ttl == nil {
 			if entryTTL, ok := entry["ttl"].(int64); ok {
 				ttl = &entryTTL
+			} else if entryTTLInt, ok := entry["ttl"].(int); ok {
+				ttlVal := int64(entryTTLInt)
+				ttl = &ttlVal
 			}
 		}
 	}
