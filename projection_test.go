@@ -3,7 +3,6 @@ package ekodb
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -186,35 +185,7 @@ func TestEmptyProjection(t *testing.T) {
 // FindByIDWithProjection Client Tests
 // ============================================================================
 
-// createProjectionTestServer creates a test server with auth handling for projection tests
-func createProjectionTestServer(t *testing.T, handlers map[string]http.HandlerFunc) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Handle token endpoint
-		if r.URL.Path == "/api/auth/token" {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"token": "test-jwt-token"})
-			return
-		}
-
-		// Check for auth header on non-token requests
-		auth := r.Header.Get("Authorization")
-		if auth != "Bearer test-jwt-token" {
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte("Unauthorized"))
-			return
-		}
-
-		// Find matching handler
-		key := r.Method + " " + r.URL.Path
-		if handler, ok := handlers[key]; ok {
-			handler(w, r)
-			return
-		}
-
-		t.Errorf("Unexpected request: %s %s", r.Method, r.URL.Path)
-		w.WriteHeader(http.StatusNotFound)
-	}))
-}
+// Note: Uses createTestServer from client_test.go
 
 func TestFindByIDWithProjectionSelectFields(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
@@ -227,7 +198,7 @@ func TestFindByIDWithProjectionSelectFields(t *testing.T) {
 		},
 	}
 
-	server := createProjectionTestServer(t, handlers)
+	server := createTestServer(t, handlers)
 	defer server.Close()
 
 	client, err := NewClientWithConfig(ClientConfig{
@@ -263,7 +234,7 @@ func TestFindByIDWithProjectionExcludeFields(t *testing.T) {
 		},
 	}
 
-	server := createProjectionTestServer(t, handlers)
+	server := createTestServer(t, handlers)
 	defer server.Close()
 
 	client, err := NewClientWithConfig(ClientConfig{
@@ -294,7 +265,7 @@ func TestFindByIDWithProjectionNotFound(t *testing.T) {
 		},
 	}
 
-	server := createProjectionTestServer(t, handlers)
+	server := createTestServer(t, handlers)
 	defer server.Close()
 
 	client, err := NewClientWithConfig(ClientConfig{
