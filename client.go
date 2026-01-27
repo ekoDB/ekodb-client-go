@@ -477,6 +477,36 @@ func (c *Client) FindByID(collection, id string) (Record, error) {
 	return result, nil
 }
 
+// FindByIDWithProjection finds a document by ID with field projection
+// selectFields: only return these fields (plus 'id')
+// excludeFields: exclude these fields from results
+func (c *Client) FindByIDWithProjection(collection, id string, selectFields, excludeFields []string) (Record, error) {
+	// Build query with projection using Find endpoint
+	query := NewQueryBuilder().Eq("id", id).Limit(1)
+
+	if len(selectFields) > 0 {
+		query.SelectFields(selectFields...)
+	}
+
+	if len(excludeFields) > 0 {
+		query.ExcludeFields(excludeFields...)
+	}
+
+	results, err := c.Find(collection, query.Build())
+	if err != nil {
+		return nil, err
+	}
+
+	if len(results) == 0 {
+		return nil, &HTTPError{
+			StatusCode: http.StatusNotFound,
+			Message:    "document not found",
+		}
+	}
+
+	return results[0], nil
+}
+
 // UpdateOptions contains optional parameters for Update
 type UpdateOptions struct {
 	BypassRipple  *bool
@@ -845,6 +875,91 @@ func (c *Client) KVGet(key string) (interface{}, error) {
 func (c *Client) KVDelete(key string) error {
 	_, err := c.makeRequest("DELETE", "/api/kv/delete/"+url.PathEscape(key), nil)
 	return err
+}
+
+// KVBatchGet retrieves multiple keys in a single request
+func (c *Client) KVBatchGet(keys []string) ([]map[string]interface{}, error) {
+	data := map[string]interface{}{
+		"keys": keys,
+	}
+
+	respBody, err := c.makeRequest("POST", "/api/kv/batch/get", data)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []map[string]interface{}
+	if err := c.unmarshal("/api/kv/batch/get", respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// KVBatchSet sets multiple key-value pairs in a single request.
+// TTL from the first entry with a valid TTL is applied to all entries (server limitation).
+func (c *Client) KVBatchSet(entries []map[string]interface{}) ([][]interface{}, error) {
+	keys := make([]string, len(entries))
+	values := make([]map[string]interface{}, len(entries))
+	var ttl *int64
+
+	for i, entry := range entries {
+		// Safe type assertion for key
+		key, ok := entry["key"].(string)
+		if !ok {
+			return nil, fmt.Errorf("KVBatchSet: entry %d has non-string or missing key", i)
+		}
+		keys[i] = key
+		values[i] = map[string]interface{}{"value": entry["value"]}
+		// Use TTL from first entry if provided (supports both int and int64)
+		if ttl == nil {
+			if entryTTL, ok := entry["ttl"].(int64); ok {
+				ttl = &entryTTL
+			} else if entryTTLInt, ok := entry["ttl"].(int); ok {
+				ttlVal := int64(entryTTLInt)
+				ttl = &ttlVal
+			}
+		}
+	}
+
+	data := map[string]interface{}{
+		"keys":   keys,
+		"values": values,
+	}
+	if ttl != nil {
+		data["ttl"] = *ttl
+	}
+
+	respBody, err := c.makeRequest("POST", "/api/kv/batch/set", data)
+	if err != nil {
+		return nil, err
+	}
+
+	var result [][]interface{}
+	if err := c.unmarshal("/api/kv/batch/set", respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// KVBatchDelete deletes multiple keys in a single request
+func (c *Client) KVBatchDelete(keys []string) ([][]interface{}, error) {
+	data := map[string]interface{}{
+		"keys": keys,
+	}
+
+	respBody, err := c.makeRequest("DELETE", "/api/kv/batch/delete", data)
+	if err != nil {
+		return nil, err
+	}
+
+	var result [][]interface{}
+	if err := c.unmarshal("/api/kv/batch/delete", respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 // KVExists checks if a key exists

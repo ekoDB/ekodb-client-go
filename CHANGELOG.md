@@ -29,8 +29,30 @@ and this project adheres to
   - `UpsertOptions` - TTL, BypassRipple, TransactionID, BypassCache
   - `DeleteOptions` - BypassRipple, TransactionID
   - `FindOptions` - BypassCache, TransactionID
-  - `BatchInsertOptions`, `BatchUpdateOptions`, `BatchDeleteOptions` - options for batch operations
+  - `BatchInsertOptions`, `BatchUpdateOptions`, `BatchDeleteOptions` - options
+    for batch operations
 - Variadic options pattern for idiomatic Go API
+
+#### Field Projection
+
+- **QueryBuilder projection methods**:
+  - `SelectFields()` - Specify which fields to return (whitelist)
+  - `ExcludeFields()` - Specify which fields to exclude (blacklist)
+- `FindByIDWithProjection()` - Find by ID with field projection support
+
+#### KV Batch Operations
+
+- **Batch KV operations** for efficient multi-key access:
+  - `KVBatchGet()` - Retrieve multiple keys in a single request
+  - `KVBatchSet()` - Set multiple key-value pairs atomically
+  - `KVBatchDelete()` - Delete multiple keys in a single request
+
+#### Function Stages
+
+- **StageSWR** - Stale-While-Revalidate pattern for external API caching
+  - Automatic cache check → HTTP request → cache set workflow
+  - Optional audit trail storage
+  - Supports duration strings, integers, or ISO timestamps for TTL
 
 #### Testing & Quality
 
