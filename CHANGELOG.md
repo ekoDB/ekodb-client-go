@@ -61,10 +61,31 @@ and this project adheres to
 - Test coverage for options and edge cases
 - Integration with existing test suite
 
+#### Script Conditions
+
+- **ScriptCondition types** for function If/control flow:
+  - `ConditionHasRecords()` - Check if working data has records
+  - `ConditionFieldExists(field)` - Check if field exists in records
+  - `ConditionFieldEquals(field, value)` - Check if field equals value
+  - `ConditionCountEquals(count)` - Check if record count equals value
+  - `ConditionCountGreaterThan(count)` - Check if record count is greater
+  - `ConditionCountLessThan(count)` - Check if record count is less
+  - `ConditionAnd(conditions)` - Logical AND of multiple conditions
+  - `ConditionOr(conditions)` - Logical OR of multiple conditions
+  - `ConditionNot(condition)` - Logical NOT of a condition
+- Comprehensive unit tests for ScriptCondition serialization
+  (`condition_test.go`)
+
 ### Fixed
 
 ### Changed
 
+- **Breaking**: `ScriptCondition` JSON serialization now uses adjacently-tagged
+  format
+  - Old format: `{"type": "FieldEquals", "field": "x", "value": "y"}`
+  - New format: `{"type": "FieldEquals", "value": {"field": "x", "value": "y"}}`
+  - This matches the Rust server's serde adjacently-tagged enum format
+  - `HasRecords` remains simple: `{"type": "HasRecords"}`
 - Updated examples to use new convenience methods where appropriate
 - Improved error messages and documentation
 - Enhanced type safety with stricter option types
