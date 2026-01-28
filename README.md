@@ -320,6 +320,29 @@ results, err := client.Find("users", query)
 
 - `ListCollections() ([]string, error)`
 - `DeleteCollection(collection string) error`
+- `CollectionExists(collection string) (bool, error)` - Check if collection
+  exists
+- `CountDocuments(collection string) (int64, error)` - Count documents in
+  collection
+
+### Chat Models
+
+- `GetChatModels() (map[string][]string, error)` - Get all available chat models
+  by provider
+- `GetChatModel(provider string) ([]string, error)` - Get models for a specific
+  provider
+
+### User Functions
+
+- `SaveUserFunction(userFunction UserFunction) (string, error)` - Create a new
+  user function
+- `GetUserFunction(label string) (*UserFunction, error)` - Get user function by
+  label
+- `ListUserFunctions(tags []string) ([]UserFunction, error)` - List all user
+  functions (optionally filter by tags)
+- `UpdateUserFunction(label string, userFunction UserFunction) error` - Update
+  existing user function
+- `DeleteUserFunction(label string) error` - Delete user function
 
 ### WebSocket Methods
 
@@ -380,6 +403,13 @@ direct API):
   Chat with sessions
 - **[client_chat_advanced.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_chat_advanced.go)** -
   Advanced chat features
+
+### Additional APIs
+
+- **[client_chat_models.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_chat_models.go)** -
+  Chat models API
+- **[client_user_functions.go](https://github.com/ekoDB/ekodb-client/blob/main/examples/go/client_user_functions.go)** -
+  User functions API
 
 ### Running Examples
 
