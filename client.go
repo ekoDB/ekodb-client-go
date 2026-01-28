@@ -910,7 +910,11 @@ func (c *Client) KVBatchSet(entries []map[string]interface{}) ([][]interface{}, 
 			return nil, fmt.Errorf("KVBatchSet: entry %d has non-string or missing key", i)
 		}
 		keys[i] = key
-		values[i] = map[string]interface{}{"value": entry["value"]}
+		value, ok := entry["value"].(map[string]interface{})
+		if !ok || value == nil {
+			return nil, fmt.Errorf("KVBatchSet: entry %d has non-map, nil, or missing value", i)
+		}
+		values[i] = value
 		// Use TTL from first entry if provided (supports both int and int64)
 		if ttl == nil {
 			if entryTTL, ok := entry["ttl"].(int64); ok {
