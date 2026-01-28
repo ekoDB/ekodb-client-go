@@ -555,17 +555,14 @@ func StageReleaseSavepoint(name string) FunctionStageConfig {
 // KV Store Operations
 // ============================================================================
 
-// StageKvGet retrieves a value from the KV store
-func StageKvGet(key string, outputField *string) FunctionStageConfig {
-	data := map[string]interface{}{
-		"key": key,
-	}
-	if outputField != nil {
-		data["output_field"] = *outputField
-	}
+// StageKvGet retrieves a value from the KV store.
+// Returns {value: <data>} on hit, {value: null} on miss.
+func StageKvGet(key string) FunctionStageConfig {
 	return FunctionStageConfig{
 		Stage: "KvGet",
-		Data:  data,
+		Data: map[string]interface{}{
+			"key": key,
+		},
 	}
 }
 
