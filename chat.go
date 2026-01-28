@@ -146,7 +146,44 @@ type MergeSessionsRequest struct {
 	MergeStrategy MergeStrategy `json:"merge_strategy"`
 }
 
+// ChatModels contains available models for each provider
+type ChatModels struct {
+	OpenAI     []string `json:"openai"`
+	Anthropic  []string `json:"anthropic"`
+	Perplexity []string `json:"perplexity"`
+}
+
 // ========== Chat Methods ==========
+
+// GetChatModels retrieves all available chat models from all providers
+func (c *Client) GetChatModels() (*ChatModels, error) {
+	respBody, err := c.makeRequest("GET", "/api/chat_models", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result ChatModels
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+// GetChatModel retrieves available models for a specific provider
+func (c *Client) GetChatModel(providerName string) ([]string, error) {
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat_models/%s", providerName), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []string
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
 
 // CreateChatSession creates a new chat session
 func (c *Client) CreateChatSession(request CreateChatSessionRequest) (*ChatResponse, error) {
@@ -315,6 +352,21 @@ func (c *Client) UpdateChatMessage(sessionID, messageID, content string) error {
 	request := map[string]string{"content": content}
 	_, err := c.makeRequest("PUT", fmt.Sprintf("/api/chat/%s/messages/%s", sessionID, messageID), request)
 	return err
+}
+
+// GetChatMessage gets a specific message by ID
+func (c *Client) GetChatMessage(sessionID, messageID string) (Record, error) {
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/%s/messages/%s", sessionID, messageID), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result Record
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 // DeleteChatMessage deletes a specific message

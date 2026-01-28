@@ -783,6 +783,121 @@ func TestDeleteCollectionSuccess(t *testing.T) {
 	}
 }
 
+func TestCollectionExistsTrue(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/collections": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string][]string{
+				"collections": {"users", "posts", "comments"},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	exists, err := client.CollectionExists("users")
+	if err != nil {
+		t.Fatalf("CollectionExists failed: %v", err)
+	}
+	if !exists {
+		t.Error("CollectionExists returned false, want true")
+	}
+}
+
+func TestCollectionExistsFalse(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/collections": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string][]string{
+				"collections": {"users", "posts", "comments"},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	exists, err := client.CollectionExists("nonexistent")
+	if err != nil {
+		t.Fatalf("CollectionExists failed: %v", err)
+	}
+	if exists {
+		t.Error("CollectionExists returned true, want false")
+	}
+}
+
+func TestCountDocuments(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]Record{
+				{"id": "1", "name": "Alice"},
+				{"id": "2", "name": "Bob"},
+				{"id": "3", "name": "Carol"},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	count, err := client.CountDocuments("users")
+	if err != nil {
+		t.Fatalf("CountDocuments failed: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("CountDocuments returned %d, want 3", count)
+	}
+}
+
+func TestGetChatModels(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/chat_models": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(ChatModels{
+				OpenAI:     []string{"gpt-4", "gpt-3.5-turbo"},
+				Anthropic:  []string{"claude-3-opus", "claude-3-sonnet"},
+				Perplexity: []string{"llama-3.1-sonar-small"},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	models, err := client.GetChatModels()
+	if err != nil {
+		t.Fatalf("GetChatModels failed: %v", err)
+	}
+	if len(models.OpenAI) != 2 {
+		t.Errorf("Expected 2 OpenAI models, got %d", len(models.OpenAI))
+	}
+	if len(models.Anthropic) != 2 {
+		t.Errorf("Expected 2 Anthropic models, got %d", len(models.Anthropic))
+	}
+}
+
+func TestGetChatModel(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/chat_models/openai": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]string{"gpt-4", "gpt-3.5-turbo", "gpt-4-turbo"})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	models, err := client.GetChatModel("openai")
+	if err != nil {
+		t.Fatalf("GetChatModel failed: %v", err)
+	}
+	if len(models) != 3 {
+		t.Errorf("Expected 3 models, got %d", len(models))
+	}
+}
+
 // ============================================================================
 // Error Handling Tests
 // ============================================================================

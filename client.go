@@ -1100,6 +1100,33 @@ func (c *Client) DeleteCollection(collection string) error {
 	return err
 }
 
+// CollectionExists checks if a collection exists
+func (c *Client) CollectionExists(collection string) (bool, error) {
+	collections, err := c.ListCollections()
+	if err != nil {
+		return false, err
+	}
+
+	for _, col := range collections {
+		if col == collection {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// CountDocuments counts the number of documents in a collection
+func (c *Client) CountDocuments(collection string) (int, error) {
+	query := NewQueryBuilder().Limit(100000).Build()
+	records, err := c.Find(collection, query)
+	if err != nil {
+		return 0, err
+	}
+
+	return len(records), nil
+}
+
 // RestoreRecord restores a deleted record from trash
 // Records remain in trash for 30 days before permanent deletion
 func (c *Client) RestoreRecord(collection, id string) error {
