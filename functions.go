@@ -20,6 +20,20 @@ type Script struct {
 	UpdatedAt   *time.Time                     `json:"updated_at,omitempty"`
 }
 
+// UserFunction is a reusable sequence of Functions that can be called by Scripts
+type UserFunction struct {
+	Label       string                         `json:"label"`
+	Name        string                         `json:"name"`
+	Description *string                        `json:"description,omitempty"`
+	Version     *string                        `json:"version,omitempty"`
+	Parameters  map[string]ParameterDefinition `json:"parameters"`
+	Functions   []FunctionStageConfig          `json:"functions"`
+	Tags        []string                       `json:"tags,omitempty"`
+	ID          *string                        `json:"id,omitempty"`
+	CreatedAt   *time.Time                     `json:"created_at,omitempty"`
+	UpdatedAt   *time.Time                     `json:"updated_at,omitempty"`
+}
+
 // ParameterDefinition for function parameters
 type ParameterDefinition struct {
 	Required    bool        `json:"required"`
@@ -830,4 +844,73 @@ func joinStrings(strs []string, sep string) string {
 		result += sep + strs[i]
 	}
 	return result
+}
+
+// ============================================================================
+// User Functions API
+// ============================================================================
+
+// SaveUserFunction creates a new reusable user function
+func (c *Client) SaveUserFunction(userFunction UserFunction) (string, error) {
+	respBody, err := c.makeRequest("POST", "/api/functions", userFunction)
+	if err != nil {
+		return "", err
+	}
+
+	var result struct {
+		Status string `json:"status"`
+		ID     string `json:"id"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", err
+	}
+
+	return result.ID, nil
+}
+
+// GetUserFunction retrieves a user function by label
+func (c *Client) GetUserFunction(label string) (*UserFunction, error) {
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/functions/%s", label), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var userFunction UserFunction
+	if err := json.Unmarshal(respBody, &userFunction); err != nil {
+		return nil, err
+	}
+
+	return &userFunction, nil
+}
+
+// ListUserFunctions lists all user functions, optionally filtered by tags
+func (c *Client) ListUserFunctions(tags []string) ([]UserFunction, error) {
+	url := "/api/functions"
+	if len(tags) > 0 {
+		url += "?tags=" + joinStrings(tags, ",")
+	}
+
+	respBody, err := c.makeRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var userFunctions []UserFunction
+	if err := json.Unmarshal(respBody, &userFunctions); err != nil {
+		return nil, err
+	}
+
+	return userFunctions, nil
+}
+
+// UpdateUserFunction updates an existing user function by label
+func (c *Client) UpdateUserFunction(label string, userFunction UserFunction) error {
+	_, err := c.makeRequest("PUT", fmt.Sprintf("/api/functions/%s", label), userFunction)
+	return err
+}
+
+// DeleteUserFunction deletes a user function by label
+func (c *Client) DeleteUserFunction(label string) error {
+	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/functions/%s", label), nil)
+	return err
 }
