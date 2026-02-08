@@ -322,12 +322,12 @@ results, err := client.Find("users", query)
 - `DeleteCollection(collection string) error`
 - `CollectionExists(collection string) (bool, error)` - Check if collection
   exists
-- `CountDocuments(collection string) (int64, error)` - Count documents in
+- `CountDocuments(collection string) (int, error)` - Count documents in
   collection
 
 ### Chat Models
 
-- `GetChatModels() (map[string][]string, error)` - Get all available chat models
+- `GetChatModels() (*ChatModels, error)` - Get all available chat models
   by provider
 - `GetChatModel(provider string) ([]string, error)` - Get models for a specific
   provider
