@@ -6,89 +6,163 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.11.1] - 2026-02-14
+
+### Fixed
+
+- **Thread-safe token management** — Added `sync.RWMutex` to protect the `token`
+  field on `Client`, eliminating a data race where concurrent goroutines could
+  read stale tokens indefinitely after a server restart
+- **Double-check token refresh** — `refreshTokenIfStale()` skips redundant HTTP
+  refresh calls when another goroutine has already refreshed the token,
+  preventing thundering herd 401 errors on the server after instance restarts
+- **WebSocket token read** — `WebSocket()` now reads the token via the
+  thread-safe `getToken()` accessor instead of directly accessing the field
+
+## [0.11.0] - 2026-02-08
 
 ### Added
 
-#### Core Features
+- **Chat Models API** — Query available AI models across providers:
+  - `GetChatModels()` — Retrieve all available chat models from all providers
+    (OpenAI, Anthropic, Perplexity)
+  - `GetChatModel(providerName string)` — Retrieve available models for a
+    specific provider
+  - `GetChatMessage(sessionID, messageID string)` — Get a specific chat message
+    by ID
+  - `ChatModels` struct — Contains lists of available models by provider
+- **User Functions API** — Reusable function sequences with lifecycle
+  management:
+  - `SaveUserFunction(userFunction UserFunction)` — Create a new reusable user
+    function
+  - `GetUserFunction(label string)` — Retrieve a user function by label
+  - `ListUserFunctions(tags []string)` — List all user functions, optionally
+    filtered by tags
+  - `UpdateUserFunction(label string, userFunction UserFunction)` — Update an
+    existing user function
+  - `DeleteUserFunction(label string)` — Delete a user function
+  - `UserFunction` struct — Label, Name, Description, Version, Parameters,
+    Functions, Tags, ID, CreatedAt, UpdatedAt
+- **Collection utilities**:
+  - `CollectionExists(collection string)` — Check if a collection exists
+    (returns bool)
+  - `CountDocuments(collection string)` — Count all documents in a collection
 
-- **Convenience methods** for ergonomic API usage:
-  - `Upsert()` - Insert or update with automatic fallback (atomic
-    insert-or-update semantics)
-  - `FindOne()` - Find single record by field value
-  - `Exists()` - Efficient existence check without fetching full record
-  - `Paginate()` - Simplified pagination with page/pageSize parameters
-  - `TextSearch()` - Full-text search helper
+### Changed
 
-#### API Improvements
+- Updated README with `CountDocuments` return type and `GetChatModels` signature
 
-- **Options structs** for cleaner method signatures:
-  - `InsertOptions` - TTL, BypassRipple, TransactionID, BypassCache
-  - `UpdateOptions` - BypassRipple, TransactionID, BypassCache, SelectFields,
-    ExcludeFields
-  - `UpsertOptions` - TTL, BypassRipple, TransactionID, BypassCache
-  - `DeleteOptions` - BypassRipple, TransactionID
-  - `FindOptions` - BypassCache, TransactionID
-  - `BatchInsertOptions`, `BatchUpdateOptions`, `BatchDeleteOptions` - options
-    for batch operations
-- Variadic options pattern for idiomatic Go API
+## [0.10.0] - 2026-01-27
 
-#### Field Projection
+### Changed
 
-- **QueryBuilder projection methods**:
-  - `SelectFields()` - Specify which fields to return (whitelist)
-  - `ExcludeFields()` - Specify which fields to exclude (blacklist)
-- `FindByIDWithProjection()` - Find by ID with field projection support
-
-#### KV Batch Operations
-
-- **Batch KV operations** for efficient multi-key access:
-  - `KVBatchGet()` - Retrieve multiple keys in a single request
-  - `KVBatchSet()` - Set multiple key-value pairs atomically
-  - `KVBatchDelete()` - Delete multiple keys in a single request
-
-#### Function Stages
-
-- **StageSWR** - Stale-While-Revalidate pattern for external API caching
-  - Automatic cache check → HTTP request → cache set workflow
-  - Optional audit trail storage
-  - Supports duration strings, integers, or ISO timestamps for TTL
-
-#### Testing & Quality
-
-- Comprehensive unit tests for all convenience methods (50+ new tests in
-  `convenience_test.go`)
-- Test coverage for options and edge cases
-- Integration with existing test suite
-
-#### Script Conditions
-
-- **ScriptCondition types** for function If/control flow:
-  - `ConditionHasRecords()` - Check if working data has records
-  - `ConditionFieldExists(field)` - Check if field exists in records
-  - `ConditionFieldEquals(field, value)` - Check if field equals value
-  - `ConditionCountEquals(count)` - Check if record count equals value
-  - `ConditionCountGreaterThan(count)` - Check if record count is greater
-  - `ConditionCountLessThan(count)` - Check if record count is less
-  - `ConditionAnd(conditions)` - Logical AND of multiple conditions
-  - `ConditionOr(conditions)` - Logical OR of multiple conditions
-  - `ConditionNot(condition)` - Logical NOT of a condition
-- Comprehensive unit tests for ScriptCondition serialization
-  (`condition_test.go`)
+- **Breaking**: `StageKvGet` signature simplified — removed `outputField`
+  parameter
+  - Old: `StageKvGet(key string, outputField *string)`
+  - New: `StageKvGet(key string)`
+  - Returns `{value: <data>}` on hit, `{value: null}` on miss
 
 ### Fixed
+
+- **KVBatchSet value handling** — Fixed value wrapping: now directly uses the
+  entry value map instead of double-wrapping in `{"value": ...}`. Added
+  validation that value is a `map[string]interface{}` and not nil
+
+## [0.9.0] - 2026-01-27
+
+### Added
+
+- **Field Projection** — Control which fields are returned in query results:
+  - `FindByIDWithProjection(collection, id string, selectFields, excludeFields []string)`
+    — Find by ID with field whitelist/blacklist
+  - `SelectFields()` / `ExcludeFields()` on `QueryBuilder` — Projection methods
+    for query builder
+- **KV Batch Operations** — Efficient multi-key access in single requests:
+  - `KVBatchGet(keys []string)` — Retrieve multiple keys
+  - `KVBatchSet(entries []map[string]interface{})` — Set multiple key-value
+    pairs with optional TTL
+  - `KVBatchDelete(keys []string)` — Delete multiple keys
+- **StageSWR** — Stale-While-Revalidate function stage for external API caching:
+  - Automatic workflow: KV cache check → HTTP request → KV cache set → optional
+    audit storage
+  - Supports parameter substitution (e.g., `"user:{{user_id}}"`)
+  - TTL accepts duration strings (`"15m"`, `"1h"`), integers (seconds), or ISO
+    timestamps
+- **ScriptCondition types** — Recursive condition system for function If/control
+  flow:
+  - `ConditionHasRecords()`, `ConditionFieldExists(field)`,
+    `ConditionFieldEquals(field, value)`
+  - `ConditionCountEquals(count)`, `ConditionCountGreaterThan(count)`,
+    `ConditionCountLessThan(count)`
+  - `ConditionAnd(conditions)`, `ConditionOr(conditions)`,
+    `ConditionNot(condition)`
+  - Custom `MarshalJSON()` for adjacently-tagged serialization matching Rust
+    server's serde format
 
 ### Changed
 
 - **Breaking**: `ScriptCondition` JSON serialization now uses adjacently-tagged
   format
-  - Old format: `{"type": "FieldEquals", "field": "x", "value": "y"}`
-  - New format: `{"type": "FieldEquals", "value": {"field": "x", "value": "y"}}`
-  - This matches the Rust server's serde adjacently-tagged enum format
+  - Old: `{"type": "FieldEquals", "field": "x", "value": "y"}`
+  - New: `{"type": "FieldEquals", "value": {"field": "x", "value": "y"}}`
   - `HasRecords` remains simple: `{"type": "HasRecords"}`
-- Updated examples to use new convenience methods where appropriate
-- Improved error messages and documentation
-- Enhanced type safety with stricter option types
+
+### Testing
+
+- Added `projection_test.go` — QueryBuilder projection and
+  FindByIDWithProjection tests (294 lines)
+- Added `client_kv_batch_test.go` — KV batch operation tests (205 lines)
+- Added `condition_test.go` — ScriptCondition serialization tests (330 lines)
+- Added `swr_test.go` — StageSWR serialization and format tests (243 lines)
+
+## [0.8.0] - 2026-01-06
+
+### Added
+
+- **Options structs** — Variadic options pattern for cleaner, extensible method
+  signatures:
+  - `InsertOptions` — TTL, BypassRipple, TransactionId, BypassCache
+  - `UpdateOptions` — BypassRipple, TransactionId, BypassCache, SelectFields,
+    ExcludeFields
+  - `DeleteOptions` — BypassRipple, TransactionId
+  - `FindOptions` — Filter, Sort, Limit, Skip, Join, BypassCache, BypassRipple,
+    SelectFields, ExcludeFields
+  - `UpsertOptions` — TTL, BypassRipple, TransactionId, BypassCache
+  - `BatchInsertOptions`, `BatchUpdateOptions`, `BatchDeleteOptions`
+- **Convenience methods** for ergonomic API usage:
+  - `Upsert(collection, id string, record Record, opts ...UpsertOptions)` —
+    Atomic insert-or-update (tries update first, falls back to insert on 404)
+  - `FindOne(collection, field string, value interface{})` — Find single record
+    by field value
+  - `Exists(collection, id string)` — Check if record exists by ID (returns
+    bool)
+  - `Paginate(collection string, page, pageSize int)` — Paginated retrieval
+    (1-indexed pages)
+  - `RestoreRecord(collection, id string)` — Restore a deleted record from trash
+  - `RestoreCollection(collection string)` — Restore all deleted records in a
+    collection
+- **Search projection** — Added `SelectFields` and `ExcludeFields` to
+  `SearchQuery` and `SearchQueryBuilder`
+
+### Changed
+
+- **Breaking**: All CRUD method signatures now accept variadic options structs
+  instead of positional parameters:
+  - `Insert(collection, record, opts ...InsertOptions)` (was `...string` for
+    TTL)
+  - `Update(collection, id, record, opts ...UpdateOptions)`
+  - `Delete(collection, id, opts ...DeleteOptions)`
+  - `Find(collection, query, opts ...FindOptions)`
+  - `BatchInsert(collection, records, opts ...BatchInsertOptions)`
+  - `BatchUpdate(collection, updates, opts ...BatchUpdateOptions)`
+  - `BatchDelete(collection, ids, opts ...BatchDeleteOptions)`
+
+### Testing
+
+- Added `convenience_test.go` — Tests for Upsert, FindOne, Exists, Paginate (184
+  lines)
+- Comprehensive client tests for all new option structs and convenience methods
+  (800+ lines added to `client_test.go`)
 
 ## [0.7.1] - 2026-01-03
 
