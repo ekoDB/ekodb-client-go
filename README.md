@@ -327,8 +327,8 @@ results, err := client.Find("users", query)
 
 ### Chat Models
 
-- `GetChatModels() (*ChatModels, error)` - Get all available chat models
-  by provider
+- `GetChatModels() (*ChatModels, error)` - Get all available chat models by
+  provider
 - `GetChatModel(provider string) ([]string, error)` - Get models for a specific
   provider
 

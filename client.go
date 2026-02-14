@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/vmihailenco/msgpack/v5"
@@ -91,6 +92,7 @@ type Client struct {
 	baseURL       string
 	apiKey        string
 	token         string
+	tokenMu       sync.RWMutex
 	httpClient    *http.Client
 	shouldRetry   bool
 	maxRetries    int
@@ -165,8 +167,30 @@ func (c *Client) IsNearRateLimit() bool {
 	return c.rateLimitInfo.IsNearLimit()
 }
 
-// refreshToken gets a new authentication token
+// getToken returns the current token (thread-safe)
+func (c *Client) getToken() string {
+	c.tokenMu.RLock()
+	defer c.tokenMu.RUnlock()
+	return c.token
+}
+
+// refreshToken gets a new authentication token (thread-safe, no stale token check - used at init)
 func (c *Client) refreshToken() error {
+	return c.refreshTokenIfStale("")
+}
+
+// refreshTokenIfStale refreshes the token only if it hasn't already been refreshed by another goroutine.
+// Pass the stale token that caused the 401; if another goroutine already refreshed, this is a no-op.
+// Pass "" to force a refresh (used at init).
+func (c *Client) refreshTokenIfStale(staleToken string) error {
+	c.tokenMu.Lock()
+	defer c.tokenMu.Unlock()
+
+	// Double-check: if another goroutine already refreshed the token, skip the HTTP call
+	if staleToken != "" && c.token != staleToken {
+		return nil
+	}
+
 	authReq := map[string]string{"api_key": c.apiKey}
 	body, err := json.Marshal(authReq)
 	if err != nil {
@@ -266,7 +290,9 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 		return nil, err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	// Capture the token used for this request so we can pass it to refreshTokenIfStale
+	usedToken := c.getToken()
+	req.Header.Set("Authorization", "Bearer "+usedToken)
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", contentType)
 
@@ -322,7 +348,7 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 		(resp.StatusCode == http.StatusInternalServerError && bytes.Contains(responseBody, []byte("Invalid token"))) {
 		if attempt == 0 { // Only try token refresh once
 			log.Printf("Authentication failed, refreshing token...")
-			if err := c.refreshToken(); err != nil {
+			if err := c.refreshTokenIfStale(usedToken); err != nil {
 				return nil, fmt.Errorf("failed to refresh token: %w", err)
 			}
 			// Retry with new token

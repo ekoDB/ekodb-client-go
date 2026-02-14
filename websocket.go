@@ -18,7 +18,7 @@ type WebSocketClient struct {
 func (c *Client) WebSocket(wsURL string) (*WebSocketClient, error) {
 	ws := &WebSocketClient{
 		wsURL: wsURL,
-		token: c.token,
+		token: c.getToken(),
 	}
 
 	if err := ws.connect(); err != nil {
