@@ -6,6 +6,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`POST /api/embed` direct endpoint support** — `Embed()` now calls the
+  server's `/api/embed` endpoint directly instead of creating temporary
+  collections and scripts. Much faster and cleaner.
+
+- **`EmbedBatch()` method** — Generate embeddings for multiple texts in a single
+  request.
+
+- **`EmbedRequest` and `EmbedResponse` types** — New types for the embed API.
+
+- **`ToolConfig` and `ToolChoice` types** — New types for configuring tool
+  calling in chat sessions. `ToolConfig` controls enabled tools, allowed
+  collections, max iterations, write permissions, and tool choice strategy.
+
+- **`MaxTokens`, `Temperature`, `ToolConfig` on `CreateChatSessionRequest`** —
+  Control LLM generation parameters and tool calling per session.
+
+- **`MaxIterations`, `ToolConfig` on `ChatMessageRequest`** — Override tool
+  config and max iterations on a per-message basis.
+
+- **`MaxContextMessages`, `BypassRipple`, `Memory` on `UpdateSessionRequest`** —
+  Allow updating context window size, ripple sync, and memory on existing
+  sessions.
+
+- **`MergeStrategyInterleaved`** — Added `Interleaved` merge strategy for
+  round-robin message merging from source sessions.
+
+- **`BypassRipple` on `MergeSessionsRequest`** — Control ripple replication
+  during session merge operations.
+
+- **`BoolPtr`, `Float32Ptr`, `Int32Ptr` helpers** — Convenience functions for
+  creating pointers to bool, float32, and int32 values.
+
+### Fixed
+
+- **`EmbedBatch()` missing input validation** — Added early return with error
+  when `texts` slice is empty, preventing unnecessary HTTP requests. Added
+  response length validation to catch server-side mismatches.
+
+### Testing
+
+- **`Embed()` / `EmbedBatch()` unit tests** — Added tests for successful embed,
+  batch embed, empty input validation, and response count mismatch.
+
 ## [0.11.1] - 2026-02-14
 
 ### Fixed
