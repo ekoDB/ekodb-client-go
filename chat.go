@@ -19,7 +19,38 @@ func StringPtr(v string) *string {
 	return &v
 }
 
+// BoolPtr returns a pointer to a bool value
+func BoolPtr(v bool) *bool {
+	return &v
+}
+
+// Float32Ptr returns a pointer to a float32 value
+func Float32Ptr(v float32) *float32 {
+	return &v
+}
+
+// Int32Ptr returns a pointer to an int32 value
+func Int32Ptr(v int32) *int32 {
+	return &v
+}
+
 // ========== Chat Types ==========
+
+// ToolChoice controls how the LLM decides whether to use tools
+type ToolChoice struct {
+	Type string `json:"type"`           // "auto", "none", "required", "tool"
+	Name string `json:"name,omitempty"` // Only used when Type is "tool"
+}
+
+// ToolConfig configures which tools are available in a chat session
+type ToolConfig struct {
+	Enabled              bool        `json:"enabled"`
+	AllowedTools         []string    `json:"allowed_tools,omitempty"`
+	AllowedCollections   []string    `json:"allowed_collections,omitempty"`
+	MaxIterations        *int        `json:"max_iterations,omitempty"`
+	AllowWriteOperations *bool       `json:"allow_write_operations,omitempty"`
+	ToolChoice           *ToolChoice `json:"tool_choice,omitempty"`
+}
 
 // CollectionConfig represents configuration for searching a specific collection
 type CollectionConfig struct {
@@ -47,13 +78,18 @@ type CreateChatSessionRequest struct {
 	ParentID           *string            `json:"parent_id,omitempty"`
 	BranchPointIdx     *int               `json:"branch_point_idx,omitempty"`
 	MaxContextMessages *int               `json:"max_context_messages,omitempty"`
+	MaxTokens          *int32             `json:"max_tokens,omitempty"`
+	Temperature        *float32           `json:"temperature,omitempty"`
+	ToolConfig         *ToolConfig        `json:"tool_config,omitempty"`
 }
 
 // ChatMessageRequest represents a request to send a message in an existing session
 type ChatMessageRequest struct {
-	Message        string `json:"message"`
-	BypassRipple   *bool  `json:"bypass_ripple,omitempty"`
-	ForceSummarize *bool  `json:"force_summarize,omitempty"`
+	Message        string      `json:"message"`
+	BypassRipple   *bool       `json:"bypass_ripple,omitempty"`
+	ForceSummarize *bool       `json:"force_summarize,omitempty"`
+	MaxIterations  *int        `json:"max_iterations,omitempty"`
+	ToolConfig     *ToolConfig `json:"tool_config,omitempty"`
 }
 
 // TokenUsage represents token usage statistics
@@ -124,10 +160,13 @@ type GetMessagesResponse struct {
 
 // UpdateSessionRequest represents a request to update session metadata
 type UpdateSessionRequest struct {
-	SystemPrompt *string            `json:"system_prompt,omitempty"`
-	LLMModel     *string            `json:"llm_model,omitempty"`
-	Collections  []CollectionConfig `json:"collections,omitempty"`
-	Title        *string            `json:"title,omitempty"`
+	SystemPrompt       *string            `json:"system_prompt,omitempty"`
+	LLMModel           *string            `json:"llm_model,omitempty"`
+	Collections        []CollectionConfig `json:"collections,omitempty"`
+	MaxContextMessages *int               `json:"max_context_messages,omitempty"`
+	BypassRipple       *bool              `json:"bypass_ripple,omitempty"`
+	Title              *string            `json:"title,omitempty"`
+	Memory             interface{}        `json:"memory,omitempty"`
 }
 
 // MergeStrategy represents how to merge chat sessions
@@ -137,6 +176,7 @@ const (
 	MergeStrategyChronological MergeStrategy = "Chronological"
 	MergeStrategySummarized    MergeStrategy = "Summarized"
 	MergeStrategyLatestOnly    MergeStrategy = "LatestOnly"
+	MergeStrategyInterleaved   MergeStrategy = "Interleaved"
 )
 
 // MergeSessionsRequest represents a request to merge multiple chat sessions
@@ -144,6 +184,7 @@ type MergeSessionsRequest struct {
 	SourceChatIDs []string      `json:"source_chat_ids"`
 	TargetChatID  string        `json:"target_chat_id"`
 	MergeStrategy MergeStrategy `json:"merge_strategy"`
+	BypassRipple  *bool         `json:"bypass_ripple,omitempty"`
 }
 
 // ChatModels contains available models for each provider
@@ -151,6 +192,20 @@ type ChatModels struct {
 	OpenAI     []string `json:"openai"`
 	Anthropic  []string `json:"anthropic"`
 	Perplexity []string `json:"perplexity"`
+}
+
+// EmbedRequest is the request body for POST /api/embed
+type EmbedRequest struct {
+	Text  *string  `json:"text,omitempty"`
+	Texts []string `json:"texts,omitempty"`
+	Model *string  `json:"model,omitempty"`
+}
+
+// EmbedResponse is the response from POST /api/embed
+type EmbedResponse struct {
+	Embeddings [][]float64 `json:"embeddings"`
+	Model      string      `json:"model"`
+	Dimensions int         `json:"dimensions"`
 }
 
 // ========== Chat Methods ==========

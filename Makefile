@@ -11,26 +11,33 @@ YELLOW := \033[33m
 RED := \033[31m
 RESET := \033[0m
 
-.PHONY: all build test test-verbose test-coverage clean fmt fmt-go fmt-md fmt-check format lint vet mod-tidy mod-verify mod-download install help setup deps-check deps-update publish bump-version check-ready examples pre-commit version info
+# Color codes for Worthington jet
+MAGENTA := \033[35m
+PURPLE := \033[35m
+BLUE := \033[34m
+BOLD := \033[1m
+DIM := \033[2m
 
-# ASCII Banner for ekoDB
-BANNER := \
-	\ "███████╗ ██╗  ██═╗██████╗ ██████═╗╔██████╗  " "\n" \
-		"██╔════╝ ██╚██║  ██╔═══██╗██   ██║║██  ██║   " "\n" \
-		"███████╗ ████═╝  ██║   ██║██    ██║███████ " "\n" \
-		"██     ║ ██╔██╗  ██║   ██║██    ██║██   ██ " "\n" \
-		"███████║ ██║  ██ ║██████╔╝███████║║███████ " "\n" \
-		"╚══════╝ ╚═╝  ╚══╝ ╚════╝ ╚══════╝ ╚═════╝  " "\n"
+# Worthington jet
+JET := "                    $(MAGENTA)●$(RESET)\n                    $(PURPLE)█$(RESET)\n                $(BLUE)▄▀▄$(PURPLE)█▀█$(BLUE)▄▀▄$(RESET)"
+
+# ASCII Banner for ekoDB (matches CLI banner)
+BANNER := "$(BOLD) ██████═╗ ██╗  ██╗  ██████╗  ████████╗ ████████╗$(RESET)\n$(BOLD)██╔═══██╝ ██║ ██╔╝ ██╔═══██╗  ██╔═══██║ ██╔═══██╗$(RESET)\n$(BOLD)████████╗ █████╔╝  ██║   ██║  ██║   ██║████████╔╝$(RESET)\n$(BOLD)██╔═════╝ ██╔═██╗  ██║   ██║  ██║   ██║ ██╔═══██╗$(RESET)\n$(BOLD)████████╗ ██║  ██╗ ╚██████╔╝ ████████║ ████████╔╝$(RESET)\n$(BOLD)╚═══════╝ ╚═╝  ╚═╝  ╚═════╝  ╚═══════╝ ╚═══════╝$(RESET)"
+
+.PHONY: all build test test-verbose test-coverage clean fmt fmt-go fmt-md fmt-check format lint vet mod-tidy mod-verify mod-download install help setup deps-check deps-update publish bump-version check-ready examples pre-commit version info
 
 # Language Sub-Banner
 GO_BANNER := \
-	"                      🔷 Go Client Library" "\n"
+	"🔷 Go Client Library" "\n"
 
 # Default target
 all: build
 
 help:
+	@echo $(JET)
+	@echo ""
 	@echo $(BANNER)
+	@echo ""
 	@echo $(GO_BANNER)
 	@echo "✨ $(CYAN)ekoDB Go Client Library ✨$(RESET)"
 	@echo ""
