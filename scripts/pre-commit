@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# Pre-commit hook for ekoDB Go Client Library
+# Runs full checks via make targets
+
+set -e
+
+CYAN='\033[36m'
+GREEN='\033[32m'
+RED='\033[31m'
+RESET='\033[0m'
+
+echo -e "${CYAN}🔍 Running pre-commit checks...${RESET}"
+
+make fmt || { echo -e "${RED}❌ fmt failed${RESET}"; exit 1; }
+make vet || { echo -e "${RED}❌ vet failed${RESET}"; exit 1; }
+make lint 2>/dev/null || true
+make build || { echo -e "${RED}❌ build failed${RESET}"; exit 1; }
+make test || { echo -e "${RED}❌ tests failed${RESET}"; exit 1; }
+
+echo -e "${GREEN}✅ All pre-commit checks passed!${RESET}"
+exit 0

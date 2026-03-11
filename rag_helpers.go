@@ -1,19 +1,13 @@
 package ekodb
 
 import (
+	"encoding/json"
 	"fmt"
-	"time"
 )
 
 // ========== RAG Helper Methods ==========
 
-// Embed generates embeddings for text using ekoDB's native Functions
-//
-// This helper simplifies embedding generation by:
-// 1. Creating a temporary collection with the text
-// 2. Running a Script with FindAll + Embed Functions
-// 3. Extracting and returning the embedding vector
-// 4. Cleaning up temporary resources
+// Embed generates embeddings for a single text via the /api/embed endpoint
 //
 // Example:
 //
@@ -23,72 +17,64 @@ import (
 //	}
 //	fmt.Printf("Generated %d dimensions\n", len(embedding))
 func (c *Client) Embed(text, model string) ([]float64, error) {
-	tempCollection := fmt.Sprintf("embed_temp_%d", time.Now().UnixNano())
-
-	// Insert temporary record with the text
-	record := Record{"text": text}
-	if _, err := c.Insert(tempCollection, record); err != nil {
-		return nil, fmt.Errorf("failed to insert temp record: %w", err)
+	request := EmbedRequest{
+		Text:  &text,
+		Model: &model,
 	}
 
-	// Create Script with FindAll + Embed Functions
-	tempLabel := fmt.Sprintf("embed_script_%d", time.Now().UnixNano())
-	version := "1.0"
-	script := &Script{
-		Label:      tempLabel,
-		Name:       "Generate Embedding",
-		Version:    &version,
-		Parameters: map[string]ParameterDefinition{},
-		Functions: []FunctionStageConfig{
-			StageFindAll(tempCollection),
-			{
-				Stage: "Embed",
-				Data: map[string]interface{}{
-					"input_field":  "text",
-					"output_field": "embedding",
-					"model":        model,
-				},
-			},
-		},
-		Tags: []string{},
-	}
-
-	// Save and execute the script
-	scriptID, err := c.SaveScript(*script)
+	respBody, err := c.makeRequest("POST", "/api/embed", request)
 	if err != nil {
-		c.DeleteCollection(tempCollection) // Cleanup on error
-		return nil, fmt.Errorf("failed to save script: %w", err)
+		return nil, fmt.Errorf("embed request failed: %w", err)
 	}
 
-	result, err := c.CallScript(scriptID, nil)
+	var response EmbedResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse embed response: %w", err)
+	}
+
+	if len(response.Embeddings) == 0 {
+		return nil, fmt.Errorf("no embedding returned")
+	}
+
+	return response.Embeddings[0], nil
+}
+
+// EmbedBatch generates embeddings for multiple texts in a single request
+//
+// Example:
+//
+//	embeddings, err := client.EmbedBatch([]string{"Hello", "World"}, "text-embedding-3-small")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+func (c *Client) EmbedBatch(texts []string, model string) ([][]float64, error) {
+	if len(texts) == 0 {
+		return nil, fmt.Errorf("texts must not be empty")
+	}
+
+	request := EmbedRequest{
+		Texts: texts,
+		Model: &model,
+	}
+
+	respBody, err := c.makeRequest("POST", "/api/embed", request)
 	if err != nil {
-		c.DeleteScript(scriptID)           // Cleanup script
-		c.DeleteCollection(tempCollection) // Cleanup collection
-		return nil, fmt.Errorf("failed to call script: %w", err)
+		return nil, fmt.Errorf("embed batch request failed: %w", err)
 	}
 
-	// Clean up
-	c.DeleteScript(scriptID)
-	c.DeleteCollection(tempCollection)
-
-	// Extract embedding from result
-	if len(result.Records) > 0 {
-		record := result.Records[0]
-		if embedding, ok := record["embedding"].([]interface{}); ok {
-			// Convert []interface{} to []float64
-			vec := make([]float64, len(embedding))
-			for i, v := range embedding {
-				if f, ok := v.(float64); ok {
-					vec[i] = f
-				} else {
-					return nil, fmt.Errorf("embedding value at index %d is not a float64", i)
-				}
-			}
-			return vec, nil
-		}
+	var response EmbedResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse embed response: %w", err)
 	}
 
-	return nil, fmt.Errorf("failed to extract embedding from result")
+	if len(response.Embeddings) == 0 {
+		return nil, fmt.Errorf("embed batch response contained no embeddings")
+	}
+	if len(response.Embeddings) != len(texts) {
+		return nil, fmt.Errorf("embed batch response length %d does not match input length %d", len(response.Embeddings), len(texts))
+	}
+
+	return response.Embeddings, nil
 }
 
 // TextSearch performs text search without embeddings
