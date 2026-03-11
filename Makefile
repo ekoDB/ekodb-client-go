@@ -24,7 +24,7 @@ JET := "                    $(MAGENTA)●$(RESET)\n                    $(PURPLE)
 # ASCII Banner for ekoDB (matches CLI banner)
 BANNER := "$(BOLD) ██████═╗ ██╗  ██╗  ██████╗  ████████╗ ████████╗$(RESET)\n$(BOLD)██╔═══██╝ ██║ ██╔╝ ██╔═══██╗  ██╔═══██║ ██╔═══██╗$(RESET)\n$(BOLD)████████╗ █████╔╝  ██║   ██║  ██║   ██║████████╔╝$(RESET)\n$(BOLD)██╔═════╝ ██╔═██╗  ██║   ██║  ██║   ██║ ██╔═══██╗$(RESET)\n$(BOLD)████████╗ ██║  ██╗ ╚██████╔╝ ████████║ ████████╔╝$(RESET)\n$(BOLD)╚═══════╝ ╚═╝  ╚═╝  ╚═════╝  ╚═══════╝ ╚═══════╝$(RESET)"
 
-.PHONY: all build test test-verbose test-coverage clean fmt fmt-go fmt-md fmt-check format lint vet mod-tidy mod-verify mod-download install help setup deps-check deps-update publish bump-version check-ready examples pre-commit version info
+.PHONY: all build test test-verbose test-coverage clean fmt fmt-go fmt-md fmt-check format lint vet mod-tidy mod-verify mod-download install help setup deps-check deps-update publish bump-version check-ready examples pre-commit ensure-hooks version info
 
 # Language Sub-Banner
 GO_BANNER := \
@@ -93,14 +93,23 @@ help:
 	@echo "  3. $(GREEN)make fmt$(RESET)       - Format code before committing"
 	@echo "  4. $(GREEN)make publish$(RESET)   - Publish new version"
 
+# Auto-install pre-commit hook if missing
+ensure-hooks:
+	@if [ ! -f .git/hooks/pre-commit ]; then \
+		echo "🔗 $(CYAN)Installing pre-commit hook...$(RESET)"; \
+		ln -s ../../scripts/pre-commit .git/hooks/pre-commit; \
+		chmod +x .git/hooks/pre-commit; \
+		echo "✅ $(GREEN)Pre-commit hook installed$(RESET)"; \
+	fi
+
 # Build the library
-build:
+build: ensure-hooks
 	@echo "🛠️  $(CYAN)Building Go client library...$(RESET)"
 	@$(GO) build -v ./...
 	@echo "✅ $(GREEN)Build complete!$(RESET)"
 
 # Run tests
-test:
+test: ensure-hooks
 	@echo "🧪 $(CYAN)Running tests...$(RESET)"
 	@TEST_OUTPUT=$$($(GO) test ./... -race -v 2>&1); \
 	echo "$$TEST_OUTPUT"; \
