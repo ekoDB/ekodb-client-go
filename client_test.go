@@ -1322,8 +1322,114 @@ func TestKVFindSuccess(t *testing.T) {
 // Embed Tests
 // ============================================================================
 
-// Note: Embed tests require complex mock setup (temp record insertion + search)
-// Skipping unit test - covered by integration tests
+func TestEmbed(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/embed": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"embeddings": [][]float64{{0.1, 0.2, 0.3}},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	embedding, err := client.Embed("Hello world", "test-model")
+	if err != nil {
+		t.Fatalf("Embed failed: %v", err)
+	}
+	expected := []float64{0.1, 0.2, 0.3}
+	if len(embedding) != len(expected) {
+		t.Fatalf("Embed returned %d dimensions, want %d", len(embedding), len(expected))
+	}
+	for i, v := range expected {
+		if embedding[i] != v {
+			t.Errorf("embedding[%d] = %f, want %f", i, embedding[i], v)
+		}
+	}
+}
+
+func TestEmbedBatch(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/embed": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"embeddings": [][]float64{{0.1, 0.2}, {0.3, 0.4}},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	embeddings, err := client.EmbedBatch([]string{"Hello", "World"}, "test-model")
+	if err != nil {
+		t.Fatalf("EmbedBatch failed: %v", err)
+	}
+	if len(embeddings) != 2 {
+		t.Fatalf("EmbedBatch returned %d embeddings, want 2", len(embeddings))
+	}
+	if embeddings[0][0] != 0.1 || embeddings[0][1] != 0.2 {
+		t.Errorf("embeddings[0] = %v, want [0.1, 0.2]", embeddings[0])
+	}
+	if embeddings[1][0] != 0.3 || embeddings[1][1] != 0.4 {
+		t.Errorf("embeddings[1] = %v, want [0.3, 0.4]", embeddings[1])
+	}
+}
+
+func TestEmbedBatchEmpty(t *testing.T) {
+	// No server needed - should fail before making request
+	handlers := map[string]http.HandlerFunc{}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.EmbedBatch([]string{}, "test-model")
+	if err == nil {
+		t.Fatal("Expected error for empty texts, got nil")
+	}
+	if !contains(err.Error(), "texts must not be empty") {
+		t.Errorf("Expected error containing 'texts must not be empty', got: %v", err)
+	}
+}
+
+func TestEmbedBatchMismatch(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/embed": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			// Return 1 embedding for 2 input texts
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"embeddings": [][]float64{{0.1, 0.2}},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.EmbedBatch([]string{"Hello", "World"}, "test-model")
+	if err == nil {
+		t.Fatal("Expected error for mismatched embedding count, got nil")
+	}
+	if !contains(err.Error(), "does not match") {
+		t.Errorf("Expected error containing 'does not match', got: %v", err)
+	}
+}
+
+// contains checks if s contains substr (helper for error message assertions)
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && searchString(s, substr)
+}
+
+func searchString(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
 
 // ============================================================================
 // Functions/Scripts Tests

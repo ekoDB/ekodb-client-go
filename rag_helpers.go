@@ -48,6 +48,10 @@ func (c *Client) Embed(text, model string) ([]float64, error) {
 //	    log.Fatal(err)
 //	}
 func (c *Client) EmbedBatch(texts []string, model string) ([][]float64, error) {
+	if len(texts) == 0 {
+		return nil, fmt.Errorf("texts must not be empty")
+	}
+
 	request := EmbedRequest{
 		Texts: texts,
 		Model: &model,
