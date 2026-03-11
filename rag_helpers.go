@@ -63,6 +63,13 @@ func (c *Client) EmbedBatch(texts []string, model string) ([][]float64, error) {
 		return nil, fmt.Errorf("failed to parse embed response: %w", err)
 	}
 
+	if len(response.Embeddings) == 0 {
+		return nil, fmt.Errorf("embed batch response contained no embeddings")
+	}
+	if len(response.Embeddings) != len(texts) {
+		return nil, fmt.Errorf("embed batch response length %d does not match input length %d", len(response.Embeddings), len(texts))
+	}
+
 	return response.Embeddings, nil
 }
 
