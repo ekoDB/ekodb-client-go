@@ -217,3 +217,65 @@ func (c *Client) Search(collection string, searchQuery SearchQuery) (*SearchResp
 
 	return &response, nil
 }
+
+// ============================================================================
+// Distinct Values
+// ============================================================================
+
+// DistinctValuesQuery is the request body for DistinctValues.
+type DistinctValuesQuery struct {
+	// Filter restricts which records are examined (optional).
+	Filter interface{} `json:"filter,omitempty"`
+	// BypassRipple skips ripple propagation when true.
+	BypassRipple *bool `json:"bypass_ripple,omitempty"`
+	// BypassCache skips the cache when true.
+	BypassCache *bool `json:"bypass_cache,omitempty"`
+}
+
+// DistinctValuesResponse is returned by DistinctValues.
+type DistinctValuesResponse struct {
+	// Collection that was queried.
+	Collection string `json:"collection"`
+	// Field whose distinct values were returned.
+	Field string `json:"field"`
+	// Values contains the unique field values, sorted alphabetically.
+	Values []interface{} `json:"values"`
+	// Count is the number of distinct values.
+	Count int `json:"count"`
+}
+
+// DistinctValues returns all unique values for a field across a collection.
+//
+// Results are deduplicated and sorted alphabetically by the server. An
+// optional filter restricts which records are considered.
+//
+// Example — all distinct statuses:
+//
+//	resp, err := client.DistinctValues("orders", "status", DistinctValuesQuery{})
+//
+// Example — statuses for US orders only:
+//
+//	t := true
+//	resp, err := client.DistinctValues("orders", "status", DistinctValuesQuery{
+//	    Filter: map[string]interface{}{
+//	        "type": "Condition",
+//	        "content": map[string]interface{}{
+//	            "field": "region", "operator": "Eq", "value": "us",
+//	        },
+//	    },
+//	})
+func (c *Client) DistinctValues(collection, field string, query DistinctValuesQuery) (*DistinctValuesResponse, error) {
+	endpoint := fmt.Sprintf("/api/distinct/%s/%s", collection, field)
+
+	data, err := c.makeRequest("POST", endpoint, query)
+	if err != nil {
+		return nil, err
+	}
+
+	var response DistinctValuesResponse
+	if err := json.Unmarshal(data, &response); err != nil {
+		return nil, err
+	}
+
+	return &response, nil
+}

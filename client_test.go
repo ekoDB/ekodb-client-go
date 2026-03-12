@@ -1954,3 +1954,116 @@ func TestToggleForgottenMessageSuccess(t *testing.T) {
 		t.Errorf("ToggleForgottenMessage failed: %v", err)
 	}
 }
+
+// ============================================================================
+// Distinct Values Tests
+// ============================================================================
+
+func TestDistinctValuesSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/distinct/products/category": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(DistinctValuesResponse{
+				Collection: "products",
+				Field:      "category",
+				Values:     []interface{}{"books", "electronics", "food"},
+				Count:      3,
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	resp, err := client.DistinctValues("products", "category", DistinctValuesQuery{})
+	if err != nil {
+		t.Fatalf("DistinctValues failed: %v", err)
+	}
+	if resp.Count != 3 {
+		t.Errorf("DistinctValues count = %d, want 3", resp.Count)
+	}
+	if len(resp.Values) != 3 {
+		t.Errorf("DistinctValues values len = %d, want 3", len(resp.Values))
+	}
+	if resp.Collection != "products" {
+		t.Errorf("DistinctValues collection = %q, want %q", resp.Collection, "products")
+	}
+	if resp.Field != "category" {
+		t.Errorf("DistinctValues field = %q, want %q", resp.Field, "category")
+	}
+}
+
+func TestDistinctValuesEmpty(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/distinct/empty/tag": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(DistinctValuesResponse{
+				Collection: "empty",
+				Field:      "tag",
+				Values:     []interface{}{},
+				Count:      0,
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	resp, err := client.DistinctValues("empty", "tag", DistinctValuesQuery{})
+	if err != nil {
+		t.Fatalf("DistinctValues failed: %v", err)
+	}
+	if resp.Count != 0 {
+		t.Errorf("DistinctValues count = %d, want 0", resp.Count)
+	}
+}
+
+func TestDistinctValuesWithFilter(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/distinct/orders/status": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(DistinctValuesResponse{
+				Collection: "orders",
+				Field:      "status",
+				Values:     []interface{}{"active", "pending"},
+				Count:      2,
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	query := DistinctValuesQuery{
+		Filter: map[string]interface{}{
+			"type": "Condition",
+			"content": map[string]interface{}{
+				"field": "region", "operator": "Eq", "value": "us",
+			},
+		},
+	}
+	resp, err := client.DistinctValues("orders", "status", query)
+	if err != nil {
+		t.Fatalf("DistinctValues failed: %v", err)
+	}
+	if resp.Count != 2 {
+		t.Errorf("DistinctValues count = %d, want 2", resp.Count)
+	}
+}
+
+func TestDistinctValuesServerError(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/distinct/bad/field": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error":"internal error"}`))
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.DistinctValues("bad", "field", DistinctValuesQuery{})
+	if err == nil {
+		t.Error("Expected error from server error, got nil")
+	}
+}

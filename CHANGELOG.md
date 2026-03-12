@@ -10,6 +10,22 @@ and this project adheres to
 
 ### Added
 
+- **`DistinctValues()` method** — New method for retrieving all unique values
+  for a specific field across records in a collection. Accepts a
+  `DistinctValuesQuery` with optional filter, `BypassRipple`, and `BypassCache`
+  flags. Returns a `*DistinctValuesResponse` with `Collection`, `Field`,
+  `Values` (sorted), and `Count`.
+
+- **`DistinctValuesQuery` and `DistinctValuesResponse` types** — New types for
+  the distinct values API in `search.go`.
+
+- **Integration example: `client_distinct_values`** — Demonstrates distinct
+  values queries with and without filters.
+
+## [0.12.0] - 2026-03-11
+
+### Added
+
 - **`POST /api/embed` direct endpoint support** — `Embed()` now calls the
   server's `/api/embed` endpoint directly instead of creating temporary
   collections and scripts. Much faster and cleaner.
