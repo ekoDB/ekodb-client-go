@@ -249,6 +249,23 @@ func (c *Client) RawCompletion(request RawCompletionRequest) (*RawCompletionResp
 	return &result, nil
 }
 
+// GetChatTools retrieves all built-in server-side chat tool definitions.
+// Returns a slice of tool objects with name, description, and parameters fields.
+// Used by planning agents to discover available tools dynamically.
+func (c *Client) GetChatTools() ([]map[string]interface{}, error) {
+	respBody, err := c.makeRequest("GET", "/api/chat/tools", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 // GetChatModels retrieves all available chat models from all providers
 func (c *Client) GetChatModels() (*ChatModels, error) {
 	respBody, err := c.makeRequest("GET", "/api/chat_models", nil)

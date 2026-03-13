@@ -10,6 +10,26 @@ and this project adheres to
 
 ### Added
 
+- **Full WebSocket dispatcher** — Rewrote `WebSocketClient` with a
+  goroutine-based read loop that routes incoming messages by type. New methods:
+  `Subscribe()` (returns `<-chan MutationNotification` for real-time collection
+  change notifications with optional filter), `ChatSend()` (returns
+  `<-chan ChatStreamEvent` with chunk/end/toolCall/error events for streaming
+  chat responses), `RegisterClientTools()` (registers client-side tool
+  definitions), and `SendToolResult()` (returns tool execution results to the
+  server). New types: `MutationNotification`, `ChatStreamEvent`,
+  `ClientToolDefinition`, `ChatSendOptions`, `SubscribeOptions`. Channel-based
+  concurrency with `sync.Mutex` protection. 11 new unit tests with httptest
+  WebSocket server.
+
+- **Chat streaming integration example** — New `client_websocket_chat_stream.go`
+  demonstrating streaming chat responses with tool calling via WebSocket.
+
+- **`GetChatTools()` method** — Returns all built-in server-side ekoDB chat tool
+  definitions via `GET /api/chat/tools`. Returns `[]map[string]interface{}` with
+  `name`, `description`, and `parameters` per tool. Used by planning agents to
+  dynamically discover available tools.
+
 - **`RawCompletion()` method** — Stateless raw LLM completion via
   `POST /api/chat/complete`. Accepts a `RawCompletionRequest` with
   `SystemPrompt`, `Message`, and optional `Provider`, `Model`, `MaxTokens`
