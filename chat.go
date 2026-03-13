@@ -208,7 +208,46 @@ type EmbedResponse struct {
 	Dimensions int         `json:"dimensions"`
 }
 
+// RawCompletionRequest is the request body for POST /api/chat/complete.
+// Stateless raw LLM completion — no session, no history, no RAG.
+type RawCompletionRequest struct {
+	SystemPrompt string  `json:"system_prompt"`
+	Message      string  `json:"message"`
+	Provider     *string `json:"provider,omitempty"`
+	Model        *string `json:"model,omitempty"`
+	MaxTokens    *int    `json:"max_tokens,omitempty"`
+}
+
+// RawCompletionResponse is returned by RawCompletion.
+type RawCompletionResponse struct {
+	Content string `json:"content"`
+}
+
 // ========== Chat Methods ==========
+
+// RawCompletion sends a stateless raw LLM completion request — no session,
+// no history, no RAG context injection. Use this for structured-output tasks
+// such as planning where the response must be parsed programmatically.
+//
+// Example:
+//
+//	resp, err := client.RawCompletion(RawCompletionRequest{
+//	    SystemPrompt: "You are a helpful assistant.",
+//	    Message:      "Summarize this in JSON.",
+//	})
+func (c *Client) RawCompletion(request RawCompletionRequest) (*RawCompletionResponse, error) {
+	respBody, err := c.makeRequest("POST", "/api/chat/complete", request)
+	if err != nil {
+		return nil, err
+	}
+
+	var result RawCompletionResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
 
 // GetChatModels retrieves all available chat models from all providers
 func (c *Client) GetChatModels() (*ChatModels, error) {

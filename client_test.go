@@ -2067,3 +2067,91 @@ func TestDistinctValuesServerError(t *testing.T) {
 		t.Error("Expected error from server error, got nil")
 	}
 }
+
+// ============================================================================
+// RawCompletion Tests
+// ============================================================================
+
+func TestRawCompletionSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/chat/complete": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(RawCompletionResponse{
+				Content: "The answer is 42.",
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	resp, err := client.RawCompletion(RawCompletionRequest{
+		SystemPrompt: "You are a helpful assistant.",
+		Message:      "What is the answer?",
+	})
+	if err != nil {
+		t.Fatalf("RawCompletion failed: %v", err)
+	}
+	if resp.Content != "The answer is 42." {
+		t.Errorf("RawCompletion content = %q, want %q", resp.Content, "The answer is 42.")
+	}
+}
+
+func TestRawCompletionWithOptionalFields(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/chat/complete": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+			if body["provider"] != "openai" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if body["model"] != "gpt-4o" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(RawCompletionResponse{Content: "Response."})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	provider := "openai"
+	model := "gpt-4o"
+	maxTokens := 512
+	client := createTestClient(t, server)
+	resp, err := client.RawCompletion(RawCompletionRequest{
+		SystemPrompt: "System.",
+		Message:      "User.",
+		Provider:     &provider,
+		Model:        &model,
+		MaxTokens:    &maxTokens,
+	})
+	if err != nil {
+		t.Fatalf("RawCompletion failed: %v", err)
+	}
+	if resp.Content != "Response." {
+		t.Errorf("RawCompletion content = %q, want %q", resp.Content, "Response.")
+	}
+}
+
+func TestRawCompletionServerError(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/chat/complete": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error":"llm unavailable"}`))
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.RawCompletion(RawCompletionRequest{
+		SystemPrompt: "S.",
+		Message:      "M.",
+	})
+	if err == nil {
+		t.Error("Expected error from server error, got nil")
+	}
+}

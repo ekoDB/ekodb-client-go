@@ -10,6 +10,16 @@ and this project adheres to
 
 ### Added
 
+- **`RawCompletion()` method** — Stateless raw LLM completion via
+  `POST /api/chat/complete`. Accepts a `RawCompletionRequest` with
+  `SystemPrompt`, `Message`, and optional `Provider`, `Model`, `MaxTokens`
+  fields. Returns a `*RawCompletionResponse` with a `Content` string. Use this
+  for structured-output tasks that must be parsed programmatically without
+  session or history overhead.
+
+- **`RawCompletionRequest` and `RawCompletionResponse` types** — New types in
+  `chat.go` for the raw completion API.
+
 - **`DistinctValues()` method** — New method for retrieving all unique values
   for a specific field across records in a collection. Accepts a
   `DistinctValuesQuery` with optional filter, `BypassRipple`, and `BypassCache`
