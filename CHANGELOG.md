@@ -10,6 +10,13 @@ and this project adheres to
 
 ### Added
 
+- **Atomic field actions** — New `UpdateWithAction()` and
+  `UpdateWithActionSequence()` methods for safe concurrent field modifications:
+  increment/decrement counters, push/pop/shift/unshift arrays,
+  multiply/divide/modulo arithmetic, append strings, remove array items, and
+  clear fields. Sequence variant applies multiple actions atomically in a single
+  request. 5 new unit tests.
+
 - **Full WebSocket dispatcher** — Rewrote `WebSocketClient` with a
   goroutine-based read loop that routes incoming messages by type. New methods:
   `Subscribe()` (returns `<-chan MutationNotification` for real-time collection

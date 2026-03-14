@@ -471,6 +471,117 @@ func TestDeleteSuccess(t *testing.T) {
 }
 
 // ============================================================================
+// Atomic Field Action Tests
+// ============================================================================
+
+func TestUpdateWithActionIncrement(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"PUT /api/update/counters/rec_1/action/increment": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(Record{"id": "rec_1", "views": float64(42)})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.UpdateWithAction("counters", "rec_1", "increment", "views", 1)
+	if err != nil {
+		t.Fatalf("UpdateWithAction failed: %v", err)
+	}
+	if result["id"] != "rec_1" {
+		t.Errorf("Expected id=rec_1, got %v", result["id"])
+	}
+}
+
+func TestUpdateWithActionPush(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"PUT /api/update/lists/rec_2/action/push": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(Record{"id": "rec_2", "tags": []string{"rust", "new-tag"}})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.UpdateWithAction("lists", "rec_2", "push", "tags", "new-tag")
+	if err != nil {
+		t.Fatalf("UpdateWithAction push failed: %v", err)
+	}
+	if result["id"] != "rec_2" {
+		t.Errorf("Expected id=rec_2, got %v", result["id"])
+	}
+}
+
+func TestUpdateWithActionClear(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"PUT /api/update/data/rec_3/action/clear": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(Record{"id": "rec_3", "temp": float64(0)})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.UpdateWithAction("data", "rec_3", "clear", "temp", nil)
+	if err != nil {
+		t.Fatalf("UpdateWithAction clear failed: %v", err)
+	}
+	if result["id"] != "rec_3" {
+		t.Errorf("Expected id=rec_3, got %v", result["id"])
+	}
+}
+
+func TestUpdateWithActionSequence(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"PUT /api/update/sequence/game/player_1": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(Record{
+				"id":    "player_1",
+				"score": float64(110),
+				"lives": float64(2),
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	actions := [][3]interface{}{
+		{"increment", "score", 10},
+		{"decrement", "lives", 1},
+		{"push", "log", "hit"},
+	}
+	result, err := client.UpdateWithActionSequence("game", "player_1", actions)
+	if err != nil {
+		t.Fatalf("UpdateWithActionSequence failed: %v", err)
+	}
+	if result["id"] != "player_1" {
+		t.Errorf("Expected id=player_1, got %v", result["id"])
+	}
+}
+
+func TestUpdateWithActionNotFound(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"PUT /api/update/counters/missing/action/increment": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"error": "Record not found"})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.UpdateWithAction("counters", "missing", "increment", "views", 1)
+	if err == nil {
+		t.Error("Expected error for missing record, got nil")
+	}
+}
+
+// ============================================================================
 // Batch Operation Tests
 // ============================================================================
 
