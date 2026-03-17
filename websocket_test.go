@@ -41,11 +41,6 @@ func readMessage(t *testing.T, conn *websocket.Conn) map[string]interface{} {
 	return msg
 }
 
-// createTestWSClient creates a WebSocketClient directly (bypassing Client.WebSocket)
-func createTestWSClient(wsURL, token string) *WebSocketClient {
-	return nil // placeholder, we use the real factory via Client
-}
-
 func TestWebSocketFindAll(t *testing.T) {
 	wsURL, connCh, server := setupTestWSServer(t)
 	defer server.Close()
@@ -60,6 +55,7 @@ func TestWebSocketFindAll(t *testing.T) {
 
 	// Get server connection
 	serverConn := <-connCh
+	defer serverConn.Close()
 
 	// Start findAll in goroutine
 	resultCh := make(chan []Record, 1)
@@ -123,6 +119,7 @@ func TestWebSocketFindAllError(t *testing.T) {
 	defer ws.Close()
 
 	serverConn := <-connCh
+	defer serverConn.Close()
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -166,6 +163,7 @@ func TestWebSocketSubscribe(t *testing.T) {
 	defer ws.Close()
 
 	serverConn := <-connCh
+	defer serverConn.Close()
 
 	subCh := make(chan (<-chan MutationNotification), 1)
 	subErr := make(chan error, 1)
@@ -241,6 +239,7 @@ func TestWebSocketChatSend(t *testing.T) {
 	defer ws.Close()
 
 	serverConn := <-connCh
+	defer serverConn.Close()
 
 	eventCh, err := ws.ChatSend("chat-1", "Hello")
 	if err != nil {
@@ -305,6 +304,7 @@ func TestWebSocketChatStreamError(t *testing.T) {
 	defer ws.Close()
 
 	serverConn := <-connCh
+	defer serverConn.Close()
 
 	eventCh, err := ws.ChatSend("chat-2", "test")
 	if err != nil {
@@ -346,6 +346,7 @@ func TestWebSocketRegisterClientTools(t *testing.T) {
 	defer ws.Close()
 
 	serverConn := <-connCh
+	defer serverConn.Close()
 
 	tools := []ClientToolDefinition{
 		{
@@ -398,6 +399,7 @@ func TestWebSocketSendToolResult(t *testing.T) {
 	defer ws.Close()
 
 	serverConn := <-connCh
+	defer serverConn.Close()
 
 	// Start a chat stream to have context
 	eventCh, err := ws.ChatSend("chat-1", "test")
@@ -472,6 +474,7 @@ func TestWebSocketChatSendWithOptions(t *testing.T) {
 	defer ws.Close()
 
 	serverConn := <-connCh
+	defer serverConn.Close()
 
 	bypass := true
 	maxIter := uint32(5)

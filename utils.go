@@ -3,6 +3,7 @@ package ekodb
 import (
 	"encoding/base64"
 	"encoding/json"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -234,8 +235,14 @@ func GetIntValue(field interface{}) (int, bool) {
 	case int8:
 		return int(v), true
 	case uint:
+		if v > uint(math.MaxInt) {
+			return 0, false
+		}
 		return int(v), true
 	case uint64:
+		if v > uint64(math.MaxInt) {
+			return 0, false
+		}
 		return int(v), true
 	case uint32:
 		return int(v), true
@@ -244,6 +251,9 @@ func GetIntValue(field interface{}) (int, bool) {
 	case uint8:
 		return int(v), true
 	case float64:
+		if v > float64(math.MaxInt) || v < float64(math.MinInt) {
+			return 0, false
+		}
 		return int(v), true
 	case float32:
 		return int(v), true

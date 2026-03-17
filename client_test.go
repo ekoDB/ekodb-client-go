@@ -989,6 +989,49 @@ func TestGetChatModels(t *testing.T) {
 	}
 }
 
+func TestGetChatTools(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/chat/tools": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"name": "web_search", "description": "Search the web"},
+				{"name": "http_fetch", "description": "Fetch a URL"},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	tools, err := client.GetChatTools()
+	if err != nil {
+		t.Fatalf("GetChatTools failed: %v", err)
+	}
+	if len(tools) != 2 {
+		t.Errorf("Expected 2 tools, got %d", len(tools))
+	}
+	if tools[0]["name"] != "web_search" {
+		t.Errorf("Expected web_search, got %v", tools[0]["name"])
+	}
+}
+
+func TestGetChatToolsError(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/chat/tools": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("internal server error"))
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.GetChatTools()
+	if err == nil {
+		t.Fatal("Expected error, got nil")
+	}
+}
+
 func TestGetChatModel(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/chat_models/openai": func(w http.ResponseWriter, r *http.Request) {

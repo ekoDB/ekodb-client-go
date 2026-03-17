@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -62,7 +65,8 @@ type WebSocketClient struct {
 	token string
 	conn  *websocket.Conn
 
-	mu               sync.Mutex
+	writeMu          sync.Mutex // serializes all writes to ws.conn
+	mu               sync.Mutex // protects maps and registerToolsAck
 	pendingRequests  map[string]chan wsResponse
 	subscriptions    map[string]chan MutationNotification
 	chatStreams      map[string]chan ChatStreamEvent
@@ -70,6 +74,7 @@ type WebSocketClient struct {
 	dispatcherDone   chan struct{}
 	ctx              context.Context
 	cancel           context.CancelFunc
+	messageCounter   atomic.Int64
 }
 
 type wsResponse struct {
@@ -103,16 +108,25 @@ func (c *Client) WebSocket(wsURL string) (*WebSocketClient, error) {
 
 // connect establishes a WebSocket connection.
 func (ws *WebSocketClient) connect() error {
-	url := ws.wsURL
-	if len(url) < 7 || url[len(url)-7:] != "/api/ws" {
-		url += "/api/ws"
+	u, err := url.Parse(ws.wsURL)
+	if err != nil {
+		return fmt.Errorf("invalid websocket URL: %w", err)
 	}
-	url += "?token=" + ws.token
+
+	if u.Path == "" || u.Path == "/" {
+		u.Path = "/api/ws"
+	} else if len(u.Path) < 7 || u.Path[len(u.Path)-7:] != "/api/ws" {
+		u.Path += "/api/ws"
+	}
+
+	q := u.Query()
+	q.Set("token", ws.token)
+	u.RawQuery = q.Encode()
 
 	header := make(map[string][]string)
 	header["Authorization"] = []string{"Bearer " + ws.token}
 
-	conn, _, err := websocket.DefaultDialer.Dial(url, header)
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), header)
 	if err != nil {
 		return fmt.Errorf("websocket connection failed: %w", err)
 	}
@@ -122,7 +136,15 @@ func (ws *WebSocketClient) connect() error {
 }
 
 func (ws *WebSocketClient) genMessageID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+	counter := ws.messageCounter.Add(1)
+	return fmt.Sprintf("%d-%d-%d", time.Now().UnixNano(), counter, rand.Intn(100000))
+}
+
+// writeJSON serializes all writes to the WebSocket connection.
+func (ws *WebSocketClient) writeJSON(v interface{}) error {
+	ws.writeMu.Lock()
+	defer ws.writeMu.Unlock()
+	return ws.conn.WriteJSON(v)
 }
 
 // readLoop is the dispatcher goroutine that routes incoming messages.
@@ -132,28 +154,50 @@ func (ws *WebSocketClient) readLoop() {
 	for {
 		_, data, err := ws.conn.ReadMessage()
 		if err != nil {
+			// Collect channels to notify, then release the lock before sending
 			ws.mu.Lock()
-			// Notify all pending requests
+			pendingChans := make(map[string]chan wsResponse)
 			for id, ch := range ws.pendingRequests {
-				ch <- wsResponse{Err: fmt.Errorf("connection closed: %w", err)}
+				pendingChans[id] = ch
 				delete(ws.pendingRequests, id)
 			}
-			// Close all chat streams
+			chatChans := make(map[string]chan ChatStreamEvent)
 			for id, ch := range ws.chatStreams {
-				ch <- ChatStreamEvent{Type: "error", Error: "connection closed"}
-				close(ch)
+				chatChans[id] = ch
 				delete(ws.chatStreams, id)
 			}
-			// Close all subscriptions
+			subChans := make(map[string]chan MutationNotification)
 			for id, ch := range ws.subscriptions {
-				close(ch)
+				subChans[id] = ch
 				delete(ws.subscriptions, id)
 			}
-			if ws.registerToolsAck != nil {
-				ws.registerToolsAck <- wsResponse{Err: fmt.Errorf("connection closed")}
-				ws.registerToolsAck = nil
-			}
+			ackCh := ws.registerToolsAck
+			ws.registerToolsAck = nil
 			ws.mu.Unlock()
+
+			// Send/close outside the lock to avoid deadlock
+			for _, ch := range pendingChans {
+				select {
+				case ch <- wsResponse{Err: fmt.Errorf("connection closed: %w", err)}:
+				default:
+				}
+			}
+			for _, ch := range chatChans {
+				select {
+				case ch <- ChatStreamEvent{Type: "error", Error: "connection closed"}:
+				default:
+				}
+				close(ch)
+			}
+			for _, ch := range subChans {
+				close(ch)
+			}
+			if ackCh != nil {
+				select {
+				case ackCh <- wsResponse{Err: fmt.Errorf("connection closed")}:
+				default:
+				}
+			}
 			return
 		}
 
@@ -195,7 +239,6 @@ func (ws *WebSocketClient) routeMessage(msgType string, msg map[string]json.RawM
 
 func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]json.RawMessage) {
 	ws.mu.Lock()
-	defer ws.mu.Unlock()
 
 	// Try to extract messageId from payload
 	var messageID string
@@ -229,8 +272,10 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 			break
 		}
 	}
+	ws.mu.Unlock()
 
 	if target != nil {
+		var resp wsResponse
 		if msgType == "Error" {
 			var errMsg string
 			if raw, ok := msg["message"]; ok {
@@ -239,9 +284,13 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 			if errMsg == "" {
 				errMsg = "unknown error"
 			}
-			target <- wsResponse{Err: fmt.Errorf("websocket error: %s", errMsg)}
+			resp = wsResponse{Err: fmt.Errorf("websocket error: %s", errMsg)}
 		} else {
-			target <- wsResponse{Payload: msg["payload"]}
+			resp = wsResponse{Payload: msg["payload"]}
+		}
+		select {
+		case target <- resp:
+		default:
 		}
 	}
 }
@@ -304,7 +353,11 @@ func (ws *WebSocketClient) routeChatStreamChunk(msg map[string]json.RawMessage) 
 	ws.mu.Unlock()
 
 	if ok {
-		ch <- ChatStreamEvent{Type: "chunk", Content: payload.Content}
+		select {
+		case ch <- ChatStreamEvent{Type: "chunk", Content: payload.Content}:
+		default:
+			// Drop if channel full — consumer is too slow
+		}
 	}
 }
 
@@ -398,12 +451,16 @@ func (ws *WebSocketClient) routeClientToolCall(msg map[string]json.RawMessage) {
 	ws.mu.Unlock()
 
 	if ok {
-		ch <- ChatStreamEvent{
+		select {
+		case ch <- ChatStreamEvent{
 			Type:      "toolCall",
 			ChatID:    chatID,
 			CallID:    payload.CallID,
 			ToolName:  payload.ToolName,
 			Arguments: payload.Arguments,
+		}:
+		default:
+			// Drop if channel full — consumer is too slow
 		}
 	}
 }
@@ -415,7 +472,7 @@ func (ws *WebSocketClient) sendRequest(request interface{}, messageID string) (j
 	ws.pendingRequests[messageID] = ch
 	ws.mu.Unlock()
 
-	if err := ws.conn.WriteJSON(request); err != nil {
+	if err := ws.writeJSON(request); err != nil {
 		ws.mu.Lock()
 		delete(ws.pendingRequests, messageID)
 		ws.mu.Unlock()
@@ -429,6 +486,10 @@ func (ws *WebSocketClient) sendRequest(request interface{}, messageID string) (j
 		}
 		return resp.Payload, nil
 	case <-ws.ctx.Done():
+		// Clean up pending request on context cancellation
+		ws.mu.Lock()
+		delete(ws.pendingRequests, messageID)
+		ws.mu.Unlock()
 		return nil, fmt.Errorf("context cancelled")
 	}
 }
@@ -453,7 +514,7 @@ func (ws *WebSocketClient) FindAll(collection string) ([]Record, error) {
 		Data []Record `json:"data"`
 	}
 	if err := json.Unmarshal(payloadRaw, &payload); err != nil {
-		return []Record{}, nil
+		return nil, fmt.Errorf("failed to unmarshal FindAll response: %w", err)
 	}
 
 	return payload.Data, nil
@@ -536,7 +597,7 @@ func (ws *WebSocketClient) ChatSend(chatID, message string, opts ...ChatSendOpti
 	ws.chatStreams[chatID] = ch
 	ws.mu.Unlock()
 
-	if err := ws.conn.WriteJSON(request); err != nil {
+	if err := ws.writeJSON(request); err != nil {
 		ws.mu.Lock()
 		delete(ws.chatStreams, chatID)
 		ws.mu.Unlock()
@@ -561,7 +622,7 @@ func (ws *WebSocketClient) RegisterClientTools(chatID string, tools []ClientTool
 	ws.registerToolsAck = ackCh
 	ws.mu.Unlock()
 
-	if err := ws.conn.WriteJSON(request); err != nil {
+	if err := ws.writeJSON(request); err != nil {
 		ws.mu.Lock()
 		ws.registerToolsAck = nil
 		ws.mu.Unlock()
@@ -572,6 +633,9 @@ func (ws *WebSocketClient) RegisterClientTools(chatID string, tools []ClientTool
 	case resp := <-ackCh:
 		return resp.Err
 	case <-ws.ctx.Done():
+		ws.mu.Lock()
+		ws.registerToolsAck = nil
+		ws.mu.Unlock()
 		return fmt.Errorf("context cancelled")
 	}
 }
@@ -595,7 +659,7 @@ func (ws *WebSocketClient) SendToolResult(chatID, callID string, success bool, r
 		"payload": payload,
 	}
 
-	return ws.conn.WriteJSON(request)
+	return ws.writeJSON(request)
 }
 
 // Close closes the WebSocket connection and cleans up resources.
