@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"net/url"
 	"strings"
 	"sync"
@@ -137,13 +136,16 @@ func (ws *WebSocketClient) connect() error {
 
 func (ws *WebSocketClient) genMessageID() string {
 	counter := ws.messageCounter.Add(1)
-	return fmt.Sprintf("%d-%d-%d", time.Now().UnixNano(), counter, rand.Intn(100000))
+	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), counter)
 }
 
 // writeJSON serializes all writes to the WebSocket connection.
 func (ws *WebSocketClient) writeJSON(v interface{}) error {
 	ws.writeMu.Lock()
 	defer ws.writeMu.Unlock()
+	if ws.conn == nil {
+		return fmt.Errorf("websocket connection closed")
+	}
 	return ws.conn.WriteJSON(v)
 }
 
@@ -151,8 +153,11 @@ func (ws *WebSocketClient) writeJSON(v interface{}) error {
 func (ws *WebSocketClient) readLoop() {
 	defer close(ws.dispatcherDone)
 
+	// Capture conn reference — Close() may set ws.conn to nil
+	conn := ws.conn
+
 	for {
-		_, data, err := ws.conn.ReadMessage()
+		_, data, err := conn.ReadMessage()
 		if err != nil {
 			// Collect channels to notify, then release the lock before sending
 			ws.mu.Lock()
@@ -238,6 +243,8 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 		var payload map[string]json.RawMessage
 		if json.Unmarshal(payloadRaw, &payload) == nil {
 			if midRaw, ok := payload["message_id"]; ok {
+				json.Unmarshal(midRaw, &messageID)
+			} else if midRaw, ok := payload["messageId"]; ok {
 				json.Unmarshal(midRaw, &messageID)
 			}
 		}
@@ -454,6 +461,9 @@ func (ws *WebSocketClient) routeClientToolCall(msg map[string]json.RawMessage) {
 func (ws *WebSocketClient) sendRequest(request interface{}, messageID string) (json.RawMessage, error) {
 	ch := make(chan wsResponse, 1)
 
+	ctx, cancel := context.WithTimeout(ws.ctx, 30*time.Second)
+	defer cancel()
+
 	ws.mu.Lock()
 	ws.pendingRequests[messageID] = ch
 	ws.mu.Unlock()
@@ -471,11 +481,13 @@ func (ws *WebSocketClient) sendRequest(request interface{}, messageID string) (j
 			return nil, resp.Err
 		}
 		return resp.Payload, nil
-	case <-ws.ctx.Done():
-		// Clean up pending request on context cancellation
+	case <-ctx.Done():
 		ws.mu.Lock()
 		delete(ws.pendingRequests, messageID)
 		ws.mu.Unlock()
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("request timeout")
+		}
 		return nil, fmt.Errorf("context cancelled")
 	}
 }
@@ -642,8 +654,14 @@ func (ws *WebSocketClient) SendToolResult(chatID, callID string, success bool, r
 // Close closes the WebSocket connection and cleans up resources.
 func (ws *WebSocketClient) Close() error {
 	ws.cancel()
-	if ws.conn != nil {
-		err := ws.conn.Close()
+
+	ws.writeMu.Lock()
+	conn := ws.conn
+	ws.conn = nil
+	ws.writeMu.Unlock()
+
+	if conn != nil {
+		err := conn.Close()
 		if ws.dispatcherDone != nil {
 			<-ws.dispatcherDone
 		}
