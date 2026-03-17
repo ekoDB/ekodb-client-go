@@ -195,6 +195,12 @@ func (ws *WebSocketClient) readLoop() {
 			for _, ch := range subChans {
 				close(ch)
 			}
+
+			// Mark connection as closed so subsequent writes fail fast
+			ws.writeMu.Lock()
+			ws.conn = nil
+			ws.writeMu.Unlock()
+			ws.cancel()
 			return
 		}
 
