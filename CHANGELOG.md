@@ -44,9 +44,6 @@ and this project adheres to
   concurrency with `sync.Mutex` protection. 11 new unit tests with httptest
   WebSocket server.
 
-- **Chat streaming integration example** — New `client_websocket_chat_stream.go`
-  demonstrating streaming chat responses with tool calling via WebSocket.
-
 - **`GetChatTools()` method** — Returns all built-in server-side ekoDB chat tool
   definitions via `GET /api/chat/tools`. Returns `[]map[string]interface{}` with
   `name`, `description`, and `parameters` per tool. Used by planning agents to
@@ -70,9 +67,6 @@ and this project adheres to
 
 - **`DistinctValuesQuery` and `DistinctValuesResponse` types** — New types for
   the distinct values API in `search.go`.
-
-- **Integration example: `client_distinct_values`** — Demonstrates distinct
-  values queries with and without filters.
 
 ## [0.12.0] - 2026-03-11
 

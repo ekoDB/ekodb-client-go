@@ -227,6 +227,9 @@ func GetIntValue(field interface{}) (int, bool) {
 	case int:
 		return v, true
 	case int64:
+		if v > int64(math.MaxInt) || v < int64(math.MinInt) {
+			return 0, false
+		}
 		return int(v), true
 	case int32:
 		return int(v), true
@@ -245,6 +248,9 @@ func GetIntValue(field interface{}) (int, bool) {
 		}
 		return int(v), true
 	case uint32:
+		if uint64(v) > uint64(math.MaxInt) {
+			return 0, false
+		}
 		return int(v), true
 	case uint16:
 		return int(v), true
@@ -256,12 +262,22 @@ func GetIntValue(field interface{}) (int, bool) {
 		}
 		return int(v), true
 	case float32:
+		f := float64(v)
+		if f > float64(math.MaxInt) || f < float64(math.MinInt) {
+			return 0, false
+		}
 		return int(v), true
 	case json.Number:
 		if parsed, err := v.Int64(); err == nil {
+			if parsed > int64(math.MaxInt) || parsed < int64(math.MinInt) {
+				return 0, false
+			}
 			return int(parsed), true
 		}
 		if parsed, err := v.Float64(); err == nil {
+			if parsed > float64(math.MaxInt) || parsed < float64(math.MinInt) {
+				return 0, false
+			}
 			return int(parsed), true
 		}
 	case string:

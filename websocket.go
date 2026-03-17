@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -115,8 +116,8 @@ func (ws *WebSocketClient) connect() error {
 
 	if u.Path == "" || u.Path == "/" {
 		u.Path = "/api/ws"
-	} else if len(u.Path) < 7 || u.Path[len(u.Path)-7:] != "/api/ws" {
-		u.Path += "/api/ws"
+	} else if !strings.HasSuffix(u.Path, "/api/ws") {
+		u.Path = strings.TrimRight(u.Path, "/") + "/api/ws"
 	}
 
 	q := u.Query()
@@ -264,14 +265,6 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 		target = ws.registerToolsAck
 		ws.registerToolsAck = nil
 	}
-
-	if target == nil && len(ws.pendingRequests) == 1 {
-		for id, ch := range ws.pendingRequests {
-			target = ch
-			delete(ws.pendingRequests, id)
-			break
-		}
-	}
 	ws.mu.Unlock()
 
 	if target != nil {
@@ -385,12 +378,15 @@ func (ws *WebSocketClient) routeChatStreamEnd(msg map[string]json.RawMessage) {
 	ws.mu.Unlock()
 
 	if ok {
-		ch <- ChatStreamEvent{
+		select {
+		case ch <- ChatStreamEvent{
 			Type:            "end",
 			MessageID:       payload.MessageID,
 			TokenUsage:      payload.TokenUsage,
 			ToolCallHistory: payload.ToolCallHistory,
 			ExecutionTimeMs: payload.ExecutionTimeMs,
+		}:
+		default:
 		}
 		close(ch)
 	}
@@ -426,7 +422,10 @@ func (ws *WebSocketClient) routeChatStreamError(msg map[string]json.RawMessage) 
 	ws.mu.Unlock()
 
 	if ok {
-		ch <- ChatStreamEvent{Type: "error", Error: errMsg}
+		select {
+		case ch <- ChatStreamEvent{Type: "error", Error: errMsg}:
+		default:
+		}
 		close(ch)
 	}
 }
@@ -546,6 +545,10 @@ func (ws *WebSocketClient) Subscribe(collection string, opts ...SubscribeOptions
 	// Register subscription channel before sending
 	ch := make(chan MutationNotification, 64)
 	ws.mu.Lock()
+	if _, exists := ws.subscriptions[collection]; exists {
+		ws.mu.Unlock()
+		return nil, fmt.Errorf("already subscribed to collection %q", collection)
+	}
 	ws.subscriptions[collection] = ch
 	ws.mu.Unlock()
 
@@ -594,6 +597,10 @@ func (ws *WebSocketClient) ChatSend(chatID, message string, opts ...ChatSendOpti
 
 	ch := make(chan ChatStreamEvent, 64)
 	ws.mu.Lock()
+	if _, exists := ws.chatStreams[chatID]; exists {
+		ws.mu.Unlock()
+		return nil, fmt.Errorf("chat stream already active for chatID %q", chatID)
+	}
 	ws.chatStreams[chatID] = ch
 	ws.mu.Unlock()
 
@@ -619,6 +626,10 @@ func (ws *WebSocketClient) RegisterClientTools(chatID string, tools []ClientTool
 
 	ackCh := make(chan wsResponse, 1)
 	ws.mu.Lock()
+	if ws.registerToolsAck != nil {
+		ws.mu.Unlock()
+		return fmt.Errorf("tool registration already in progress")
+	}
 	ws.registerToolsAck = ackCh
 	ws.mu.Unlock()
 

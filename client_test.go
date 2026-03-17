@@ -477,6 +477,16 @@ func TestDeleteSuccess(t *testing.T) {
 func TestUpdateWithActionIncrement(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"PUT /api/update/counters/rec_1/action/increment": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("Failed to decode request body: %v", err)
+			}
+			if body["field"] != "views" {
+				t.Errorf("Expected field=views, got %v", body["field"])
+			}
+			if body["value"] != float64(1) {
+				t.Errorf("Expected value=1, got %v", body["value"])
+			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(Record{"id": "rec_1", "views": float64(42)})
 		},
@@ -2175,6 +2185,13 @@ func TestDistinctValuesEmpty(t *testing.T) {
 func TestDistinctValuesWithFilter(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/distinct/orders/status": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("Failed to decode request body: %v", err)
+			}
+			if body["filter"] == nil {
+				t.Errorf("Expected filter in request body, got nil")
+			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(DistinctValuesResponse{
 				Collection: "orders",
