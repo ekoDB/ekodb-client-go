@@ -373,10 +373,13 @@ func TestWebSocketRegisterClientTools(t *testing.T) {
 		t.Fatalf("expected RegisterClientTools, got %v", msg["type"])
 	}
 
-	// Ack
+	// Ack with messageId echoed back
 	serverConn.WriteJSON(map[string]interface{}{
-		"type":    "Success",
-		"payload": map[string]interface{}{"status": "tools_registered"},
+		"type": "Success",
+		"payload": map[string]interface{}{
+			"message_id": msg["messageId"],
+			"status":     "tools_registered",
+		},
 	})
 
 	select {

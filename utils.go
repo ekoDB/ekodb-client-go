@@ -257,13 +257,13 @@ func GetIntValue(field interface{}) (int, bool) {
 	case uint8:
 		return int(v), true
 	case float64:
-		if v > float64(math.MaxInt) || v < float64(math.MinInt) {
+		if math.IsNaN(v) || math.IsInf(v, 0) || v > float64(math.MaxInt) || v < float64(math.MinInt) {
 			return 0, false
 		}
 		return int(v), true
 	case float32:
 		f := float64(v)
-		if f > float64(math.MaxInt) || f < float64(math.MinInt) {
+		if math.IsNaN(f) || math.IsInf(f, 0) || f > float64(math.MaxInt) || f < float64(math.MinInt) {
 			return 0, false
 		}
 		return int(v), true
@@ -275,7 +275,7 @@ func GetIntValue(field interface{}) (int, bool) {
 			return int(parsed), true
 		}
 		if parsed, err := v.Float64(); err == nil {
-			if parsed > float64(math.MaxInt) || parsed < float64(math.MinInt) {
+			if math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed > float64(math.MaxInt) || parsed < float64(math.MinInt) {
 				return 0, false
 			}
 			return int(parsed), true

@@ -66,16 +66,15 @@ type WebSocketClient struct {
 	token string
 	conn  *websocket.Conn
 
-	writeMu          sync.Mutex // serializes all writes to ws.conn
-	mu               sync.Mutex // protects maps and registerToolsAck
-	pendingRequests  map[string]chan wsResponse
-	subscriptions    map[string]chan MutationNotification
-	chatStreams      map[string]chan ChatStreamEvent
-	registerToolsAck chan wsResponse
-	dispatcherDone   chan struct{}
-	ctx              context.Context
-	cancel           context.CancelFunc
-	messageCounter   atomic.Int64
+	writeMu         sync.Mutex // serializes all writes to ws.conn
+	mu              sync.Mutex // protects maps
+	pendingRequests map[string]chan wsResponse
+	subscriptions   map[string]chan MutationNotification
+	chatStreams     map[string]chan ChatStreamEvent
+	dispatcherDone  chan struct{}
+	ctx             context.Context
+	cancel          context.CancelFunc
+	messageCounter  atomic.Int64
 }
 
 type wsResponse struct {
@@ -172,8 +171,6 @@ func (ws *WebSocketClient) readLoop() {
 				subChans[id] = ch
 				delete(ws.subscriptions, id)
 			}
-			ackCh := ws.registerToolsAck
-			ws.registerToolsAck = nil
 			ws.mu.Unlock()
 
 			// Send/close outside the lock to avoid deadlock
@@ -192,12 +189,6 @@ func (ws *WebSocketClient) readLoop() {
 			}
 			for _, ch := range subChans {
 				close(ch)
-			}
-			if ackCh != nil {
-				select {
-				case ackCh <- wsResponse{Err: fmt.Errorf("connection closed")}:
-				default:
-				}
 			}
 			return
 		}
@@ -261,10 +252,6 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 		}
 	}
 
-	if target == nil && ws.registerToolsAck != nil {
-		target = ws.registerToolsAck
-		ws.registerToolsAck = nil
-	}
 	ws.mu.Unlock()
 
 	if target != nil {
@@ -616,39 +603,18 @@ func (ws *WebSocketClient) ChatSend(chatID, message string, opts ...ChatSendOpti
 
 // RegisterClientTools registers client-side tool definitions for a chat session.
 func (ws *WebSocketClient) RegisterClientTools(chatID string, tools []ClientToolDefinition) error {
+	messageID := ws.genMessageID()
 	request := map[string]interface{}{
-		"type": "RegisterClientTools",
+		"type":      "RegisterClientTools",
+		"messageId": messageID,
 		"payload": map[string]interface{}{
 			"chat_id": chatID,
 			"tools":   tools,
 		},
 	}
 
-	ackCh := make(chan wsResponse, 1)
-	ws.mu.Lock()
-	if ws.registerToolsAck != nil {
-		ws.mu.Unlock()
-		return fmt.Errorf("tool registration already in progress")
-	}
-	ws.registerToolsAck = ackCh
-	ws.mu.Unlock()
-
-	if err := ws.writeJSON(request); err != nil {
-		ws.mu.Lock()
-		ws.registerToolsAck = nil
-		ws.mu.Unlock()
-		return fmt.Errorf("failed to send tool registration: %w", err)
-	}
-
-	select {
-	case resp := <-ackCh:
-		return resp.Err
-	case <-ws.ctx.Done():
-		ws.mu.Lock()
-		ws.registerToolsAck = nil
-		ws.mu.Unlock()
-		return fmt.Errorf("context cancelled")
-	}
+	_, err := ws.sendRequest(request, messageID)
+	return err
 }
 
 // SendToolResult sends a tool result back to the server during a chat stream.
