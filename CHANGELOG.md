@@ -6,7 +6,69 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.13.0] - 2026-03-17
+
+### Fixed
+
+- **`GetIntValue` now accepts `json.Number`, numeric strings, and all integer
+  types** — Previously only handled `int`, `int64`, and `float64`. Now accepts
+  `int8-64`, `uint8-64`, `float32`, `json.Number`, and numeric strings (e.g.,
+  `"42"`). This fixes silent zero-value returns when ekoDB records contained
+  values in these types.
+- **`GetFloatValue` now accepts `json.Number`, numeric strings, and all numeric
+  types** — Previously only handled `float64`, `int`, and `int64`. Now accepts
+  `float32`, `int8-64`, `uint8-64`, `json.Number`, and numeric strings.
+- **`GetBoolValue` now accepts string and numeric representations** — Previously
+  only handled `bool`. Now accepts `"true"/"false"`, `"1"/"0"`,
+  `"yes"/"no"/"y"/"n"/"on"/"off"`, and numeric values (non-zero = true). This
+  fixes silent false returns for boolean fields stored as strings.
+
+### Added
+
+- **Atomic field actions** — New `UpdateWithAction()` and
+  `UpdateWithActionSequence()` methods for safe concurrent field modifications:
+  increment/decrement counters, push/pop/shift/unshift arrays,
+  multiply/divide/modulo arithmetic, append strings, remove array items, and
+  clear fields. Sequence variant applies multiple actions atomically in a single
+  request. 5 new unit tests.
+
+- **Full WebSocket dispatcher** — Rewrote `WebSocketClient` with a
+  goroutine-based read loop that routes incoming messages by type. New methods:
+  `Subscribe()` (returns `<-chan MutationNotification` for real-time collection
+  change notifications with optional filter), `ChatSend()` (returns
+  `<-chan ChatStreamEvent` with chunk/end/toolCall/error events for streaming
+  chat responses), `RegisterClientTools()` (registers client-side tool
+  definitions), and `SendToolResult()` (returns tool execution results to the
+  server). New types: `MutationNotification`, `ChatStreamEvent`,
+  `ClientToolDefinition`, `ChatSendOptions`, `SubscribeOptions`. Channel-based
+  concurrency with `sync.Mutex` protection. 11 new unit tests with httptest
+  WebSocket server.
+
+- **`GetChatTools()` method** — Returns all built-in server-side ekoDB chat tool
+  definitions via `GET /api/chat/tools`. Returns `[]map[string]interface{}` with
+  `name`, `description`, and `parameters` per tool. Used by planning agents to
+  dynamically discover available tools.
+
+- **`RawCompletion()` method** — Stateless raw LLM completion via
+  `POST /api/chat/complete`. Accepts a `RawCompletionRequest` with
+  `SystemPrompt`, `Message`, and optional `Provider`, `Model`, `MaxTokens`
+  fields. Returns a `*RawCompletionResponse` with a `Content` string. Use this
+  for structured-output tasks that must be parsed programmatically without
+  session or history overhead.
+
+- **`RawCompletionRequest` and `RawCompletionResponse` types** — New types in
+  `chat.go` for the raw completion API.
+
+- **`DistinctValues()` method** — New method for retrieving all unique values
+  for a specific field across records in a collection. Accepts a
+  `DistinctValuesQuery` with optional filter, `BypassRipple`, and `BypassCache`
+  flags. Returns a `*DistinctValuesResponse` with `Collection`, `Field`,
+  `Values` (sorted), and `Count`.
+
+- **`DistinctValuesQuery` and `DistinctValuesResponse` types** — New types for
+  the distinct values API in `search.go`.
+
+## [0.12.0] - 2026-03-11
 
 ### Added
 

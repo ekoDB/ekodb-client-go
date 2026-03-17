@@ -584,6 +584,56 @@ func (c *Client) Update(collection, id string, record Record, opts ...UpdateOpti
 	return result, nil
 }
 
+// UpdateWithActionBody is the request body for a single atomic field action.
+type UpdateWithActionBody struct {
+	Field string      `json:"field"`
+	Value interface{} `json:"value"`
+}
+
+// UpdateWithAction applies an atomic field action to a single field of a record.
+//
+// Use this instead of Update() for safe concurrent modifications like
+// incrementing counters, pushing to arrays, or arithmetic operations.
+//
+// Supported actions: increment, decrement, multiply, divide, modulo,
+// push, pop, shift, unshift, remove, append, clear.
+func (c *Client) UpdateWithAction(collection, id, action, field string, value interface{}) (Record, error) {
+	path := fmt.Sprintf("/api/update/%s/%s/action/%s", collection, id, action)
+	body := UpdateWithActionBody{Field: field, Value: value}
+	respBody, err := c.makeRequest("PUT", path, body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result Record
+	if err := c.unmarshal(path, respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// UpdateWithActionSequence applies a sequence of atomic field actions to a
+// record in a single request. All actions are applied atomically — the record
+// is fetched once, all actions run in order, and the result is persisted in a
+// single update.
+//
+// Each action is a 3-element slice: [action, field, value].
+func (c *Client) UpdateWithActionSequence(collection, id string, actions [][3]interface{}) (Record, error) {
+	path := fmt.Sprintf("/api/update/sequence/%s/%s", collection, id)
+	respBody, err := c.makeRequest("PUT", path, actions)
+	if err != nil {
+		return nil, err
+	}
+
+	var result Record
+	if err := c.unmarshal(path, respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 // DeleteOptions contains optional parameters for Delete
 type DeleteOptions struct {
 	BypassRipple  *bool

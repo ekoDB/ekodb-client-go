@@ -471,6 +471,127 @@ func TestDeleteSuccess(t *testing.T) {
 }
 
 // ============================================================================
+// Atomic Field Action Tests
+// ============================================================================
+
+func TestUpdateWithActionIncrement(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"PUT /api/update/counters/rec_1/action/increment": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("Failed to decode request body: %v", err)
+			}
+			if body["field"] != "views" {
+				t.Errorf("Expected field=views, got %v", body["field"])
+			}
+			if body["value"] != float64(1) {
+				t.Errorf("Expected value=1, got %v", body["value"])
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(Record{"id": "rec_1", "views": float64(42)})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.UpdateWithAction("counters", "rec_1", "increment", "views", 1)
+	if err != nil {
+		t.Fatalf("UpdateWithAction failed: %v", err)
+	}
+	if result["id"] != "rec_1" {
+		t.Errorf("Expected id=rec_1, got %v", result["id"])
+	}
+}
+
+func TestUpdateWithActionPush(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"PUT /api/update/lists/rec_2/action/push": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(Record{"id": "rec_2", "tags": []string{"rust", "new-tag"}})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.UpdateWithAction("lists", "rec_2", "push", "tags", "new-tag")
+	if err != nil {
+		t.Fatalf("UpdateWithAction push failed: %v", err)
+	}
+	if result["id"] != "rec_2" {
+		t.Errorf("Expected id=rec_2, got %v", result["id"])
+	}
+}
+
+func TestUpdateWithActionClear(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"PUT /api/update/data/rec_3/action/clear": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(Record{"id": "rec_3", "temp": float64(0)})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.UpdateWithAction("data", "rec_3", "clear", "temp", nil)
+	if err != nil {
+		t.Fatalf("UpdateWithAction clear failed: %v", err)
+	}
+	if result["id"] != "rec_3" {
+		t.Errorf("Expected id=rec_3, got %v", result["id"])
+	}
+}
+
+func TestUpdateWithActionSequence(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"PUT /api/update/sequence/game/player_1": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(Record{
+				"id":    "player_1",
+				"score": float64(110),
+				"lives": float64(2),
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	actions := [][3]interface{}{
+		{"increment", "score", 10},
+		{"decrement", "lives", 1},
+		{"push", "log", "hit"},
+	}
+	result, err := client.UpdateWithActionSequence("game", "player_1", actions)
+	if err != nil {
+		t.Fatalf("UpdateWithActionSequence failed: %v", err)
+	}
+	if result["id"] != "player_1" {
+		t.Errorf("Expected id=player_1, got %v", result["id"])
+	}
+}
+
+func TestUpdateWithActionNotFound(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"PUT /api/update/counters/missing/action/increment": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"error": "Record not found"})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.UpdateWithAction("counters", "missing", "increment", "views", 1)
+	if err == nil {
+		t.Error("Expected error for missing record, got nil")
+	}
+}
+
+// ============================================================================
 // Batch Operation Tests
 // ============================================================================
 
@@ -875,6 +996,49 @@ func TestGetChatModels(t *testing.T) {
 	}
 	if len(models.Anthropic) != 2 {
 		t.Errorf("Expected 2 Anthropic models, got %d", len(models.Anthropic))
+	}
+}
+
+func TestGetChatTools(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/chat/tools": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"name": "web_search", "description": "Search the web"},
+				{"name": "http_fetch", "description": "Fetch a URL"},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	tools, err := client.GetChatTools()
+	if err != nil {
+		t.Fatalf("GetChatTools failed: %v", err)
+	}
+	if len(tools) != 2 {
+		t.Errorf("Expected 2 tools, got %d", len(tools))
+	}
+	if tools[0]["name"] != "web_search" {
+		t.Errorf("Expected web_search, got %v", tools[0]["name"])
+	}
+}
+
+func TestGetChatToolsError(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/chat/tools": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("internal server error"))
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.GetChatTools()
+	if err == nil {
+		t.Fatal("Expected error, got nil")
 	}
 }
 
@@ -1952,5 +2116,213 @@ func TestToggleForgottenMessageSuccess(t *testing.T) {
 	err := client.ToggleForgottenMessage("chat_123", "msg_001", true)
 	if err != nil {
 		t.Errorf("ToggleForgottenMessage failed: %v", err)
+	}
+}
+
+// ============================================================================
+// Distinct Values Tests
+// ============================================================================
+
+func TestDistinctValuesSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/distinct/products/category": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(DistinctValuesResponse{
+				Collection: "products",
+				Field:      "category",
+				Values:     []interface{}{"books", "electronics", "food"},
+				Count:      3,
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	resp, err := client.DistinctValues("products", "category", DistinctValuesQuery{})
+	if err != nil {
+		t.Fatalf("DistinctValues failed: %v", err)
+	}
+	if resp.Count != 3 {
+		t.Errorf("DistinctValues count = %d, want 3", resp.Count)
+	}
+	if len(resp.Values) != 3 {
+		t.Errorf("DistinctValues values len = %d, want 3", len(resp.Values))
+	}
+	if resp.Collection != "products" {
+		t.Errorf("DistinctValues collection = %q, want %q", resp.Collection, "products")
+	}
+	if resp.Field != "category" {
+		t.Errorf("DistinctValues field = %q, want %q", resp.Field, "category")
+	}
+}
+
+func TestDistinctValuesEmpty(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/distinct/empty/tag": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(DistinctValuesResponse{
+				Collection: "empty",
+				Field:      "tag",
+				Values:     []interface{}{},
+				Count:      0,
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	resp, err := client.DistinctValues("empty", "tag", DistinctValuesQuery{})
+	if err != nil {
+		t.Fatalf("DistinctValues failed: %v", err)
+	}
+	if resp.Count != 0 {
+		t.Errorf("DistinctValues count = %d, want 0", resp.Count)
+	}
+}
+
+func TestDistinctValuesWithFilter(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/distinct/orders/status": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("Failed to decode request body: %v", err)
+			}
+			if body["filter"] == nil {
+				t.Errorf("Expected filter in request body, got nil")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(DistinctValuesResponse{
+				Collection: "orders",
+				Field:      "status",
+				Values:     []interface{}{"active", "pending"},
+				Count:      2,
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	query := DistinctValuesQuery{
+		Filter: map[string]interface{}{
+			"type": "Condition",
+			"content": map[string]interface{}{
+				"field": "region", "operator": "Eq", "value": "us",
+			},
+		},
+	}
+	resp, err := client.DistinctValues("orders", "status", query)
+	if err != nil {
+		t.Fatalf("DistinctValues failed: %v", err)
+	}
+	if resp.Count != 2 {
+		t.Errorf("DistinctValues count = %d, want 2", resp.Count)
+	}
+}
+
+func TestDistinctValuesServerError(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/distinct/bad/field": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error":"internal error"}`))
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.DistinctValues("bad", "field", DistinctValuesQuery{})
+	if err == nil {
+		t.Error("Expected error from server error, got nil")
+	}
+}
+
+// ============================================================================
+// RawCompletion Tests
+// ============================================================================
+
+func TestRawCompletionSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/chat/complete": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(RawCompletionResponse{
+				Content: "The answer is 42.",
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	resp, err := client.RawCompletion(RawCompletionRequest{
+		SystemPrompt: "You are a helpful assistant.",
+		Message:      "What is the answer?",
+	})
+	if err != nil {
+		t.Fatalf("RawCompletion failed: %v", err)
+	}
+	if resp.Content != "The answer is 42." {
+		t.Errorf("RawCompletion content = %q, want %q", resp.Content, "The answer is 42.")
+	}
+}
+
+func TestRawCompletionWithOptionalFields(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/chat/complete": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+			if body["provider"] != "openai" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if body["model"] != "gpt-4o" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(RawCompletionResponse{Content: "Response."})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	provider := "openai"
+	model := "gpt-4o"
+	maxTokens := 512
+	client := createTestClient(t, server)
+	resp, err := client.RawCompletion(RawCompletionRequest{
+		SystemPrompt: "System.",
+		Message:      "User.",
+		Provider:     &provider,
+		Model:        &model,
+		MaxTokens:    &maxTokens,
+	})
+	if err != nil {
+		t.Fatalf("RawCompletion failed: %v", err)
+	}
+	if resp.Content != "Response." {
+		t.Errorf("RawCompletion content = %q, want %q", resp.Content, "Response.")
+	}
+}
+
+func TestRawCompletionServerError(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/chat/complete": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error":"llm unavailable"}`))
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.RawCompletion(RawCompletionRequest{
+		SystemPrompt: "S.",
+		Message:      "M.",
+	})
+	if err == nil {
+		t.Error("Expected error from server error, got nil")
 	}
 }
