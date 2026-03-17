@@ -8,6 +8,21 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- **`GetIntValue` now accepts `json.Number`, numeric strings, and all integer
+  types** — Previously only handled `int`, `int64`, and `float64`. Now accepts
+  `int8-64`, `uint8-64`, `float32`, `json.Number`, and numeric strings (e.g.,
+  `"42"`). This fixes silent zero-value returns when ekoDB records contained
+  values in these types.
+- **`GetFloatValue` now accepts `json.Number`, numeric strings, and all numeric
+  types** — Previously only handled `float64`, `int`, and `int64`. Now accepts
+  `float32`, `int8-64`, `uint8-64`, `json.Number`, and numeric strings.
+- **`GetBoolValue` now accepts string and numeric representations** — Previously
+  only handled `bool`. Now accepts `"true"/"false"`, `"1"/"0"`,
+  `"yes"/"no"/"y"/"n"/"on"/"off"`, and numeric values (non-zero = true). This
+  fixes silent false returns for boolean fields stored as strings.
+
 ### Added
 
 - **Atomic field actions** — New `UpdateWithAction()` and

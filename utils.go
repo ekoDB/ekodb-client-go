@@ -2,7 +2,9 @@ package ekodb
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -203,7 +205,8 @@ func GetValue(field interface{}) interface{} {
 	return field
 }
 
-// GetStringValue extracts a string value from an ekoDB field
+// GetStringValue extracts a string value from an ekoDB field.
+// Returns the unwrapped string value, or empty string if not convertible.
 func GetStringValue(field interface{}) string {
 	val := GetValue(field)
 	if str, ok := val.(string); ok {
@@ -214,63 +217,114 @@ func GetStringValue(field interface{}) string {
 
 // GetIntValue extracts an int value from an ekoDB field.
 // It returns the extracted int and a boolean indicating whether the conversion succeeded.
-// Note: This function uses (int, bool) return signature for better error detection,
-// unlike other getters which return zero values on failure. This allows callers to
-// distinguish between actual zero values and conversion errors.
 //
-// Conversion behavior:
-//   - int64: Converted to int. On 32-bit systems where int is 32 bits, values outside
-//     the range [-2147483648, 2147483647] will overflow. The function now validates
-//     this range and returns false for out-of-bounds values on 32-bit systems.
-//   - float64: Truncates the decimal portion (e.g., 3.9 becomes 3, -2.7 becomes -2).
-//     This is intentional for numeric type flexibility but callers should be aware
-//     that precision is lost. Returns false if the value would overflow int range.
+// Accepts: int, int8-64, uint8-64, float32, float64, json.Number, numeric strings.
+// float64 values are truncated (e.g., 3.9 becomes 3).
 func GetIntValue(field interface{}) (int, bool) {
 	val := GetValue(field)
 	switch v := val.(type) {
 	case int:
 		return v, true
 	case int64:
-		// Check for overflow on 32-bit systems (where int is 32 bits)
-		const maxInt = int(^uint(0) >> 1)
-		const minInt = -maxInt - 1
-		if v > int64(maxInt) || v < int64(minInt) {
-			return 0, false
-		}
+		return int(v), true
+	case int32:
+		return int(v), true
+	case int16:
+		return int(v), true
+	case int8:
+		return int(v), true
+	case uint:
+		return int(v), true
+	case uint64:
+		return int(v), true
+	case uint32:
+		return int(v), true
+	case uint16:
+		return int(v), true
+	case uint8:
 		return int(v), true
 	case float64:
-		// Truncates decimal portion - document this behavior
-		// Also check for overflow
-		const maxInt = int(^uint(0) >> 1)
-		const minInt = -maxInt - 1
-		if v > float64(maxInt) || v < float64(minInt) {
-			return 0, false
-		}
 		return int(v), true
+	case float32:
+		return int(v), true
+	case json.Number:
+		if parsed, err := v.Int64(); err == nil {
+			return int(parsed), true
+		}
+		if parsed, err := v.Float64(); err == nil {
+			return int(parsed), true
+		}
+	case string:
+		if parsed, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			return parsed, true
+		}
 	}
 	return 0, false
 }
 
-// GetFloatValue extracts a float64 value from an ekoDB field
+// GetFloatValue extracts a float64 value from an ekoDB field.
+//
+// Accepts: float32, float64, int, int8-64, uint8-64, json.Number, numeric strings.
 func GetFloatValue(field interface{}) float64 {
 	val := GetValue(field)
-	if f, ok := val.(float64); ok {
-		return f
-	}
-	if i, ok := val.(int); ok {
-		return float64(i)
-	}
-	if i, ok := val.(int64); ok {
-		return float64(i)
+	switch v := val.(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	case int32:
+		return float64(v)
+	case int16:
+		return float64(v)
+	case int8:
+		return float64(v)
+	case uint:
+		return float64(v)
+	case uint64:
+		return float64(v)
+	case uint32:
+		return float64(v)
+	case uint16:
+		return float64(v)
+	case uint8:
+		return float64(v)
+	case json.Number:
+		if parsed, err := v.Float64(); err == nil {
+			return parsed
+		}
+	case string:
+		if parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			return parsed
+		}
 	}
 	return 0.0
 }
 
-// GetBoolValue extracts a bool value from an ekoDB field
+// GetBoolValue extracts a bool value from an ekoDB field.
+//
+// Accepts: bool, string ("true"/"false"/"1"/"0"/"yes"/"no"), int/int64/float64 (non-zero = true).
 func GetBoolValue(field interface{}) bool {
 	val := GetValue(field)
-	if b, ok := val.(bool); ok {
-		return b
+	switch v := val.(type) {
+	case bool:
+		return v
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "true", "1", "yes", "y", "on":
+			return true
+		case "false", "0", "no", "n", "off":
+			return false
+		}
+	case int:
+		return v != 0
+	case int64:
+		return v != 0
+	case float64:
+		return v != 0
 	}
 	return false
 }
