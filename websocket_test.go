@@ -596,3 +596,171 @@ func TestClientToolDefinitionJSON(t *testing.T) {
 		t.Fatalf("roundtrip failed: %+v", tool2)
 	}
 }
+
+func TestWebSocketRawCompletion(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	resultCh := make(chan *RawCompletionResponse, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		resp, err := ws.RawCompletion(RawCompletionRequest{
+			SystemPrompt: "You are helpful.",
+			Message:      "Say hello.",
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- resp
+	}()
+
+	msg := readMessage(t, serverConn)
+	if msg["type"] != "RawComplete" {
+		t.Fatalf("expected RawComplete, got %v", msg["type"])
+	}
+
+	payload := msg["payload"].(map[string]interface{})
+	if payload["system_prompt"] != "You are helpful." {
+		t.Fatalf("expected system_prompt, got %v", payload["system_prompt"])
+	}
+	if payload["message"] != "Say hello." {
+		t.Fatalf("expected message, got %v", payload["message"])
+	}
+
+	resp := map[string]interface{}{
+		"type": "Success",
+		"payload": map[string]interface{}{
+			"data": map[string]interface{}{
+				"content": "Hello! How can I help?",
+			},
+		},
+	}
+	serverConn.WriteJSON(resp)
+
+	select {
+	case result := <-resultCh:
+		if result.Content != "Hello! How can I help?" {
+			t.Fatalf("expected content, got %v", result.Content)
+		}
+	case err := <-errCh:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for RawCompletion result")
+	}
+}
+
+func TestWebSocketRawCompletionWithOptionalFields(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	provider := "openai"
+	model := "gpt-4o-mini"
+	maxTokens := 512
+
+	resultCh := make(chan *RawCompletionResponse, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		resp, err := ws.RawCompletion(RawCompletionRequest{
+			SystemPrompt: "System.",
+			Message:      "User.",
+			Provider:     &provider,
+			Model:        &model,
+			MaxTokens:    &maxTokens,
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- resp
+	}()
+
+	msg := readMessage(t, serverConn)
+	payload := msg["payload"].(map[string]interface{})
+	if payload["provider"] != "openai" {
+		t.Fatalf("expected provider openai, got %v", payload["provider"])
+	}
+	if payload["model"] != "gpt-4o-mini" {
+		t.Fatalf("expected model gpt-4o-mini, got %v", payload["model"])
+	}
+
+	resp := map[string]interface{}{
+		"type": "Success",
+		"payload": map[string]interface{}{
+			"data": map[string]interface{}{"content": "Done."},
+		},
+	}
+	serverConn.WriteJSON(resp)
+
+	select {
+	case result := <-resultCh:
+		if result.Content != "Done." {
+			t.Fatalf("expected Done., got %v", result.Content)
+		}
+	case err := <-errCh:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestWebSocketRawCompletionError(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := ws.RawCompletion(RawCompletionRequest{
+			SystemPrompt: "System.",
+			Message:      "User.",
+		})
+		errCh <- err
+	}()
+
+	readMessage(t, serverConn)
+
+	resp := map[string]interface{}{
+		"type":    "Error",
+		"message": "Model not found",
+	}
+	serverConn.WriteJSON(resp)
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+}

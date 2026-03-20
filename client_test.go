@@ -2426,3 +2426,4 @@ func TestRawCompletionStreamHTTPError(t *testing.T) {
 		t.Error("Expected error from 401 response, got nil")
 	}
 }
+

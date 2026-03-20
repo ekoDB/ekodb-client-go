@@ -674,6 +674,52 @@ func (ws *WebSocketClient) SendToolResult(chatID, callID string, success bool, r
 	return ws.writeJSON(request)
 }
 
+// RawCompletion performs a stateless raw LLM completion via WebSocket.
+//
+// Sends a RawComplete message and waits for the Success response.
+// Preferred over HTTP for deployed instances: the persistent WSS
+// connection is already authenticated and won't be killed by reverse
+// proxy timeouts.
+func (ws *WebSocketClient) RawCompletion(request RawCompletionRequest) (*RawCompletionResponse, error) {
+	messageID := ws.genMessageID()
+
+	payload := map[string]interface{}{
+		"system_prompt": request.SystemPrompt,
+		"message":       request.Message,
+	}
+	if request.Provider != nil {
+		payload["provider"] = *request.Provider
+	}
+	if request.Model != nil {
+		payload["model"] = *request.Model
+	}
+	if request.MaxTokens != nil {
+		payload["max_tokens"] = *request.MaxTokens
+	}
+
+	req := map[string]interface{}{
+		"type":      "RawComplete",
+		"messageId": messageID,
+		"payload":   payload,
+	}
+
+	payloadRaw, err := ws.sendRequest(req, messageID)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Data struct {
+			Content string `json:"content"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(payloadRaw, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal RawCompletion response: %w", err)
+	}
+
+	return &RawCompletionResponse{Content: result.Data.Content}, nil
+}
+
 // Close closes the WebSocket connection and cleans up resources.
 func (ws *WebSocketClient) Close() error {
 	ws.cancel()
