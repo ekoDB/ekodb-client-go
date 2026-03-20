@@ -6,9 +6,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.13.0] - 2026-03-17
+## [0.14.0] - 2026-03-19
 
 ### Fixed
+
+- **HTTP client timeout no longer kills SSE streams** — Replaced
+  `http.Client.Timeout` (which aborts entire requests including streaming
+  response bodies) with a `net.Dialer.Timeout` on a custom `http.Transport`.
+  The dial timeout still protects against unresponsive servers during
+  connection setup, but SSE streams like `RawCompletionStream` can now run
+  indefinitely without being killed.
+
+### Added
+
+- **`RawCompletionStreamWithProgress` streaming callback** — New method that
+  works like `RawCompletionStream` but accepts an `onToken func(string)`
+  callback invoked for each token as it arrives. Allows callers to display
+  real-time incremental output during long-running LLM calls.
+
+- **Goal CRUD & lifecycle methods** — `GoalCreate`, `GoalList`, `GoalGet`,
+  `GoalUpdate`, `GoalDelete`, `GoalSearch`, `GoalComplete`, `GoalApprove`,
+  `GoalReject`, `GoalStepStart`, `GoalStepComplete`, `GoalStepFail`. Full
+  coverage of the `/api/chat/goals` endpoints including step-level lifecycle
+  transitions.
+
+- **Task CRUD & lifecycle methods** — `TaskCreate`, `TaskList`, `TaskGet`,
+  `TaskUpdate`, `TaskDelete`, `TaskDue`, `TaskStart`, `TaskSucceed`,
+  `TaskFail`, `TaskPause`, `TaskResume`. Full coverage of the
+  `/api/chat/tasks` endpoints including due-task polling and lifecycle
+  transitions.
+
+- **Agent CRUD methods** — `AgentCreate`, `AgentList`, `AgentGet`,
+  `AgentGetByName`, `AgentUpdate`, `AgentDelete`, `AgentsByDeployment`. Full
+  coverage of the `/api/chat/agents` endpoints including lookup by name and
+  by deployment ID.
+
+## [0.13.0] - 2026-03-18
+
+### Added
+
+- **SSE streaming raw completion** — New `RawCompletionStream()`
+  method. Calls `POST /api/chat/complete/stream` and parses SSE
+  events. Keeps the connection alive with heartbeat events, preventing
+  reverse proxy timeouts on deployed instances.
+
+### Fixed
+
+- **Auth in RawCompletionStream** — Uses proper JWT token exchange
+  via `getToken()`/`refreshToken()` instead of the raw API key.
 
 - **`GetIntValue` now accepts `json.Number`, numeric strings, and all integer
   types** — Previously only handled `int`, `int64`, and `float64`. Now accepts

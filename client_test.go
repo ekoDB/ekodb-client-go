@@ -2,8 +2,10 @@ package ekodb
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -2324,5 +2326,103 @@ func TestRawCompletionServerError(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("Expected error from server error, got nil")
+	}
+}
+
+func TestRawCompletionStreamSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/chat/complete/stream": func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Accept") != "text/event-stream" {
+				t.Errorf("Expected Accept: text/event-stream, got: %s", r.Header.Get("Accept"))
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintln(w, `data: {"token":"Hello"}`)
+			fmt.Fprintln(w, `data: {"token":" world"}`)
+			fmt.Fprintln(w, `data: {"content":"Hello world","done":true}`)
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.RawCompletionStream(RawCompletionRequest{
+		SystemPrompt: "System.",
+		Message:      "User.",
+	})
+	if err != nil {
+		t.Fatalf("RawCompletionStream failed: %v", err)
+	}
+	if result.Content != "Hello world" {
+		t.Errorf("Expected 'Hello world', got '%s'", result.Content)
+	}
+}
+
+func TestRawCompletionStreamTokenAccumulation(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/chat/complete/stream": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintln(w, `data: {"token":"chunk1"}`)
+			fmt.Fprintln(w, `data: {"token":"chunk2"}`)
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.RawCompletionStream(RawCompletionRequest{
+		SystemPrompt: "S.",
+		Message:      "M.",
+	})
+	if err != nil {
+		t.Fatalf("RawCompletionStream failed: %v", err)
+	}
+	if result.Content != "chunk1chunk2" {
+		t.Errorf("Expected 'chunk1chunk2', got '%s'", result.Content)
+	}
+}
+
+func TestRawCompletionStreamError(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/chat/complete/stream": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintln(w, `data: {"error":"LLM timeout"}`)
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.RawCompletionStream(RawCompletionRequest{
+		SystemPrompt: "S.",
+		Message:      "M.",
+	})
+	if err == nil {
+		t.Error("Expected error from SSE error event, got nil")
+	}
+	if !strings.Contains(err.Error(), "LLM timeout") {
+		t.Errorf("Expected error to contain 'LLM timeout', got: %s", err.Error())
+	}
+}
+
+func TestRawCompletionStreamHTTPError(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/chat/complete/stream": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Unauthorized"))
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.RawCompletionStream(RawCompletionRequest{
+		SystemPrompt: "S.",
+		Message:      "M.",
+	})
+	if err == nil {
+		t.Error("Expected error from 401 response, got nil")
 	}
 }

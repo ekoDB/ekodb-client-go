@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -140,9 +141,14 @@ func NewClientWithConfig(config ClientConfig) (*Client, error) {
 		maxRetries:  config.MaxRetries,
 		format:      config.Format, // Default is JSON (0 value)
 		httpClient: &http.Client{
-			Timeout: config.Timeout,
-			// Using nil transport enables default transport with automatic compression
-			Transport: nil,
+			// Use a custom Transport with a dial timeout instead of http.Client.Timeout.
+			// Client.Timeout kills the entire request (including streaming SSE bodies),
+			// whereas DialContext.Timeout only limits the initial TCP+TLS handshake.
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{
+					Timeout: config.Timeout,
+				}).DialContext,
+			},
 		},
 	}
 

@@ -2,9 +2,14 @@
 package ekodb
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
+	"strings"
 )
 
 // ========== Helper Functions ==========
@@ -247,6 +252,155 @@ func (c *Client) RawCompletion(request RawCompletionRequest) (*RawCompletionResp
 	}
 
 	return &result, nil
+}
+
+// RawCompletionStream performs a stateless raw LLM completion via SSE streaming.
+//
+// Same as RawCompletion but uses Server-Sent Events to keep the connection alive.
+// Preferred for deployed instances where reverse proxies may kill idle HTTP
+// connections before the LLM responds.
+func (c *Client) RawCompletionStream(request RawCompletionRequest) (*RawCompletionResponse, error) {
+	// Serialize request body as JSON
+	bodyBytes, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", c.baseURL+"/api/chat/complete/stream", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	token := c.getToken()
+	if token == "" {
+		if err := c.refreshToken(); err != nil {
+			return nil, fmt.Errorf("failed to get auth token: %w", err)
+		}
+		token = c.getToken()
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("SSE request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("SSE raw completion failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	// Parse SSE events
+	scanner := bufio.NewScanner(resp.Body)
+	var content string
+	var lastError string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		dataStr := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if dataStr == "" {
+			continue
+		}
+		var eventData map[string]interface{}
+		if err := json.Unmarshal([]byte(dataStr), &eventData); err != nil {
+			continue
+		}
+		if token, ok := eventData["token"].(string); ok {
+			content += token
+		}
+		if c, ok := eventData["content"].(string); ok {
+			content = c
+		}
+		if e, ok := eventData["error"].(string); ok {
+			lastError = e
+		}
+	}
+
+	if lastError != "" {
+		return nil, fmt.Errorf("LLM error: %s", lastError)
+	}
+
+	return &RawCompletionResponse{Content: content}, nil
+}
+
+// RawCompletionStreamWithProgress performs a stateless raw LLM completion via SSE
+// streaming, calling onToken for each token as it arrives.
+//
+// Same as RawCompletionStream but provides incremental progress via the callback,
+// allowing callers to show real-time output during long-running LLM calls.
+func (c *Client) RawCompletionStreamWithProgress(request RawCompletionRequest, onToken func(string)) (*RawCompletionResponse, error) {
+	bodyBytes, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", c.baseURL+"/api/chat/complete/stream", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	token := c.getToken()
+	if token == "" {
+		if err := c.refreshToken(); err != nil {
+			return nil, fmt.Errorf("failed to get auth token: %w", err)
+		}
+		token = c.getToken()
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("SSE request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("SSE raw completion failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	var content string
+	var lastError string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		dataStr := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if dataStr == "" {
+			continue
+		}
+		var eventData map[string]interface{}
+		if err := json.Unmarshal([]byte(dataStr), &eventData); err != nil {
+			continue
+		}
+		if tok, ok := eventData["token"].(string); ok {
+			content += tok
+			if onToken != nil {
+				onToken(tok)
+			}
+		}
+		if c, ok := eventData["content"].(string); ok {
+			content = c
+		}
+		if e, ok := eventData["error"].(string); ok {
+			lastError = e
+		}
+	}
+
+	if lastError != "" {
+		return nil, fmt.Errorf("LLM error: %s", lastError)
+	}
+
+	return &RawCompletionResponse{Content: content}, nil
 }
 
 // GetChatTools retrieves all built-in server-side chat tool definitions.
