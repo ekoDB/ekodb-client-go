@@ -94,7 +94,8 @@ type Client struct {
 	apiKey        string
 	token         string
 	tokenMu       sync.RWMutex
-	httpClient    *http.Client
+	httpClient    *http.Client // Normal requests (has Timeout)
+	streamClient  *http.Client // SSE streaming (no Timeout, only dial timeout)
 	shouldRetry   bool
 	maxRetries    int
 	format        SerializationFormat
@@ -141,9 +142,11 @@ func NewClientWithConfig(config ClientConfig) (*Client, error) {
 		maxRetries:  config.MaxRetries,
 		format:      config.Format, // Default is JSON (0 value)
 		httpClient: &http.Client{
-			// Use a custom Transport with a dial timeout instead of http.Client.Timeout.
-			// Client.Timeout kills the entire request (including streaming SSE bodies),
-			// whereas DialContext.Timeout only limits the initial TCP+TLS handshake.
+			Timeout: config.Timeout,
+		},
+		// streamClient has no request Timeout so SSE streams aren't killed
+		// mid-flight. Only the TCP dial phase is bounded.
+		streamClient: &http.Client{
 			Transport: &http.Transport{
 				DialContext: (&net.Dialer{
 					Timeout: config.Timeout,

@@ -243,15 +243,22 @@ func (ws *WebSocketClient) routeMessage(msgType string, msg map[string]json.RawM
 func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]json.RawMessage) {
 	ws.mu.Lock()
 
-	// Try to extract messageId from payload
+	// Try to extract messageId from top-level, then from payload
 	var messageID string
-	if payloadRaw, ok := msg["payload"]; ok {
-		var payload map[string]json.RawMessage
-		if json.Unmarshal(payloadRaw, &payload) == nil {
-			if midRaw, ok := payload["message_id"]; ok {
-				json.Unmarshal(midRaw, &messageID)
-			} else if midRaw, ok := payload["messageId"]; ok {
-				json.Unmarshal(midRaw, &messageID)
+	if midRaw, ok := msg["messageId"]; ok {
+		json.Unmarshal(midRaw, &messageID)
+	} else if midRaw, ok := msg["message_id"]; ok {
+		json.Unmarshal(midRaw, &messageID)
+	}
+	if messageID == "" {
+		if payloadRaw, ok := msg["payload"]; ok {
+			var payload map[string]json.RawMessage
+			if json.Unmarshal(payloadRaw, &payload) == nil {
+				if midRaw, ok := payload["message_id"]; ok {
+					json.Unmarshal(midRaw, &messageID)
+				} else if midRaw, ok := payload["messageId"]; ok {
+					json.Unmarshal(midRaw, &messageID)
+				}
 			}
 		}
 	}
@@ -262,6 +269,16 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 		if ch, ok := ws.pendingRequests[messageID]; ok {
 			target = ch
 			delete(ws.pendingRequests, messageID)
+		}
+	}
+
+	// Server doesn't echo messageId — if there's exactly one pending
+	// request, deliver the response to it (sequential request/response).
+	if target == nil && len(ws.pendingRequests) == 1 {
+		for id, ch := range ws.pendingRequests {
+			target = ch
+			delete(ws.pendingRequests, id)
+			break
 		}
 	}
 

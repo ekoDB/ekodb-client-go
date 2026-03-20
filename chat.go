@@ -281,7 +281,7 @@ func (c *Client) RawCompletionStream(request RawCompletionRequest) (*RawCompleti
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.streamClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("SSE request failed: %w", err)
 	}
@@ -354,7 +354,7 @@ func (c *Client) RawCompletionStreamWithProgress(request RawCompletionRequest, o
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.streamClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("SSE request failed: %w", err)
 	}
