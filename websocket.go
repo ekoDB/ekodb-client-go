@@ -30,6 +30,7 @@ type ChatStreamEvent struct {
 	TokenUsage      json.RawMessage `json:"token_usage,omitempty"`
 	ToolCallHistory json.RawMessage `json:"tool_call_history,omitempty"`
 	ExecutionTimeMs uint64          `json:"execution_time_ms,omitempty"`
+	ContextWindow   uint32          `json:"context_window,omitempty"` // Model's context window size in tokens
 	ChatID          string          `json:"chat_id,omitempty"`
 	CallID          string          `json:"call_id,omitempty"`
 	ToolName        string          `json:"tool_name,omitempty"`
@@ -382,6 +383,7 @@ func (ws *WebSocketClient) routeChatStreamEnd(msg map[string]json.RawMessage) {
 		TokenUsage      json.RawMessage `json:"token_usage"`
 		ToolCallHistory json.RawMessage `json:"tool_call_history"`
 		ExecutionTimeMs uint64          `json:"execution_time_ms"`
+		ContextWindow   uint32          `json:"context_window"`
 	}
 	if raw, ok := msg["payload"]; ok {
 		json.Unmarshal(raw, &payload)
@@ -402,6 +404,7 @@ func (ws *WebSocketClient) routeChatStreamEnd(msg map[string]json.RawMessage) {
 			TokenUsage:      payload.TokenUsage,
 			ToolCallHistory: payload.ToolCallHistory,
 			ExecutionTimeMs: payload.ExecutionTimeMs,
+			ContextWindow:   payload.ContextWindow,
 		}:
 		default:
 		}

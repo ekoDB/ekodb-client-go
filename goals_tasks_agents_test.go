@@ -626,3 +626,107 @@ func TestAgentGetNotFound(t *testing.T) {
 		t.Fatal("Expected error for non-existent agent")
 	}
 }
+
+// ============================================================================
+// Goal Template CRUD Tests
+// ============================================================================
+
+func TestGoalTemplateCreate(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/goal-templates": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id": "tpl_1", "title": "Migration Template",
+			})
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.GoalTemplateCreate(map[string]interface{}{"title": "Migration Template"})
+	if err != nil {
+		t.Fatalf("GoalTemplateCreate failed: %v", err)
+	}
+	if result["id"] != "tpl_1" {
+		t.Errorf("Expected id tpl_1, got %v", result["id"])
+	}
+}
+
+func TestGoalTemplateList(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"GET /api/chat/goal-templates": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"templates": []map[string]interface{}{{"id": "tpl_1"}, {"id": "tpl_2"}},
+			})
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.GoalTemplateList()
+	if err != nil {
+		t.Fatalf("GoalTemplateList failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+}
+
+func TestGoalTemplateGet(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"GET /api/chat/goal-templates/tpl_1": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id": "tpl_1", "title": "Migration Template",
+			})
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.GoalTemplateGet("tpl_1")
+	if err != nil {
+		t.Fatalf("GoalTemplateGet failed: %v", err)
+	}
+	if result["id"] != "tpl_1" {
+		t.Errorf("Expected id tpl_1, got %v", result["id"])
+	}
+}
+
+func TestGoalTemplateUpdate(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"PUT /api/chat/goal-templates/tpl_1": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id": "tpl_1", "title": "Updated Template",
+			})
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.GoalTemplateUpdate("tpl_1", map[string]interface{}{"title": "Updated Template"})
+	if err != nil {
+		t.Fatalf("GoalTemplateUpdate failed: %v", err)
+	}
+	if result["title"] != "Updated Template" {
+		t.Errorf("Expected title 'Updated Template', got %v", result["title"])
+	}
+}
+
+func TestGoalTemplateDelete(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"DELETE /api/chat/goal-templates/tpl_1": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	err := client.GoalTemplateDelete("tpl_1")
+	if err != nil {
+		t.Fatalf("GoalTemplateDelete failed: %v", err)
+	}
+}

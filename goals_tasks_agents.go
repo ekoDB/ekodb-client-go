@@ -161,6 +161,66 @@ func (c *Client) GoalStepFail(id string, stepIndex int, data map[string]interfac
 	return result, nil
 }
 
+// ── Goal Template CRUD ─────────────────────────────────────────────────────
+
+// GoalTemplateCreate creates a new goal template.
+func (c *Client) GoalTemplateCreate(data map[string]interface{}) (map[string]interface{}, error) {
+	respBody, err := c.makeRequest("POST", "/api/chat/goal-templates", data)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// GoalTemplateList lists all goal templates.
+func (c *Client) GoalTemplateList() (map[string]interface{}, error) {
+	respBody, err := c.makeRequest("GET", "/api/chat/goal-templates", nil)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// GoalTemplateGet retrieves a goal template by ID.
+func (c *Client) GoalTemplateGet(id string) (map[string]interface{}, error) {
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/goal-templates/%s", id), nil)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// GoalTemplateUpdate updates a goal template by ID.
+func (c *Client) GoalTemplateUpdate(id string, data map[string]interface{}) (map[string]interface{}, error) {
+	respBody, err := c.makeRequest("PUT", fmt.Sprintf("/api/chat/goal-templates/%s", id), data)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// GoalTemplateDelete deletes a goal template by ID.
+func (c *Client) GoalTemplateDelete(id string) error {
+	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/chat/goal-templates/%s", id), nil)
+	return err
+}
+
 // ── Task CRUD ──────────────────────────────────────────────────────────────
 
 // TaskCreate creates a new scheduled task.

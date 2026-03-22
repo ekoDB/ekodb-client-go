@@ -570,6 +570,90 @@ func TestChatStreamEventTypes(t *testing.T) {
 	}
 }
 
+func TestChatStreamEndContextWindow(t *testing.T) {
+	// Test that context_window field is correctly marshalled/unmarshalled
+	event := ChatStreamEvent{
+		Type:            "end",
+		MessageID:       "msg-cw",
+		ExecutionTimeMs: 250,
+		ContextWindow:   128000,
+	}
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	var e2 ChatStreamEvent
+	if err := json.Unmarshal(data, &e2); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if e2.ContextWindow != 128000 {
+		t.Fatalf("expected context_window 128000, got %d", e2.ContextWindow)
+	}
+
+	// Test that context_window is omitted when zero
+	event2 := ChatStreamEvent{Type: "end", MessageID: "msg-2"}
+	data2, _ := json.Marshal(event2)
+	dataStr := string(data2)
+	if json.Valid(data2) {
+		var raw map[string]interface{}
+		json.Unmarshal(data2, &raw)
+		if _, exists := raw["context_window"]; exists {
+			t.Fatalf("context_window should be omitted when zero, got: %s", dataStr)
+		}
+	}
+}
+
+func TestWebSocketChatSendWithContextWindow(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	eventCh, err := ws.ChatSend("chat-cw", "test")
+	if err != nil {
+		t.Fatalf("failed to send chat: %v", err)
+	}
+
+	readMessage(t, serverConn)
+
+	// Send end event with context_window
+	serverConn.WriteJSON(map[string]interface{}{
+		"type": "ChatStreamEnd",
+		"payload": map[string]interface{}{
+			"chat_id":           "chat-cw",
+			"message_id":        "msg-cw",
+			"execution_time_ms": 100,
+			"context_window":    128000,
+		},
+	})
+
+	var events []ChatStreamEvent
+	for event := range eventCh {
+		events = append(events, event)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != "end" {
+		t.Fatalf("expected end event, got %s", events[0].Type)
+	}
+	if events[0].ContextWindow != 128000 {
+		t.Fatalf("expected context_window 128000, got %d", events[0].ContextWindow)
+	}
+}
+
 func TestClientToolDefinitionJSON(t *testing.T) {
 	tool := ClientToolDefinition{
 		Name:        "get_weather",

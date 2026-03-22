@@ -661,3 +661,124 @@ func (c *Client) MergeChatSessions(request MergeSessionsRequest) (*ChatSessionRe
 
 	return &result, nil
 }
+
+// ========== Chat Streaming (SSE) ==========
+
+// ChatMessageStream sends a message in an existing chat session via SSE streaming.
+// Uses the same ChatStreamEvent type as the WebSocket ChatSend method.
+//
+// Returns a channel that yields ChatStreamEvent values as they arrive:
+//   - Chunk events carry incremental token text in Content.
+//   - An End event signals completion and includes MessageID, TokenUsage, etc.
+//   - An Error event carries a description string in Error.
+//
+// The channel is closed when the stream finishes or an error occurs.
+//
+// Example:
+//
+//	ch, err := client.ChatMessageStream("chat-id", ChatMessageRequest{Message: "Hello"})
+//	if err != nil { log.Fatal(err) }
+//	for event := range ch {
+//	    switch event.Type {
+//	    case "chunk":
+//	        fmt.Print(event.Content)
+//	    case "end":
+//	        fmt.Printf("\nDone: %s (%d ms)\n", event.MessageID, event.ExecutionTimeMs)
+//	    case "error":
+//	        fmt.Println("Error:", event.Error)
+//	    }
+//	}
+func (c *Client) ChatMessageStream(chatID string, request ChatMessageRequest) (chan ChatStreamEvent, error) {
+	bodyBytes, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", c.baseURL+fmt.Sprintf("/api/chat/%s/messages/stream", chatID), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	token := c.getToken()
+	if token == "" {
+		if err := c.refreshToken(); err != nil {
+			return nil, fmt.Errorf("failed to get auth token: %w", err)
+		}
+		token = c.getToken()
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.streamClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("SSE request failed: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("SSE chat message stream failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	ch := make(chan ChatStreamEvent, 128)
+
+	go func() {
+		defer resp.Body.Close()
+		defer close(ch)
+
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data:") {
+				continue
+			}
+			dataStr := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if dataStr == "" {
+				continue
+			}
+			var eventData map[string]interface{}
+			if err := json.Unmarshal([]byte(dataStr), &eventData); err != nil {
+				continue
+			}
+
+			// Token chunk
+			if tok, ok := eventData["token"].(string); ok {
+				ch <- ChatStreamEvent{Type: "chunk", Content: tok}
+			}
+
+			// Done event (has "content" field)
+			if _, hasContent := eventData["content"]; hasContent {
+				event := ChatStreamEvent{Type: "end"}
+				if mid, ok := eventData["message_id"].(string); ok {
+					event.MessageID = mid
+				}
+				if ms, ok := eventData["execution_time_ms"].(float64); ok {
+					event.ExecutionTimeMs = uint64(ms)
+				}
+				if tu, ok := eventData["token_usage"]; ok {
+					if raw, err := json.Marshal(tu); err == nil {
+						event.TokenUsage = json.RawMessage(raw)
+					}
+				}
+				if tch, ok := eventData["tool_call_history"]; ok {
+					if raw, err := json.Marshal(tch); err == nil {
+						event.ToolCallHistory = json.RawMessage(raw)
+					}
+				}
+				if cw, ok := eventData["context_window"].(float64); ok {
+					event.ContextWindow = uint32(cw)
+				}
+				ch <- event
+				return
+			}
+
+			// Error event
+			if errMsg, ok := eventData["error"].(string); ok {
+				ch <- ChatStreamEvent{Type: "error", Error: errMsg}
+				return
+			}
+		}
+	}()
+
+	return ch, nil
+}
