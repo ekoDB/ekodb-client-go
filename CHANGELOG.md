@@ -6,16 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.14.1] - Unreleased
+## [0.14.0] - 2026-03-23
 
 ### Added
 
 - **JWT expiry-based token caching** — The client now extracts the `exp` claim
   from JWT tokens and proactively refreshes 60 seconds before expiry, matching
   the Rust client's `AuthManager` behavior. Previously tokens were cached
-  indefinitely until a 401 triggered a reactive refresh. New `extractJWTExpiry()`
-  function decodes the JWT payload (URL-safe base64 no-pad) without signature
-  verification. Falls back to a 1-hour TTL if JWT decoding fails.
+  indefinitely until a 401 triggered a reactive refresh. New
+  `extractJWTExpiry()` function decodes the JWT payload (URL-safe base64 no-pad)
+  without signature verification. Falls back to a 1-hour TTL if JWT decoding
+  fails.
 
 - **`ClearTokenCache()` exported method** — Clears the cached token and expiry,
   forcing a fresh token fetch on the next request.
@@ -34,8 +35,6 @@ and this project adheres to
   `chan ChatStreamEvent` (same type as WebSocket `ChatSend`). Calls
   `POST /api/chat/{id}/messages/stream`. Simpler alternative to WebSocket
   streaming that works behind reverse proxies without upgrade support.
-
-## [0.14.0] - 2026-03-19
 
 ### Removed
 
