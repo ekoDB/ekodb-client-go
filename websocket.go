@@ -30,6 +30,7 @@ type ChatStreamEvent struct {
 	TokenUsage      json.RawMessage `json:"token_usage,omitempty"`
 	ToolCallHistory json.RawMessage `json:"tool_call_history,omitempty"`
 	ExecutionTimeMs uint64          `json:"execution_time_ms,omitempty"`
+	ContextWindow   uint32          `json:"context_window,omitempty"` // Model's context window size in tokens
 	ChatID          string          `json:"chat_id,omitempty"`
 	CallID          string          `json:"call_id,omitempty"`
 	ToolName        string          `json:"tool_name,omitempty"`
@@ -243,15 +244,22 @@ func (ws *WebSocketClient) routeMessage(msgType string, msg map[string]json.RawM
 func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]json.RawMessage) {
 	ws.mu.Lock()
 
-	// Try to extract messageId from payload
+	// Try to extract messageId from top-level, then from payload
 	var messageID string
-	if payloadRaw, ok := msg["payload"]; ok {
-		var payload map[string]json.RawMessage
-		if json.Unmarshal(payloadRaw, &payload) == nil {
-			if midRaw, ok := payload["message_id"]; ok {
-				json.Unmarshal(midRaw, &messageID)
-			} else if midRaw, ok := payload["messageId"]; ok {
-				json.Unmarshal(midRaw, &messageID)
+	if midRaw, ok := msg["messageId"]; ok {
+		json.Unmarshal(midRaw, &messageID)
+	} else if midRaw, ok := msg["message_id"]; ok {
+		json.Unmarshal(midRaw, &messageID)
+	}
+	if messageID == "" {
+		if payloadRaw, ok := msg["payload"]; ok {
+			var payload map[string]json.RawMessage
+			if json.Unmarshal(payloadRaw, &payload) == nil {
+				if midRaw, ok := payload["message_id"]; ok {
+					json.Unmarshal(midRaw, &messageID)
+				} else if midRaw, ok := payload["messageId"]; ok {
+					json.Unmarshal(midRaw, &messageID)
+				}
 			}
 		}
 	}
@@ -262,6 +270,16 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 		if ch, ok := ws.pendingRequests[messageID]; ok {
 			target = ch
 			delete(ws.pendingRequests, messageID)
+		}
+	}
+
+	// Server doesn't echo messageId — if there's exactly one pending
+	// request, deliver the response to it (sequential request/response).
+	if target == nil && len(ws.pendingRequests) == 1 {
+		for id, ch := range ws.pendingRequests {
+			target = ch
+			delete(ws.pendingRequests, id)
+			break
 		}
 	}
 
@@ -365,6 +383,7 @@ func (ws *WebSocketClient) routeChatStreamEnd(msg map[string]json.RawMessage) {
 		TokenUsage      json.RawMessage `json:"token_usage"`
 		ToolCallHistory json.RawMessage `json:"tool_call_history"`
 		ExecutionTimeMs uint64          `json:"execution_time_ms"`
+		ContextWindow   uint32          `json:"context_window"`
 	}
 	if raw, ok := msg["payload"]; ok {
 		json.Unmarshal(raw, &payload)
@@ -385,6 +404,7 @@ func (ws *WebSocketClient) routeChatStreamEnd(msg map[string]json.RawMessage) {
 			TokenUsage:      payload.TokenUsage,
 			ToolCallHistory: payload.ToolCallHistory,
 			ExecutionTimeMs: payload.ExecutionTimeMs,
+			ContextWindow:   payload.ContextWindow,
 		}:
 		default:
 		}
@@ -655,6 +675,52 @@ func (ws *WebSocketClient) SendToolResult(chatID, callID string, success bool, r
 	}
 
 	return ws.writeJSON(request)
+}
+
+// RawCompletion performs a stateless raw LLM completion via WebSocket.
+//
+// Sends a RawComplete message and waits for the Success response.
+// Preferred over HTTP for deployed instances: the persistent WSS
+// connection is already authenticated and won't be killed by reverse
+// proxy timeouts.
+func (ws *WebSocketClient) RawCompletion(request RawCompletionRequest) (*RawCompletionResponse, error) {
+	messageID := ws.genMessageID()
+
+	payload := map[string]interface{}{
+		"system_prompt": request.SystemPrompt,
+		"message":       request.Message,
+	}
+	if request.Provider != nil {
+		payload["provider"] = *request.Provider
+	}
+	if request.Model != nil {
+		payload["model"] = *request.Model
+	}
+	if request.MaxTokens != nil {
+		payload["max_tokens"] = *request.MaxTokens
+	}
+
+	req := map[string]interface{}{
+		"type":      "RawComplete",
+		"messageId": messageID,
+		"payload":   payload,
+	}
+
+	payloadRaw, err := ws.sendRequest(req, messageID)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Data struct {
+			Content string `json:"content"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(payloadRaw, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal RawCompletion response: %w", err)
+	}
+
+	return &RawCompletionResponse{Content: result.Data.Content}, nil
 }
 
 // Close closes the WebSocket connection and cleans up resources.

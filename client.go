@@ -3,13 +3,16 @@ package ekodb
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -92,8 +95,10 @@ type Client struct {
 	baseURL       string
 	apiKey        string
 	token         string
+	tokenExpiry   int64 // Unix timestamp (seconds) when the cached token expires
 	tokenMu       sync.RWMutex
-	httpClient    *http.Client
+	httpClient    *http.Client // Normal requests (has Timeout)
+	streamClient  *http.Client // SSE streaming (no Timeout, only dial timeout)
 	shouldRetry   bool
 	maxRetries    int
 	format        SerializationFormat
@@ -141,8 +146,15 @@ func NewClientWithConfig(config ClientConfig) (*Client, error) {
 		format:      config.Format, // Default is JSON (0 value)
 		httpClient: &http.Client{
 			Timeout: config.Timeout,
-			// Using nil transport enables default transport with automatic compression
-			Transport: nil,
+		},
+		// streamClient has no request Timeout so SSE streams aren't killed
+		// mid-flight. Only the TCP dial phase is bounded.
+		streamClient: &http.Client{
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{
+					Timeout: config.Timeout,
+				}).DialContext,
+			},
 		},
 	}
 
@@ -167,11 +179,31 @@ func (c *Client) IsNearRateLimit() bool {
 	return c.rateLimitInfo.IsNearLimit()
 }
 
-// getToken returns the current token (thread-safe)
+// getToken returns the current token (thread-safe).
+// If the cached token is about to expire (within 60 seconds), it proactively
+// refreshes to avoid returning a token that will expire mid-request.
 func (c *Client) getToken() string {
 	c.tokenMu.RLock()
-	defer c.tokenMu.RUnlock()
-	return c.token
+	token := c.token
+	expiry := c.tokenExpiry
+	c.tokenMu.RUnlock()
+
+	// If we have an expiry and it's within 60 seconds, proactively refresh
+	if token != "" && expiry > 0 {
+		now := time.Now().Unix()
+		if now+60 >= expiry {
+			log.Printf("Token expiring soon (%ds left), refreshing proactively", expiry-now)
+			if err := c.refreshToken(); err != nil {
+				log.Printf("Proactive token refresh failed: %v (returning existing token)", err)
+				return token // Return existing token as fallback
+			}
+			c.tokenMu.RLock()
+			token = c.token
+			c.tokenMu.RUnlock()
+		}
+	}
+
+	return token
 }
 
 // refreshToken gets a new authentication token (thread-safe, no stale token check - used at init)
@@ -219,7 +251,59 @@ func (c *Client) refreshTokenIfStale(staleToken string) error {
 	}
 
 	c.token = token
+
+	// Extract expiry from JWT payload; fall back to 1 hour if decoding fails
+	if exp, ok := extractJWTExpiry(token); ok {
+		c.tokenExpiry = exp
+	} else {
+		c.tokenExpiry = time.Now().Unix() + 3600
+	}
+
 	return nil
+}
+
+// extractJWTExpiry decodes the JWT payload (middle segment, URL-safe base64 no-pad)
+// and extracts the "exp" claim. Returns (expiry, true) on success, (0, false) on failure.
+func extractJWTExpiry(token string) (int64, bool) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return 0, false
+	}
+
+	// JWT uses URL-safe base64 without padding
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return 0, false
+	}
+
+	var claims map[string]interface{}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return 0, false
+	}
+
+	exp, ok := claims["exp"]
+	if !ok {
+		return 0, false
+	}
+
+	// JSON numbers decode as float64
+	switch v := exp.(type) {
+	case float64:
+		return int64(v), true
+	case int64:
+		return v, true
+	default:
+		return 0, false
+	}
+}
+
+// ClearTokenCache clears the cached authentication token, forcing a fresh
+// token to be fetched on the next request.
+func (c *Client) ClearTokenCache() {
+	c.tokenMu.Lock()
+	defer c.tokenMu.Unlock()
+	c.token = ""
+	c.tokenExpiry = 0
 }
 
 // extractRateLimitInfo extracts rate limit information from response headers

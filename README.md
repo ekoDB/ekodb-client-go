@@ -350,6 +350,88 @@ results, err := client.Find("users", query)
 - `FindAll(collection string) ([]Record, error)`
 - `Close() error`
 
+### Goals, Tasks & Agents
+
+```go
+// Create a goal
+goal, _ := client.GoalCreate(map[string]interface{}{
+    "title": "Migrate user data",
+    "description": "Move users from legacy to new schema",
+    "status": "active",
+})
+
+// List goals
+goals, _ := client.GoalList()
+
+// Complete a goal (moves to pending_review)
+client.GoalComplete("goal-id", map[string]interface{}{"summary": "All records migrated"})
+
+// Approve or reject
+client.GoalApprove("goal-id")
+client.GoalReject("goal-id", map[string]interface{}{"reason": "Missing validation"})
+
+// Goal step lifecycle
+client.GoalStepStart("goal-id", 0)
+client.GoalStepComplete("goal-id", 0, map[string]interface{}{"result": "done"})
+
+// Tasks
+task, _ := client.TaskCreate(map[string]interface{}{"title": "Backup DB", "schedule": "0 0 * * *"})
+client.TaskStart("task-id")
+client.TaskSucceed("task-id", map[string]interface{}{"records": 1500})
+client.TaskPause("task-id")
+client.TaskResume("task-id", nil)
+
+// Agents
+agent, _ := client.AgentCreate(map[string]interface{}{"name": "data-processor", "model": "gpt-4.1"})
+agents, _ := client.AgentList()
+client.AgentGetByName("data-processor")
+client.AgentsByDeployment("deploy-id")
+```
+
+### Schedule Management
+
+```go
+// Create a schedule
+sched, _ := client.CreateSchedule(map[string]interface{}{
+    "name": "nightly-backup",
+    "cron": "0 2 * * *",
+    "task_type": "backup",
+})
+
+// List, get, update
+schedules, _ := client.ListSchedules()
+client.GetSchedule("sched-id")
+client.UpdateSchedule("sched-id", map[string]interface{}{"cron": "0 3 * * *"})
+
+// Pause and resume
+client.PauseSchedule("sched-id")
+client.ResumeSchedule("sched-id")
+
+// Delete
+client.DeleteSchedule("sched-id")
+```
+
+### WebSocket Chat Streaming
+
+```go
+ws, _ := client.WebSocket("ws://localhost:8080")
+defer ws.Close()
+
+eventCh, _ := ws.ChatSend(chatID, "What is the capital of France?")
+for event := range eventCh {
+    switch event.Type {
+    case "chunk":
+        fmt.Print(event.Content)
+    case "end":
+        fmt.Printf("\nDone in %dms (context window: %d tokens)\n", event.ExecutionTimeMs, event.ContextWindow)
+    case "toolCall":
+        ws.SendToolResult(chatID, event.CallID, true, result, "")
+    case "error":
+        fmt.Printf("Error: %s\n", event.Error)
+    }
+}
+```
+
 ## 💡 Examples
 
 <!-- Example counts sourced from: https://github.com/ekoDB/ekodb-client/blob/main/examples_list.txt -->

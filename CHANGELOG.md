@@ -6,9 +6,104 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.13.0] - 2026-03-17
+## [0.14.0] - 2026-03-23
+
+### Added
+
+- **JWT expiry-based token caching** — The client now extracts the `exp` claim
+  from JWT tokens and proactively refreshes 60 seconds before expiry, matching
+  the Rust client's `AuthManager` behavior. Previously tokens were cached
+  indefinitely until a 401 triggered a reactive refresh. New
+  `extractJWTExpiry()` function decodes the JWT payload (URL-safe base64 no-pad)
+  without signature verification. Falls back to a 1-hour TTL if JWT decoding
+  fails.
+
+- **`ClearTokenCache()` exported method** — Clears the cached token and expiry,
+  forcing a fresh token fetch on the next request.
+
+- **Goal template CRUD methods** — New client methods for managing goal
+  templates: `GoalTemplateCreate`, `GoalTemplateList`, `GoalTemplateGet`,
+  `GoalTemplateUpdate`, `GoalTemplateDelete`. Calls `/api/chat/goal-templates`
+  endpoints on the ekoDB server.
+
+- **`ContextWindow` field on `ChatStreamEvent`** — The `end` event now includes
+  `ContextWindow uint32` with the model's context window size in tokens. Allows
+  clients to display context usage and warn when approaching limits.
+
+- **SSE chat message streaming** — New `ChatMessageStream()` method on `Client`
+  streams chat responses via Server-Sent Events over plain HTTP. Returns a
+  `chan ChatStreamEvent` (same type as WebSocket `ChatSend`). Calls
+  `POST /api/chat/{id}/messages/stream`. Simpler alternative to WebSocket
+  streaming that works behind reverse proxies without upgrade support.
+
+### Removed
+
+- **Query index management methods** — Removed `CreateQueryIndex`,
+  `ListQueryIndexes`, `DeleteQueryIndex`, `ExplainQuery` (deleted `indexes.go`).
+  These endpoints require admin auth (`admin_filter`) and do not belong in the
+  client library.
+
+- **Search index management methods** — Removed `CreateSearchIndex`,
+  `ExplainTextSearch`, `ExplainVectorSearch`, `ExplainHybridSearch` (deleted
+  `search_indexes.go`). These endpoints require admin auth (`admin_filter`) and
+  do not belong in the client library.
 
 ### Fixed
+
+- **HTTP client timeout no longer kills SSE streams** — Replaced
+  `http.Client.Timeout` (which aborts entire requests including streaming
+  response bodies) with a `net.Dialer.Timeout` on a custom `http.Transport`. The
+  dial timeout still protects against unresponsive servers during connection
+  setup, but SSE streams like `RawCompletionStream` can now run indefinitely
+  without being killed.
+
+### Added
+
+- **Search index management methods** — `CreateSearchIndex`,
+  `ExplainTextSearch`, `ExplainVectorSearch`, `ExplainHybridSearch` for creating
+  search indexes and explaining search query execution plans.
+
+- **KV document linking methods** — `KVGetLinks`, `KVLink`, `KVUnlink` for
+  linking and unlinking documents to KV keys.
+
+- **Schedule management methods** — `CreateSchedule`, `ListSchedules`,
+  `GetSchedule`, `UpdateSchedule`, `DeleteSchedule`, `PauseSchedule`,
+  `ResumeSchedule` for full CRUD and lifecycle management of scheduled tasks.
+
+- **`RawCompletionStreamWithProgress` streaming callback** — New method that
+  works like `RawCompletionStream` but accepts an `onToken func(string)`
+  callback invoked for each token as it arrives. Allows callers to display
+  real-time incremental output during long-running LLM calls.
+
+- **Goal CRUD & lifecycle methods** — `GoalCreate`, `GoalList`, `GoalGet`,
+  `GoalUpdate`, `GoalDelete`, `GoalSearch`, `GoalComplete`, `GoalApprove`,
+  `GoalReject`, `GoalStepStart`, `GoalStepComplete`, `GoalStepFail`. Full
+  coverage of the `/api/chat/goals` endpoints including step-level lifecycle
+  transitions.
+
+- **Task CRUD & lifecycle methods** — `TaskCreate`, `TaskList`, `TaskGet`,
+  `TaskUpdate`, `TaskDelete`, `TaskDue`, `TaskStart`, `TaskSucceed`, `TaskFail`,
+  `TaskPause`, `TaskResume`. Full coverage of the `/api/chat/tasks` endpoints
+  including due-task polling and lifecycle transitions.
+
+- **Agent CRUD methods** — `AgentCreate`, `AgentList`, `AgentGet`,
+  `AgentGetByName`, `AgentUpdate`, `AgentDelete`, `AgentsByDeployment`. Full
+  coverage of the `/api/chat/agents` endpoints including lookup by name and by
+  deployment ID.
+
+## [0.13.0] - 2026-03-18
+
+### Added
+
+- **SSE streaming raw completion** — New `RawCompletionStream()` method. Calls
+  `POST /api/chat/complete/stream` and parses SSE events. Keeps the connection
+  alive with heartbeat events, preventing reverse proxy timeouts on deployed
+  instances.
+
+### Fixed
+
+- **Auth in RawCompletionStream** — Uses proper JWT token exchange via
+  `getToken()`/`refreshToken()` instead of the raw API key.
 
 - **`GetIntValue` now accepts `json.Number`, numeric strings, and all integer
   types** — Previously only handled `int`, `int64`, and `float64`. Now accepts
