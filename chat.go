@@ -95,6 +95,7 @@ type ChatMessageRequest struct {
 	ForceSummarize *bool       `json:"force_summarize,omitempty"`
 	MaxIterations  *int        `json:"max_iterations,omitempty"`
 	ToolConfig     *ToolConfig `json:"tool_config,omitempty"`
+	LLMModel       *string     `json:"llm_model,omitempty"`
 }
 
 // TokenUsage represents token usage statistics
