@@ -4,12 +4,112 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 )
 
 // ============================================================================
 // Chat Message Stream Tests
 // ============================================================================
+
+func TestExecuteToolSuccess(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+
+			if body["tool"] != "count_records" {
+				t.Errorf("Expected tool count_records, got %v", body["tool"])
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"result":  map[string]interface{}{"count": 42},
+			})
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.ExecuteTool("count_records", map[string]interface{}{"collection": "users"}, "")
+	if err != nil {
+		t.Fatalf("ExecuteTool failed: %v", err)
+	}
+	if result["count"] != float64(42) {
+		t.Errorf("Expected count 42, got %v", result["count"])
+	}
+}
+
+func TestExecuteToolWithChatID(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+
+			if body["chat_id"] != "chat_456" {
+				t.Errorf("Expected chat_id chat_456, got %v", body["chat_id"])
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"result":  map[string]interface{}{"value": "hello"},
+			})
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.ExecuteTool("kv_get", map[string]interface{}{"key": "greeting"}, "chat_456")
+	if err != nil {
+		t.Fatalf("ExecuteTool failed: %v", err)
+	}
+	if result["value"] != "hello" {
+		t.Errorf("Expected value hello, got %v", result["value"])
+	}
+}
+
+func TestExecuteToolFailure(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "permission denied",
+			})
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.ExecuteTool("delete_collection", map[string]interface{}{"collection": "system"}, "")
+	if err == nil {
+		t.Fatal("Expected error for failed tool execution")
+	}
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("Expected permission denied error, got %v", err)
+	}
+}
+
+func TestExecuteToolNotFound(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte("Not Found"))
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.ExecuteTool("count_records", map[string]interface{}{"collection": "users"}, "")
+	if err != nil {
+		t.Fatalf("Expected nil error for 404, got %v", err)
+	}
+	if result != nil {
+		t.Errorf("Expected nil result for 404, got %v", result)
+	}
+}
 
 func TestChatMessageStream(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
