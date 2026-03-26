@@ -458,7 +458,7 @@ func (c *Client) ExecuteTool(toolName string, params map[string]interface{}, cha
 	if errMsg == "" {
 		errMsg = "tool execution failed"
 	}
-	return nil, fmt.Errorf("%s", errMsg)
+	return nil, errors.New(errMsg)
 }
 
 // GetChatTools retrieves all built-in server-side chat tool definitions.

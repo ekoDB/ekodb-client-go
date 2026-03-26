@@ -17,7 +17,9 @@ func TestExecuteToolSuccess(t *testing.T) {
 		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
 			var body map[string]interface{}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("Failed to decode request body: %v", err)
+				t.Errorf("Failed to decode request body: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
 			}
 
 			if body["tool"] != "count_records" {
@@ -27,7 +29,9 @@ func TestExecuteToolSuccess(t *testing.T) {
 			// Verify params are sent correctly
 			params, ok := body["params"].(map[string]interface{})
 			if !ok {
-				t.Fatalf("Expected params to be a map, got %T", body["params"])
+				t.Errorf("Expected params to be a map, got %T", body["params"])
+				w.WriteHeader(http.StatusBadRequest)
+				return
 			}
 			if params["collection"] != "users" {
 				t.Errorf("Expected params.collection=users, got %v", params["collection"])
@@ -62,7 +66,9 @@ func TestExecuteToolWithChatID(t *testing.T) {
 		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
 			var body map[string]interface{}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("Failed to decode request body: %v", err)
+				t.Errorf("Failed to decode request body: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
 			}
 
 			if body["chat_id"] != "chat_456" {
@@ -72,7 +78,9 @@ func TestExecuteToolWithChatID(t *testing.T) {
 			// Verify params are sent correctly
 			params, ok := body["params"].(map[string]interface{})
 			if !ok {
-				t.Fatalf("Expected params to be a map, got %T", body["params"])
+				t.Errorf("Expected params to be a map, got %T", body["params"])
+				w.WriteHeader(http.StatusBadRequest)
+				return
 			}
 			if params["key"] != "greeting" {
 				t.Errorf("Expected params.key=greeting, got %v", params["key"])
@@ -135,6 +143,25 @@ func TestExecuteToolNotFound(t *testing.T) {
 	}
 	if result != nil {
 		t.Errorf("Expected nil result for 404, got %v", result)
+	}
+}
+
+func TestExecuteToolMethodNotAllowed(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			w.Write([]byte("Method Not Allowed"))
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.ExecuteTool("count_records", map[string]interface{}{"collection": "users"}, "")
+	if err != nil {
+		t.Fatalf("Expected nil error for 405, got %v", err)
+	}
+	if result != nil {
+		t.Errorf("Expected nil result for 405, got %v", result)
 	}
 }
 
