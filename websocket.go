@@ -280,7 +280,9 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 
 	// Server doesn't echo messageId — if there's exactly one pending
 	// request, deliver the response to it (sequential request/response).
-	if target == nil && len(ws.pendingRequests) == 1 {
+	// Only use this fallback when no message-id field was present at all;
+	// if a field existed but was malformed, don't risk misrouting.
+	if target == nil && !hasMessageIDField && len(ws.pendingRequests) == 1 {
 		for id, ch := range ws.pendingRequests {
 			target = ch
 			delete(ws.pendingRequests, id)
@@ -392,10 +394,9 @@ func (ws *WebSocketClient) routeChatStreamEnd(msg map[string]json.RawMessage) {
 		ExecutionTimeMs uint64          `json:"execution_time_ms"`
 		ContextWindow   uint32          `json:"context_window"`
 	}
+	var unmarshalErr error
 	if raw, ok := msg["payload"]; ok {
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			return
-		}
+		unmarshalErr = json.Unmarshal(raw, &payload)
 	}
 
 	ws.mu.Lock()
@@ -406,16 +407,24 @@ func (ws *WebSocketClient) routeChatStreamEnd(msg map[string]json.RawMessage) {
 	ws.mu.Unlock()
 
 	if ok {
-		select {
-		case ch <- ChatStreamEvent{
-			Type:            "end",
-			MessageID:       payload.MessageID,
-			TokenUsage:      payload.TokenUsage,
-			ToolCallHistory: payload.ToolCallHistory,
-			ExecutionTimeMs: payload.ExecutionTimeMs,
-			ContextWindow:   payload.ContextWindow,
-		}:
-		default:
+		if unmarshalErr != nil {
+			// Send error event so consumer isn't left hanging
+			select {
+			case ch <- ChatStreamEvent{Type: "error", Error: "malformed end payload: " + unmarshalErr.Error()}:
+			default:
+			}
+		} else {
+			select {
+			case ch <- ChatStreamEvent{
+				Type:            "end",
+				MessageID:       payload.MessageID,
+				TokenUsage:      payload.TokenUsage,
+				ToolCallHistory: payload.ToolCallHistory,
+				ExecutionTimeMs: payload.ExecutionTimeMs,
+				ContextWindow:   payload.ContextWindow,
+			}:
+			default:
+			}
 		}
 		close(ch)
 	}
@@ -433,7 +442,8 @@ func (ws *WebSocketClient) routeChatStreamError(msg map[string]json.RawMessage) 
 	}
 	if raw, ok := msg["payload"]; ok {
 		if err := json.Unmarshal(raw, &payload); err != nil {
-			return
+			// Payload is malformed — still need to close the stream
+			payload.Error = "malformed error payload: " + err.Error()
 		}
 	}
 
