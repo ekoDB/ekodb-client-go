@@ -265,16 +265,23 @@ func TestGetTokenIsThreadSafe(t *testing.T) {
 	}
 
 	// 10 writers
+	var refreshErrors int64
 	for i := 0; i < 10; i++ {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				_ = client.refreshToken()
+				if err := client.refreshToken(); err != nil {
+					atomic.AddInt64(&refreshErrors, 1)
+				}
 			}
 		}()
 	}
 
 	wg.Wait()
+
+	if refreshErrors > 0 {
+		t.Errorf("refreshToken failed %d times during concurrent access", refreshErrors)
+	}
 }
 
 // ============================================================================

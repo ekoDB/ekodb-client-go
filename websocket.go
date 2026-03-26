@@ -244,14 +244,19 @@ func (ws *WebSocketClient) routeMessage(msgType string, msg map[string]json.RawM
 func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]json.RawMessage) {
 	ws.mu.Lock()
 
-	// Try to extract messageId from top-level, then from payload
+	// Try to extract messageId from top-level, then from payload.
+	// Only fall back to the "single pending request" path when no
+	// message-id field was present at all — not when parsing failed.
 	var messageID string
+	hasMessageIDField := false
 	if midRaw, ok := msg["messageId"]; ok {
+		hasMessageIDField = true
 		_ = json.Unmarshal(midRaw, &messageID)
 	} else if midRaw, ok := msg["message_id"]; ok {
+		hasMessageIDField = true
 		_ = json.Unmarshal(midRaw, &messageID)
 	}
-	if messageID == "" {
+	if messageID == "" && !hasMessageIDField {
 		if payloadRaw, ok := msg["payload"]; ok {
 			var payload map[string]json.RawMessage
 			if json.Unmarshal(payloadRaw, &payload) == nil {
@@ -356,7 +361,9 @@ func (ws *WebSocketClient) routeChatStreamChunk(msg map[string]json.RawMessage) 
 		Content string `json:"content"`
 	}
 	if raw, ok := msg["payload"]; ok {
-		_ = json.Unmarshal(raw, &payload)
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return
+		}
 	}
 
 	ws.mu.Lock()
@@ -386,7 +393,9 @@ func (ws *WebSocketClient) routeChatStreamEnd(msg map[string]json.RawMessage) {
 		ContextWindow   uint32          `json:"context_window"`
 	}
 	if raw, ok := msg["payload"]; ok {
-		_ = json.Unmarshal(raw, &payload)
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return
+		}
 	}
 
 	ws.mu.Lock()
@@ -423,7 +432,9 @@ func (ws *WebSocketClient) routeChatStreamError(msg map[string]json.RawMessage) 
 		Message string `json:"message"`
 	}
 	if raw, ok := msg["payload"]; ok {
-		_ = json.Unmarshal(raw, &payload)
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return
+		}
 	}
 
 	errMsg := payload.Error
@@ -462,7 +473,9 @@ func (ws *WebSocketClient) routeClientToolCall(msg map[string]json.RawMessage) {
 		Arguments json.RawMessage `json:"arguments"`
 	}
 	if raw, ok := msg["payload"]; ok {
-		_ = json.Unmarshal(raw, &payload)
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return
+		}
 	}
 
 	ws.mu.Lock()
