@@ -16,10 +16,26 @@ func TestExecuteToolSuccess(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
 			var body map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&body)
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("Failed to decode request body: %v", err)
+			}
 
 			if body["tool"] != "count_records" {
 				t.Errorf("Expected tool count_records, got %v", body["tool"])
+			}
+
+			// Verify params are sent correctly
+			params, ok := body["params"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("Expected params to be a map, got %T", body["params"])
+			}
+			if params["collection"] != "users" {
+				t.Errorf("Expected params.collection=users, got %v", params["collection"])
+			}
+
+			// Verify chat_id is omitted when empty
+			if _, exists := body["chat_id"]; exists {
+				t.Errorf("Expected chat_id to be omitted when empty, but it was present: %v", body["chat_id"])
 			}
 
 			w.Header().Set("Content-Type", "application/json")
@@ -45,10 +61,21 @@ func TestExecuteToolWithChatID(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
 			var body map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&body)
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("Failed to decode request body: %v", err)
+			}
 
 			if body["chat_id"] != "chat_456" {
 				t.Errorf("Expected chat_id chat_456, got %v", body["chat_id"])
+			}
+
+			// Verify params are sent correctly
+			params, ok := body["params"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("Expected params to be a map, got %T", body["params"])
+			}
+			if params["key"] != "greeting" {
+				t.Errorf("Expected params.key=greeting, got %v", params["key"])
 			}
 
 			w.Header().Set("Content-Type", "application/json")
