@@ -14,7 +14,7 @@ func TestCreateSchedule(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/schedules": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"id": "sched_1", "name": "Daily Backup", "cron": "0 0 * * *", "status": "active",
 			})
 		},
@@ -41,7 +41,7 @@ func TestListSchedules(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/schedules": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"schedules": []map[string]interface{}{
 					{"id": "sched_1", "name": "Daily Backup"},
 					{"id": "sched_2", "name": "Hourly Sync"},
@@ -65,7 +65,7 @@ func TestGetSchedule(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/schedules/sched_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"id": "sched_1", "name": "Daily Backup", "cron": "0 0 * * *",
 			})
 		},
@@ -89,7 +89,7 @@ func TestUpdateSchedule(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"PUT /api/schedules/sched_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"id": "sched_1", "name": "Weekly Backup", "cron": "0 0 * * 0",
 			})
 		},
@@ -113,7 +113,7 @@ func TestDeleteSchedule(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"DELETE /api/schedules/sched_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 		},
 	})
 	defer server.Close()
@@ -129,7 +129,7 @@ func TestPauseSchedule(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/schedules/sched_1/pause": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"id": "sched_1", "status": "paused",
 			})
 		},
@@ -150,7 +150,7 @@ func TestResumeSchedule(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/schedules/sched_1/resume": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"id": "sched_1", "status": "active",
 			})
 		},
@@ -175,7 +175,7 @@ func TestGetScheduleNotFound(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/schedules/nonexistent": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("Not Found"))
+			_, _ = w.Write([]byte("Not Found"))
 		},
 	})
 	defer server.Close()
@@ -191,7 +191,7 @@ func TestDeleteScheduleNotFound(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"DELETE /api/schedules/nonexistent": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("Not Found"))
+			_, _ = w.Write([]byte("Not Found"))
 		},
 	})
 	defer server.Close()
@@ -207,7 +207,7 @@ func TestPauseScheduleAlreadyPaused(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/schedules/sched_1/pause": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusConflict)
-			w.Write([]byte("Schedule already paused"))
+			_, _ = w.Write([]byte("Schedule already paused"))
 		},
 	})
 	defer server.Close()
@@ -223,7 +223,7 @@ func TestCreateScheduleServerError(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/schedules": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Internal Server Error"))
+			_, _ = w.Write([]byte("Internal Server Error"))
 		},
 	})
 	defer server.Close()

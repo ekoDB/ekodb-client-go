@@ -19,7 +19,7 @@ func TestKVBatchGetSuccess(t *testing.T) {
 				{"data": "value2"},
 				{"data": "value3"},
 			}
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		},
 	}
 
@@ -46,7 +46,7 @@ func TestKVBatchSetSuccess(t *testing.T) {
 				{"key2", true},
 				{"key3", true},
 			}
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		},
 	}
 
@@ -86,7 +86,7 @@ func TestKVBatchSetWithTTL(t *testing.T) {
 				{"key1", true},
 				{"key2", true},
 			}
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		},
 	}
 
@@ -116,7 +116,7 @@ func TestKVBatchDeleteSuccess(t *testing.T) {
 				{"key2", true},
 				{"key3", false},
 			}
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		},
 	}
 
@@ -148,7 +148,7 @@ func TestKVBatchGetEmptyKeys(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/kv/batch/get": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]map[string]interface{}{})
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{})
 		},
 	}
 
@@ -174,7 +174,7 @@ func TestKVBatchSetPartialFailure(t *testing.T) {
 				{"key2", false},
 				{"key3", true},
 			}
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		},
 	}
 

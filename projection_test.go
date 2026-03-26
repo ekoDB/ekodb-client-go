@@ -192,7 +192,7 @@ func TestFindByIDWithProjectionSelectFields(t *testing.T) {
 		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			// Return only the selected fields
-			json.NewEncoder(w).Encode([]Record{
+			_ = json.NewEncoder(w).Encode([]Record{
 				{"id": "user_123", "name": "Alice", "email": "alice@example.com"},
 			})
 		},
@@ -228,7 +228,7 @@ func TestFindByIDWithProjectionExcludeFields(t *testing.T) {
 		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			// Return record without excluded fields
-			json.NewEncoder(w).Encode([]Record{
+			_ = json.NewEncoder(w).Encode([]Record{
 				{"id": "user_123", "name": "Alice"},
 			})
 		},
@@ -261,7 +261,7 @@ func TestFindByIDWithProjectionNotFound(t *testing.T) {
 		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			// Return empty array for not found
-			json.NewEncoder(w).Encode([]Record{})
+			_ = json.NewEncoder(w).Encode([]Record{})
 		},
 	}
 

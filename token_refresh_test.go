@@ -27,9 +27,9 @@ func TestTokenRefreshOnUnauthorized(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			// First call returns the initial token, subsequent calls return refreshed token
 			if requestCount.Load() == 0 {
-				json.NewEncoder(w).Encode(map[string]string{"token": "initial-token"})
+				_ = json.NewEncoder(w).Encode(map[string]string{"token": "initial-token"})
 			} else {
-				json.NewEncoder(w).Encode(map[string]string{"token": newToken})
+				_ = json.NewEncoder(w).Encode(map[string]string{"token": newToken})
 			}
 			return
 		}
@@ -38,14 +38,14 @@ func TestTokenRefreshOnUnauthorized(t *testing.T) {
 		if auth == "Bearer "+newToken {
 			// New token is accepted
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]interface{}{})
+			_ = json.NewEncoder(w).Encode([]interface{}{})
 			return
 		}
 
 		// Old token rejected with 401
 		requestCount.Add(1)
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"code":401,"message":"Invalid token: wrong instance"}`))
+		_, _ = w.Write([]byte(`{"code":401,"message":"Invalid token: wrong instance"}`))
 	}))
 	defer server.Close()
 
@@ -83,7 +83,7 @@ func TestRefreshTokenIfStaleSkipsDuplicate(t *testing.T) {
 		if r.URL.Path == "/api/auth/token" {
 			refreshCount.Add(1)
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"token": "new-token"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": "new-token"})
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -116,7 +116,7 @@ func TestRefreshTokenIfStaleSkipsDuplicate(t *testing.T) {
 	for i := 0; i < goroutines; i++ {
 		go func() {
 			defer wg.Done()
-			client.refreshTokenIfStale(staleToken)
+			_ = client.refreshTokenIfStale(staleToken)
 		}()
 	}
 	wg.Wait()
@@ -149,21 +149,21 @@ func TestConcurrentRequestsAfterTokenRefresh(t *testing.T) {
 			// Small delay to simulate real network latency
 			time.Sleep(10 * time.Millisecond)
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"token": newToken})
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": newToken})
 			return
 		}
 
 		auth := r.Header.Get("Authorization")
 		if auth == "Bearer "+newToken {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]interface{}{})
+			_ = json.NewEncoder(w).Encode([]interface{}{})
 			return
 		}
 
 		// Old token gets 401
 		unauthorizedCount.Add(1)
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"code":401,"message":"Invalid token: wrong instance"}`))
+		_, _ = w.Write([]byte(`{"code":401,"message":"Invalid token: wrong instance"}`))
 	}))
 	defer server.Close()
 
@@ -229,7 +229,7 @@ func TestGetTokenIsThreadSafe(t *testing.T) {
 		if r.URL.Path == "/api/auth/token" {
 			refreshCount.Add(1)
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"token": "token-v" + string(rune('0'+refreshCount.Load()))})
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": "token-v" + string(rune('0'+refreshCount.Load()))})
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -269,7 +269,7 @@ func TestGetTokenIsThreadSafe(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				client.refreshToken()
+				_ = client.refreshToken()
 			}
 		}()
 	}
@@ -351,7 +351,7 @@ func TestTokenExpiryProactiveRefresh(t *testing.T) {
 		if r.URL.Path == "/api/auth/token" {
 			refreshCount.Add(1)
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"token": newToken})
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": newToken})
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -410,7 +410,7 @@ func TestTokenExpiryStillValid(t *testing.T) {
 		if r.URL.Path == "/api/auth/token" {
 			refreshCount.Add(1)
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"token": "should-not-be-fetched"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": "should-not-be-fetched"})
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -456,7 +456,7 @@ func TestClearTokenCache(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/auth/token" {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"token": "some-token"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": "some-token"})
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)

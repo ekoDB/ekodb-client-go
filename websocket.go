@@ -212,7 +212,7 @@ func (ws *WebSocketClient) readLoop() {
 
 		var msgType string
 		if t, ok := msg["type"]; ok {
-			json.Unmarshal(t, &msgType)
+			_ = json.Unmarshal(t, &msgType)
 		}
 
 		ws.routeMessage(msgType, msg, data)
@@ -247,18 +247,18 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 	// Try to extract messageId from top-level, then from payload
 	var messageID string
 	if midRaw, ok := msg["messageId"]; ok {
-		json.Unmarshal(midRaw, &messageID)
+		_ = json.Unmarshal(midRaw, &messageID)
 	} else if midRaw, ok := msg["message_id"]; ok {
-		json.Unmarshal(midRaw, &messageID)
+		_ = json.Unmarshal(midRaw, &messageID)
 	}
 	if messageID == "" {
 		if payloadRaw, ok := msg["payload"]; ok {
 			var payload map[string]json.RawMessage
 			if json.Unmarshal(payloadRaw, &payload) == nil {
 				if midRaw, ok := payload["message_id"]; ok {
-					json.Unmarshal(midRaw, &messageID)
+					_ = json.Unmarshal(midRaw, &messageID)
 				} else if midRaw, ok := payload["messageId"]; ok {
-					json.Unmarshal(midRaw, &messageID)
+					_ = json.Unmarshal(midRaw, &messageID)
 				}
 			}
 		}
@@ -290,7 +290,7 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 		if msgType == "Error" {
 			var errMsg string
 			if raw, ok := msg["message"]; ok {
-				json.Unmarshal(raw, &errMsg)
+				_ = json.Unmarshal(raw, &errMsg)
 			}
 			if errMsg == "" {
 				errMsg = "unknown error"
@@ -341,7 +341,7 @@ func (ws *WebSocketClient) extractChatID(msg map[string]json.RawMessage) string 
 	}
 	var chatID string
 	if raw, ok := payload["chat_id"]; ok {
-		json.Unmarshal(raw, &chatID)
+		_ = json.Unmarshal(raw, &chatID)
 	}
 	return chatID
 }
@@ -356,7 +356,7 @@ func (ws *WebSocketClient) routeChatStreamChunk(msg map[string]json.RawMessage) 
 		Content string `json:"content"`
 	}
 	if raw, ok := msg["payload"]; ok {
-		json.Unmarshal(raw, &payload)
+		_ = json.Unmarshal(raw, &payload)
 	}
 
 	ws.mu.Lock()
@@ -386,7 +386,7 @@ func (ws *WebSocketClient) routeChatStreamEnd(msg map[string]json.RawMessage) {
 		ContextWindow   uint32          `json:"context_window"`
 	}
 	if raw, ok := msg["payload"]; ok {
-		json.Unmarshal(raw, &payload)
+		_ = json.Unmarshal(raw, &payload)
 	}
 
 	ws.mu.Lock()
@@ -423,7 +423,7 @@ func (ws *WebSocketClient) routeChatStreamError(msg map[string]json.RawMessage) 
 		Message string `json:"message"`
 	}
 	if raw, ok := msg["payload"]; ok {
-		json.Unmarshal(raw, &payload)
+		_ = json.Unmarshal(raw, &payload)
 	}
 
 	errMsg := payload.Error
@@ -462,7 +462,7 @@ func (ws *WebSocketClient) routeClientToolCall(msg map[string]json.RawMessage) {
 		Arguments json.RawMessage `json:"arguments"`
 	}
 	if raw, ok := msg["payload"]; ok {
-		json.Unmarshal(raw, &payload)
+		_ = json.Unmarshal(raw, &payload)
 	}
 
 	ws.mu.Lock()

@@ -14,7 +14,7 @@ func TestGoalCreate(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/goals": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"id": "goal_1", "title": "Test Goal", "status": "active",
 			})
 		},
@@ -35,7 +35,7 @@ func TestGoalList(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/chat/goals": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"goals": []map[string]interface{}{{"id": "goal_1"}, {"id": "goal_2"}},
 			})
 		},
@@ -56,7 +56,7 @@ func TestGoalGet(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/chat/goals/goal_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "goal_1", "title": "Test Goal"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "goal_1", "title": "Test Goal"})
 		},
 	})
 	defer server.Close()
@@ -75,7 +75,7 @@ func TestGoalUpdate(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"PUT /api/chat/goals/goal_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "goal_1", "title": "Updated"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "goal_1", "title": "Updated"})
 		},
 	})
 	defer server.Close()
@@ -94,7 +94,7 @@ func TestGoalDelete(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"DELETE /api/chat/goals/goal_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 		},
 	})
 	defer server.Close()
@@ -114,7 +114,7 @@ func TestGoalSearch(t *testing.T) {
 				t.Error("Expected q parameter")
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"goals": []interface{}{}})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"goals": []interface{}{}})
 		},
 	})
 	defer server.Close()
@@ -133,7 +133,7 @@ func TestGoalComplete(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/goals/goal_1/complete": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "goal_1", "status": "pending_review"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "goal_1", "status": "pending_review"})
 		},
 	})
 	defer server.Close()
@@ -152,7 +152,7 @@ func TestGoalApprove(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/goals/goal_1/approve": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "goal_1", "status": "in_progress"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "goal_1", "status": "in_progress"})
 		},
 	})
 	defer server.Close()
@@ -171,7 +171,7 @@ func TestGoalReject(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/goals/goal_1/reject": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "goal_1", "status": "failed"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "goal_1", "status": "failed"})
 		},
 	})
 	defer server.Close()
@@ -190,7 +190,7 @@ func TestGoalStepStart(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/goals/goal_1/steps/0/start": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "goal_1"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "goal_1"})
 		},
 	})
 	defer server.Close()
@@ -206,7 +206,7 @@ func TestGoalStepComplete(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/goals/goal_1/steps/0/complete": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "goal_1"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "goal_1"})
 		},
 	})
 	defer server.Close()
@@ -222,7 +222,7 @@ func TestGoalStepFail(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/goals/goal_1/steps/0/fail": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "goal_1"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "goal_1"})
 		},
 	})
 	defer server.Close()
@@ -242,7 +242,7 @@ func TestTaskCreate(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/tasks": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1", "name": "Test Task", "status": "active"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1", "name": "Test Task", "status": "active"})
 		},
 	})
 	defer server.Close()
@@ -261,7 +261,7 @@ func TestTaskList(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/chat/tasks": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"tasks": []interface{}{}})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"tasks": []interface{}{}})
 		},
 	})
 	defer server.Close()
@@ -280,7 +280,7 @@ func TestTaskGet(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/chat/tasks/task_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1"})
 		},
 	})
 	defer server.Close()
@@ -299,7 +299,7 @@ func TestTaskUpdate(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"PUT /api/chat/tasks/task_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1", "name": "Updated"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1", "name": "Updated"})
 		},
 	})
 	defer server.Close()
@@ -318,7 +318,7 @@ func TestTaskDelete(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"DELETE /api/chat/tasks/task_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 		},
 	})
 	defer server.Close()
@@ -334,7 +334,7 @@ func TestTaskDue(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/chat/tasks/due*": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"tasks": []interface{}{}})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"tasks": []interface{}{}})
 		},
 	})
 	defer server.Close()
@@ -353,7 +353,7 @@ func TestTaskStart(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/tasks/task_1/start": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1", "status": "running"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1", "status": "running"})
 		},
 	})
 	defer server.Close()
@@ -372,7 +372,7 @@ func TestTaskSucceed(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/tasks/task_1/succeed": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1", "status": "active"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1", "status": "active"})
 		},
 	})
 	defer server.Close()
@@ -391,7 +391,7 @@ func TestTaskFail(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/tasks/task_1/fail": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1"})
 		},
 	})
 	defer server.Close()
@@ -407,7 +407,7 @@ func TestTaskPause(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/tasks/task_1/pause": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1", "status": "paused"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1", "status": "paused"})
 		},
 	})
 	defer server.Close()
@@ -426,7 +426,7 @@ func TestTaskResume(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/tasks/task_1/resume": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1", "status": "active"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1", "status": "active"})
 		},
 	})
 	defer server.Close()
@@ -449,7 +449,7 @@ func TestAgentCreate(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/agents": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "agent_1", "name": "TestAgent"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "agent_1", "name": "TestAgent"})
 		},
 	})
 	defer server.Close()
@@ -468,7 +468,7 @@ func TestAgentList(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/chat/agents": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"agents": []interface{}{}})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"agents": []interface{}{}})
 		},
 	})
 	defer server.Close()
@@ -487,7 +487,7 @@ func TestAgentGet(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/chat/agents/agent_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "agent_1", "name": "TestAgent"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "agent_1", "name": "TestAgent"})
 		},
 	})
 	defer server.Close()
@@ -506,7 +506,7 @@ func TestAgentGetByName(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/chat/agents/by-name/TestAgent": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "agent_1", "name": "TestAgent"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "agent_1", "name": "TestAgent"})
 		},
 	})
 	defer server.Close()
@@ -525,7 +525,7 @@ func TestAgentUpdate(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"PUT /api/chat/agents/agent_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"id": "agent_1", "name": "Updated"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "agent_1", "name": "Updated"})
 		},
 	})
 	defer server.Close()
@@ -544,7 +544,7 @@ func TestAgentDelete(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"DELETE /api/chat/agents/agent_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 		},
 	})
 	defer server.Close()
@@ -560,7 +560,7 @@ func TestAgentsByDeployment(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/chat/agents/by-deployment/deploy_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"agents": []interface{}{map[string]interface{}{"id": "agent_1"}}})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"agents": []interface{}{map[string]interface{}{"id": "agent_1"}}})
 		},
 	})
 	defer server.Close()
@@ -583,7 +583,7 @@ func TestGoalGetNotFound(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/chat/goals/nonexistent": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("Not Found"))
+			_, _ = w.Write([]byte("Not Found"))
 		},
 	})
 	defer server.Close()
@@ -599,7 +599,7 @@ func TestTaskGetNotFound(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/chat/tasks/nonexistent": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("Not Found"))
+			_, _ = w.Write([]byte("Not Found"))
 		},
 	})
 	defer server.Close()
@@ -615,7 +615,7 @@ func TestAgentGetNotFound(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/chat/agents/nonexistent": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("Not Found"))
+			_, _ = w.Write([]byte("Not Found"))
 		},
 	})
 	defer server.Close()
@@ -635,7 +635,7 @@ func TestGoalTemplateCreate(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/goal-templates": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"id": "tpl_1", "title": "Migration Template",
 			})
 		},
@@ -656,7 +656,7 @@ func TestGoalTemplateList(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/chat/goal-templates": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"templates": []map[string]interface{}{{"id": "tpl_1"}, {"id": "tpl_2"}},
 			})
 		},
@@ -677,7 +677,7 @@ func TestGoalTemplateGet(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/chat/goal-templates/tpl_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"id": "tpl_1", "title": "Migration Template",
 			})
 		},
@@ -698,7 +698,7 @@ func TestGoalTemplateUpdate(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"PUT /api/chat/goal-templates/tpl_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"id": "tpl_1", "title": "Updated Template",
 			})
 		},
@@ -719,7 +719,7 @@ func TestGoalTemplateDelete(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"DELETE /api/chat/goal-templates/tpl_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 		},
 	})
 	defer server.Close()

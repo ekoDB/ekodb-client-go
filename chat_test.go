@@ -43,7 +43,7 @@ func TestExecuteToolSuccess(t *testing.T) {
 			}
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"success": true,
 				"result":  map[string]interface{}{"count": 42},
 			})
@@ -87,7 +87,7 @@ func TestExecuteToolWithChatID(t *testing.T) {
 			}
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"success": true,
 				"result":  map[string]interface{}{"value": "hello"},
 			})
@@ -109,7 +109,7 @@ func TestExecuteToolFailure(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"success": false,
 				"error":   "permission denied",
 			})
@@ -131,7 +131,7 @@ func TestExecuteToolNotFound(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("Not Found"))
+			_, _ = w.Write([]byte("Not Found"))
 		},
 	})
 	defer server.Close()
@@ -150,7 +150,7 @@ func TestExecuteToolMethodNotAllowed(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusMethodNotAllowed)
-			w.Write([]byte("Method Not Allowed"))
+			_, _ = w.Write([]byte("Method Not Allowed"))
 		},
 	})
 	defer server.Close()
@@ -265,7 +265,7 @@ func TestChatMessageStreamHTTPError(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/session_1/messages/stream": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Internal Server Error"))
+			_, _ = w.Write([]byte("Internal Server Error"))
 		},
 	})
 	defer server.Close()
@@ -381,7 +381,7 @@ func TestSaveUserFunction(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/functions": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "created", "id": "fn_1",
 			})
 		},
@@ -408,7 +408,7 @@ func TestGetUserFunction(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/functions/my_fn": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"label": "my_fn", "name": "My Function",
 			})
 		},
@@ -432,7 +432,7 @@ func TestListUserFunctions(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/functions": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]map[string]interface{}{
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
 				{"label": "fn_a", "name": "Function A"},
 				{"label": "fn_b", "name": "Function B"},
 			})
@@ -458,7 +458,7 @@ func TestListUserFunctionsWithTags(t *testing.T) {
 				t.Error("Expected tags parameter")
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]map[string]interface{}{
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
 				{"label": "fn_a", "name": "Function A"},
 			})
 		},
@@ -480,7 +480,7 @@ func TestUpdateUserFunction(t *testing.T) {
 		"PUT /api/functions/my_fn": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("{}"))
+			_, _ = w.Write([]byte("{}"))
 		},
 	})
 	defer server.Close()
@@ -503,7 +503,7 @@ func TestDeleteUserFunction(t *testing.T) {
 		"DELETE /api/functions/my_fn": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("{}"))
+			_, _ = w.Write([]byte("{}"))
 		},
 	})
 	defer server.Close()
@@ -519,7 +519,7 @@ func TestGetUserFunctionNotFound(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/functions/nonexistent": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("Not Found"))
+			_, _ = w.Write([]byte("Not Found"))
 		},
 	})
 	defer server.Close()

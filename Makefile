@@ -175,10 +175,12 @@ fmt-check:
 	@echo "✅ $(GREEN)All files are properly formatted!$(RESET)"
 
 # Run golangci-lint
+GOLANGCI_LINT := $(shell command -v golangci-lint 2>/dev/null || echo "$(shell go env GOPATH)/bin/golangci-lint")
+
 lint:
 	@echo "🔬 $(CYAN)Running golangci-lint...$(RESET)"
-	@if command -v golangci-lint > /dev/null; then \
-		golangci-lint run ./...; \
+	@if [ -x "$(GOLANGCI_LINT)" ]; then \
+		$(GOLANGCI_LINT) run ./...; \
 		echo "✅ $(GREEN)Linting complete!$(RESET)"; \
 	else \
 		echo "$(YELLOW)⚠️  golangci-lint not found$(RESET)"; \

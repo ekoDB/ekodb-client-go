@@ -14,7 +14,7 @@ func TestKVGetLinks(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/kv/links/my-key": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"links": []map[string]interface{}{
 					{"collection": "users", "document_id": "doc_1"},
 					{"collection": "users", "document_id": "doc_2"},
@@ -38,7 +38,7 @@ func TestKVLink(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/kv/link": func(w http.ResponseWriter, r *http.Request) {
 			var body map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&body)
+			_ = json.NewDecoder(r.Body).Decode(&body)
 			if body["key"] != "my-key" {
 				t.Errorf("Expected key my-key, got %v", body["key"])
 			}
@@ -49,7 +49,7 @@ func TestKVLink(t *testing.T) {
 				t.Errorf("Expected document_id doc_1, got %v", body["document_id"])
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"ok": true, "key": "my-key", "collection": "users", "document_id": "doc_1",
 			})
 		},
@@ -70,7 +70,7 @@ func TestKVUnlink(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/kv/unlink": func(w http.ResponseWriter, r *http.Request) {
 			var body map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&body)
+			_ = json.NewDecoder(r.Body).Decode(&body)
 			if body["key"] != "my-key" {
 				t.Errorf("Expected key my-key, got %v", body["key"])
 			}
@@ -81,7 +81,7 @@ func TestKVUnlink(t *testing.T) {
 				t.Errorf("Expected document_id doc_1, got %v", body["document_id"])
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"ok": true,
 			})
 		},
@@ -106,7 +106,7 @@ func TestKVGetLinksNotFound(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/kv/links/missing-key": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("Key not found"))
+			_, _ = w.Write([]byte("Key not found"))
 		},
 	})
 	defer server.Close()
@@ -122,7 +122,7 @@ func TestKVLinkServerError(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/kv/link": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Internal Server Error"))
+			_, _ = w.Write([]byte("Internal Server Error"))
 		},
 	})
 	defer server.Close()
@@ -138,7 +138,7 @@ func TestKVUnlinkNotFound(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/kv/unlink": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("Link not found"))
+			_, _ = w.Write([]byte("Link not found"))
 		},
 	})
 	defer server.Close()
@@ -154,7 +154,7 @@ func TestKVGetLinksEmpty(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/kv/links/empty-key": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"links": []interface{}{},
 			})
 		},
