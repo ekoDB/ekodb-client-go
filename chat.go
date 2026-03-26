@@ -429,6 +429,9 @@ type ExecuteToolResult struct {
 // Returns the tool result if executed, nil if the server doesn't
 // support the endpoint (older ekoDB versions), or an error.
 func (c *Client) ExecuteTool(toolName string, params map[string]interface{}, chatID string) (map[string]interface{}, error) {
+	if params == nil {
+		params = map[string]interface{}{}
+	}
 	request := ExecuteToolRequest{
 		Tool:   toolName,
 		Params: params,
