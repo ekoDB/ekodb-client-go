@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -437,7 +438,8 @@ func (c *Client) ExecuteTool(toolName string, params map[string]interface{}, cha
 	respBody, err := c.makeRequest("POST", "/api/chat/tools/execute", request)
 	if err != nil {
 		// If 404/405, server doesn't support the endpoint — return nil
-		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "405") {
+		var httpErr *HTTPError
+		if errors.As(err, &httpErr) && (httpErr.StatusCode == 404 || httpErr.StatusCode == 405) {
 			return nil, nil
 		}
 		return nil, err
