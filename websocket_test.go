@@ -11,6 +11,14 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// Test helper: write JSON to server conn, fail test on error
+func mustWriteJSON(t *testing.T, conn *websocket.Conn, v interface{}) {
+	t.Helper()
+	if err := conn.WriteJSON(v); err != nil {
+		t.Fatalf("WriteJSON failed: %v", err)
+	}
+}
+
 // Test helper: create a mock WS server and return the URL + server connection channel
 func setupTestWSServer(t *testing.T) (string, chan *websocket.Conn, *httptest.Server) {
 	upgrader := websocket.Upgrader{
@@ -92,7 +100,7 @@ func TestWebSocketFindAll(t *testing.T) {
 			},
 		},
 	}
-	serverConn.WriteJSON(resp)
+	mustWriteJSON(t, serverConn, resp)
 
 	select {
 	case records := <-resultCh:
@@ -138,7 +146,7 @@ func TestWebSocketFindAllError(t *testing.T) {
 			"message_id": msg["messageId"],
 		},
 	}
-	serverConn.WriteJSON(resp)
+	mustWriteJSON(t, serverConn, resp)
 
 	select {
 	case err := <-errCh:
@@ -191,7 +199,7 @@ func TestWebSocketSubscribe(t *testing.T) {
 	}
 
 	// Ack
-	serverConn.WriteJSON(map[string]interface{}{
+	mustWriteJSON(t, serverConn, map[string]interface{}{
 		"type":    "Success",
 		"payload": map[string]interface{}{"message_id": msg["messageId"]},
 	})
@@ -206,7 +214,7 @@ func TestWebSocketSubscribe(t *testing.T) {
 	}
 
 	// Send mutation notification
-	serverConn.WriteJSON(map[string]interface{}{
+	mustWriteJSON(t, serverConn, map[string]interface{}{
 		"type": "MutationNotification",
 		"payload": map[string]interface{}{
 			"collection": "orders",
@@ -258,15 +266,15 @@ func TestWebSocketChatSend(t *testing.T) {
 	}
 
 	// Send chunks
-	serverConn.WriteJSON(map[string]interface{}{
+	mustWriteJSON(t, serverConn, map[string]interface{}{
 		"type":    "ChatStreamChunk",
 		"payload": map[string]interface{}{"chat_id": "chat-1", "content": "Hi "},
 	})
-	serverConn.WriteJSON(map[string]interface{}{
+	mustWriteJSON(t, serverConn, map[string]interface{}{
 		"type":    "ChatStreamChunk",
 		"payload": map[string]interface{}{"chat_id": "chat-1", "content": "there!"},
 	})
-	serverConn.WriteJSON(map[string]interface{}{
+	mustWriteJSON(t, serverConn, map[string]interface{}{
 		"type": "ChatStreamEnd",
 		"payload": map[string]interface{}{
 			"chat_id":           "chat-1",
@@ -315,7 +323,7 @@ func TestWebSocketChatStreamError(t *testing.T) {
 
 	readMessage(t, serverConn) // consume the ChatSend message
 
-	serverConn.WriteJSON(map[string]interface{}{
+	mustWriteJSON(t, serverConn, map[string]interface{}{
 		"type": "ChatStreamError",
 		"payload": map[string]interface{}{
 			"chat_id": "chat-2",
@@ -374,7 +382,7 @@ func TestWebSocketRegisterClientTools(t *testing.T) {
 	}
 
 	// Ack with messageId echoed back
-	serverConn.WriteJSON(map[string]interface{}{
+	mustWriteJSON(t, serverConn, map[string]interface{}{
 		"type": "Success",
 		"payload": map[string]interface{}{
 			"message_id": msg["messageId"],
@@ -414,7 +422,7 @@ func TestWebSocketSendToolResult(t *testing.T) {
 	readMessage(t, serverConn) // consume ChatSend
 
 	// Server sends tool call
-	serverConn.WriteJSON(map[string]interface{}{
+	mustWriteJSON(t, serverConn, map[string]interface{}{
 		"type": "ClientToolCall",
 		"payload": map[string]interface{}{
 			"chat_id":   "chat-1",
@@ -453,7 +461,7 @@ func TestWebSocketSendToolResult(t *testing.T) {
 	}
 
 	// End the stream
-	serverConn.WriteJSON(map[string]interface{}{
+	mustWriteJSON(t, serverConn, map[string]interface{}{
 		"type": "ChatStreamEnd",
 		"payload": map[string]interface{}{
 			"chat_id":           "chat-1",
@@ -508,7 +516,7 @@ func TestWebSocketChatSendWithOptions(t *testing.T) {
 	}
 
 	// End stream
-	serverConn.WriteJSON(map[string]interface{}{
+	mustWriteJSON(t, serverConn, map[string]interface{}{
 		"type": "ChatStreamEnd",
 		"payload": map[string]interface{}{
 			"chat_id":           "chat-3",
@@ -599,7 +607,9 @@ func TestChatStreamEndContextWindow(t *testing.T) {
 	dataStr := string(data2)
 	if json.Valid(data2) {
 		var raw map[string]interface{}
-		json.Unmarshal(data2, &raw)
+		if err := json.Unmarshal(data2, &raw); err != nil {
+			t.Fatalf("failed to unmarshal ChatStreamEvent: %v", err)
+		}
 		if _, exists := raw["context_window"]; exists {
 			t.Fatalf("context_window should be omitted when zero, got: %s", dataStr)
 		}
@@ -628,7 +638,7 @@ func TestWebSocketChatSendWithContextWindow(t *testing.T) {
 	readMessage(t, serverConn)
 
 	// Send end event with context_window
-	serverConn.WriteJSON(map[string]interface{}{
+	mustWriteJSON(t, serverConn, map[string]interface{}{
 		"type": "ChatStreamEnd",
 		"payload": map[string]interface{}{
 			"chat_id":           "chat-cw",
@@ -730,7 +740,7 @@ func TestWebSocketRawCompletion(t *testing.T) {
 			},
 		},
 	}
-	serverConn.WriteJSON(resp)
+	mustWriteJSON(t, serverConn, resp)
 
 	select {
 	case result := <-resultCh:
@@ -794,7 +804,7 @@ func TestWebSocketRawCompletionWithOptionalFields(t *testing.T) {
 			"data": map[string]interface{}{"content": "Done."},
 		},
 	}
-	serverConn.WriteJSON(resp)
+	mustWriteJSON(t, serverConn, resp)
 
 	select {
 	case result := <-resultCh:
@@ -837,7 +847,7 @@ func TestWebSocketRawCompletionError(t *testing.T) {
 		"type":    "Error",
 		"message": "Model not found",
 	}
-	serverConn.WriteJSON(resp)
+	mustWriteJSON(t, serverConn, resp)
 
 	select {
 	case err := <-errCh:

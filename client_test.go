@@ -24,7 +24,7 @@ func mockTokenHandler(t *testing.T) http.HandlerFunc {
 			t.Errorf("Expected /api/auth/token, got %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"token": "test-jwt-token"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"token": "test-jwt-token"})
 	}
 }
 
@@ -41,7 +41,7 @@ func createTestServer(t *testing.T, handlers map[string]http.HandlerFunc) *httpt
 		auth := r.Header.Get("Authorization")
 		if auth != "Bearer test-jwt-token" {
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte("Unauthorized"))
+			_, _ = w.Write([]byte("Unauthorized"))
 			return
 		}
 
@@ -146,7 +146,7 @@ func TestNewClientWithDefaults(t *testing.T) {
 func TestClientAuthFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte("Invalid API key"))
+		_, _ = w.Write([]byte("Invalid API key"))
 	}))
 	defer server.Close()
 
@@ -273,7 +273,7 @@ func TestHealthSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/health": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -290,7 +290,7 @@ func TestHealthFailure(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/health": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"status": "unhealthy"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "unhealthy"})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -311,7 +311,7 @@ func TestInsertSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/insert/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(Record{
+			_ = json.NewEncoder(w).Encode(Record{
 				"id":   "user_123",
 				"name": "John Doe",
 				"age":  30,
@@ -336,9 +336,9 @@ func TestInsertWithTTL(t *testing.T) {
 	var receivedRecord Record
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/insert/users": func(w http.ResponseWriter, r *http.Request) {
-			json.NewDecoder(r.Body).Decode(&receivedRecord)
+			_ = json.NewDecoder(r.Body).Decode(&receivedRecord)
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(Record{"id": "user_123"})
+			_ = json.NewEncoder(w).Encode(Record{"id": "user_123"})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -363,7 +363,7 @@ func TestFindSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]Record{
+			_ = json.NewEncoder(w).Encode([]Record{
 				{"id": "user_1", "name": "Alice"},
 				{"id": "user_2", "name": "Bob"},
 			})
@@ -387,7 +387,7 @@ func TestFindEmptyResult(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]Record{})
+			_ = json.NewEncoder(w).Encode([]Record{})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -407,7 +407,7 @@ func TestFindByIDSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/find/users/user_123": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(Record{"id": "user_123", "name": "Alice"})
+			_ = json.NewEncoder(w).Encode(Record{"id": "user_123", "name": "Alice"})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -431,7 +431,7 @@ func TestUpdateSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"PUT /api/update/users/user_123": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(Record{
+			_ = json.NewEncoder(w).Encode(Record{
 				"id":   "user_123",
 				"name": "Alice Updated",
 			})
@@ -459,7 +459,7 @@ func TestDeleteSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"DELETE /api/delete/users/user_123": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]bool{"deleted": true})
+			_ = json.NewEncoder(w).Encode(map[string]bool{"deleted": true})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -490,7 +490,7 @@ func TestUpdateWithActionIncrement(t *testing.T) {
 				t.Errorf("Expected value=1, got %v", body["value"])
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(Record{"id": "rec_1", "views": float64(42)})
+			_ = json.NewEncoder(w).Encode(Record{"id": "rec_1", "views": float64(42)})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -510,7 +510,7 @@ func TestUpdateWithActionPush(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"PUT /api/update/lists/rec_2/action/push": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(Record{"id": "rec_2", "tags": []string{"rust", "new-tag"}})
+			_ = json.NewEncoder(w).Encode(Record{"id": "rec_2", "tags": []string{"rust", "new-tag"}})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -530,7 +530,7 @@ func TestUpdateWithActionClear(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"PUT /api/update/data/rec_3/action/clear": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(Record{"id": "rec_3", "temp": float64(0)})
+			_ = json.NewEncoder(w).Encode(Record{"id": "rec_3", "temp": float64(0)})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -550,7 +550,7 @@ func TestUpdateWithActionSequence(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"PUT /api/update/sequence/game/player_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(Record{
+			_ = json.NewEncoder(w).Encode(Record{
 				"id":    "player_1",
 				"score": float64(110),
 				"lives": float64(2),
@@ -580,7 +580,7 @@ func TestUpdateWithActionNotFound(t *testing.T) {
 		"PUT /api/update/counters/missing/action/increment": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"error": "Record not found"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Record not found"})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -601,7 +601,7 @@ func TestBatchInsertSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/batch/insert/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"successful": []string{"id_1", "id_2", "id_3"},
 				"failed":     []interface{}{},
 			})
@@ -629,7 +629,7 @@ func TestBatchDeleteSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"DELETE /api/batch/delete/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"successful": []string{"id_1", "id_2"},
 				"failed":     []interface{}{},
 			})
@@ -653,7 +653,7 @@ func TestBatchUpdateSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"PUT /api/batch/update/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"successful": []string{"id_1", "id_2"},
 				"failed":     []interface{}{},
 			})
@@ -684,7 +684,7 @@ func TestKVSetSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/kv/set/my_key": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]bool{"success": true})
+			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -701,7 +701,7 @@ func TestKVGetSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/kv/get/my_key": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"value": map[string]string{"data": "stored_value"},
 			})
 		},
@@ -723,7 +723,7 @@ func TestKVDeleteSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"DELETE /api/kv/delete/my_key": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]bool{"deleted": true})
+			_ = json.NewEncoder(w).Encode(map[string]bool{"deleted": true})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -740,7 +740,7 @@ func TestKVExistsSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/kv/get/existing_key": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{"value": "data"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"value": "data"})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -760,7 +760,7 @@ func TestKVExistsNotFound(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/kv/get/missing_key": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -784,7 +784,7 @@ func TestBeginTransactionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/transactions": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"transaction_id": "tx_123456"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"transaction_id": "tx_123456"})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -815,7 +815,7 @@ func TestBeginTransactionAllIsolationLevels(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/transactions": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"transaction_id": "tx_123"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"transaction_id": "tx_123"})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -872,7 +872,7 @@ func TestListCollectionsSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/collections": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string][]string{
+			_ = json.NewEncoder(w).Encode(map[string][]string{
 				"collections": {"users", "posts", "comments"},
 			})
 		},
@@ -910,7 +910,7 @@ func TestCollectionExistsTrue(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/collections": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string][]string{
+			_ = json.NewEncoder(w).Encode(map[string][]string{
 				"collections": {"users", "posts", "comments"},
 			})
 		},
@@ -932,7 +932,7 @@ func TestCollectionExistsFalse(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/collections": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string][]string{
+			_ = json.NewEncoder(w).Encode(map[string][]string{
 				"collections": {"users", "posts", "comments"},
 			})
 		},
@@ -954,7 +954,7 @@ func TestCountDocuments(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]Record{
+			_ = json.NewEncoder(w).Encode([]Record{
 				{"id": "1", "name": "Alice"},
 				{"id": "2", "name": "Bob"},
 				{"id": "3", "name": "Carol"},
@@ -978,7 +978,7 @@ func TestGetChatModels(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/chat_models": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(ChatModels{
+			_ = json.NewEncoder(w).Encode(ChatModels{
 				OpenAI:     []string{"gpt-4", "gpt-3.5-turbo"},
 				Anthropic:  []string{"claude-3-opus", "claude-3-sonnet"},
 				Perplexity: []string{"llama-3.1-sonar-small"},
@@ -1005,7 +1005,7 @@ func TestGetChatTools(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/chat/tools": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]map[string]interface{}{
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
 				{"name": "web_search", "description": "Search the web"},
 				{"name": "http_fetch", "description": "Fetch a URL"},
 			})
@@ -1031,7 +1031,7 @@ func TestGetChatToolsError(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/chat/tools": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("internal server error"))
+			_, _ = w.Write([]byte("internal server error"))
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -1048,7 +1048,7 @@ func TestGetChatModel(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/chat_models/openai": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]string{"gpt-4", "gpt-3.5-turbo", "gpt-4-turbo"})
+			_ = json.NewEncoder(w).Encode([]string{"gpt-4", "gpt-3.5-turbo", "gpt-4-turbo"})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -1072,7 +1072,7 @@ func TestServerError(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/insert/users": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Internal Server Error"))
+			_, _ = w.Write([]byte("Internal Server Error"))
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -1095,7 +1095,7 @@ func TestNotFoundError(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/find/users/nonexistent": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -1119,7 +1119,7 @@ func TestRateLimitErrorResponse(t *testing.T) {
 		"POST /api/insert/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Retry-After", "60")
 			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte("Rate limit exceeded"))
+			_, _ = w.Write([]byte("Rate limit exceeded"))
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -1149,7 +1149,7 @@ func TestRateLimitInfoExtraction(t *testing.T) {
 			w.Header().Set("X-RateLimit-Remaining", "999")
 			w.Header().Set("X-RateLimit-Reset", "1234567890")
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -1191,7 +1191,7 @@ func TestIsNearRateLimit(t *testing.T) {
 			w.Header().Set("X-RateLimit-Remaining", "5") // 5% remaining
 			w.Header().Set("X-RateLimit-Reset", "1234567890")
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -1205,7 +1205,7 @@ func TestIsNearRateLimit(t *testing.T) {
 	}
 
 	// Make a request
-	client.Health()
+	_ = client.Health()
 
 	// Check near limit
 	if !client.IsNearRateLimit() {
@@ -1221,7 +1221,7 @@ func TestRestoreRecordSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/trash/users/record_123": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"status": "restored"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "restored"})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -1238,7 +1238,7 @@ func TestRestoreCollectionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/trash/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status":           "restored",
 				"collection":       "users",
 				"records_restored": 5,
@@ -1266,7 +1266,7 @@ func TestCreateCollectionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/collections/new_collection": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"status": "created"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "created"})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -1287,7 +1287,7 @@ func TestGetCollectionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/collections/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"collection": map[string]interface{}{
 					"fields": map[string]interface{}{
 						"name": map[string]string{"field_type": "String"},
@@ -1313,7 +1313,7 @@ func TestGetSchemaSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/collections/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"collection": map[string]interface{}{
 					"fields": map[string]interface{}{
 						"name":  map[string]string{"field_type": "String"},
@@ -1344,7 +1344,7 @@ func TestSearchSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/search/documents": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"results": []map[string]interface{}{
 					{"id": "doc_1", "score": 0.95, "title": "Result 1"},
 					{"id": "doc_2", "score": 0.85, "title": "Result 2"},
@@ -1371,7 +1371,7 @@ func TestTextSearchSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/search/documents": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"results": []map[string]interface{}{
 					{"id": "doc_1", "title": "Matching document"},
 				},
@@ -1395,7 +1395,7 @@ func TestHybridSearchSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/search/documents": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"results": []map[string]interface{}{
 					{"id": "doc_1", "score": 0.9},
 					{"id": "doc_2", "score": 0.8},
@@ -1465,7 +1465,7 @@ func TestKVFindSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/kv/find": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]map[string]interface{}{
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
 				{"key": "user:1", "value": map[string]string{"name": "Alice"}},
 				{"key": "user:2", "value": map[string]string{"name": "Bob"}},
 			})
@@ -1492,7 +1492,7 @@ func TestEmbed(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/embed": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"embeddings": [][]float64{{0.1, 0.2, 0.3}},
 			})
 		},
@@ -1520,7 +1520,7 @@ func TestEmbedBatch(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/embed": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"embeddings": [][]float64{{0.1, 0.2}, {0.3, 0.4}},
 			})
 		},
@@ -1565,7 +1565,7 @@ func TestEmbedBatchMismatch(t *testing.T) {
 		"POST /api/embed": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			// Return 1 embedding for 2 input texts
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"embeddings": [][]float64{{0.1, 0.2}},
 			})
 		},
@@ -1605,7 +1605,7 @@ func TestSaveScriptSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/functions": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"id":    "func_123",
 				"label": "my_function",
 			})
@@ -1635,7 +1635,7 @@ func TestCallScriptSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/functions/my_function": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"results": []map[string]interface{}{
 					{"id": "user_1", "name": "Alice"},
 				},
@@ -1660,7 +1660,7 @@ func TestGetScriptSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/functions/func_123": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"id":    "func_123",
 				"label": "my_function",
 				"name":  "my_function",
@@ -1684,7 +1684,7 @@ func TestListScriptsSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/functions": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]map[string]interface{}{
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
 				{"id": "func_1", "label": "function_1", "name": "function_1"},
 				{"id": "func_2", "label": "function_2", "name": "function_2"},
 			})
@@ -1727,7 +1727,7 @@ func TestCreateChatSessionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/chat": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"chat_id":    "chat_123",
 				"message_id": "msg_001",
 				"responses":  []string{"Hello! How can I help you?"},
@@ -1755,7 +1755,7 @@ func TestChatMessageSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/chat/chat_123/messages": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"chat_id":    "chat_123",
 				"message_id": "msg_002",
 				"responses":  []string{"Here's my response to your question."},
@@ -1780,7 +1780,7 @@ func TestListChatSessionsSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/chat": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"sessions": []map[string]interface{}{
 					{"id": "chat_1", "created_at": "2024-01-01T00:00:00Z"},
 					{"id": "chat_2", "created_at": "2024-01-02T00:00:00Z"},
@@ -1806,7 +1806,7 @@ func TestGetChatSessionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/chat/chat_123": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"id":         "chat_123",
 				"created_at": "2024-01-01T00:00:00Z",
 				"messages":   []interface{}{},
@@ -1855,7 +1855,7 @@ func TestFindAllSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]map[string]interface{}{
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
 				{"id": "user_1", "name": "Alice"},
 				{"id": "user_2", "name": "Bob"},
 			})
@@ -1878,7 +1878,7 @@ func TestKVQuerySuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/kv/find": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]map[string]interface{}{
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
 				{"key": "config:app", "value": map[string]string{"setting": "value1"}},
 				{"key": "config:db", "value": map[string]string{"setting": "value2"}},
 			})
@@ -1901,7 +1901,7 @@ func TestGetTransactionStatusSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/transactions/tx_123": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"transaction_id": "tx_123",
 				"status":         "active",
 			})
@@ -1924,7 +1924,7 @@ func TestUpdateScriptSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"PUT /api/functions/func_123": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"id":    "func_123",
 				"label": "updated_function",
 			})
@@ -1951,7 +1951,7 @@ func TestBranchChatSessionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/chat/branch": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"chat_id":       "chat_456",
 				"branched_from": "chat_123",
 			})
@@ -1977,7 +1977,7 @@ func TestMergeChatSessionsSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/chat/merge": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"chat_id": "chat_123",
 				"merged":  true,
 			})
@@ -2004,7 +2004,7 @@ func TestUpdateChatSessionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"PUT /api/chat/chat_123": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"chat_id": "chat_123",
 				"updated": true,
 			})
@@ -2029,7 +2029,7 @@ func TestGetChatSessionMessagesSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/chat/chat_123/messages": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"messages": []map[string]interface{}{
 					{"id": "msg_1", "role": "user", "content": "Hello"},
 					{"id": "msg_2", "role": "assistant", "content": "Hi there"},
@@ -2086,7 +2086,7 @@ func TestRegenerateChatMessageSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/chat/chat_123/messages/msg_001/regenerate": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"message_id": "msg_002",
 				"content":    "Regenerated response",
 			})
@@ -2129,7 +2129,7 @@ func TestDistinctValuesSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/distinct/products/category": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(DistinctValuesResponse{
+			_ = json.NewEncoder(w).Encode(DistinctValuesResponse{
 				Collection: "products",
 				Field:      "category",
 				Values:     []interface{}{"books", "electronics", "food"},
@@ -2163,7 +2163,7 @@ func TestDistinctValuesEmpty(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/distinct/empty/tag": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(DistinctValuesResponse{
+			_ = json.NewEncoder(w).Encode(DistinctValuesResponse{
 				Collection: "empty",
 				Field:      "tag",
 				Values:     []interface{}{},
@@ -2195,7 +2195,7 @@ func TestDistinctValuesWithFilter(t *testing.T) {
 				t.Errorf("Expected filter in request body, got nil")
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(DistinctValuesResponse{
+			_ = json.NewEncoder(w).Encode(DistinctValuesResponse{
 				Collection: "orders",
 				Field:      "status",
 				Values:     []interface{}{"active", "pending"},
@@ -2228,7 +2228,7 @@ func TestDistinctValuesServerError(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/distinct/bad/field": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`{"error":"internal error"}`))
+			_, _ = w.Write([]byte(`{"error":"internal error"}`))
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -2249,7 +2249,7 @@ func TestRawCompletionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/chat/complete": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(RawCompletionResponse{
+			_ = json.NewEncoder(w).Encode(RawCompletionResponse{
 				Content: "The answer is 42.",
 			})
 		},
@@ -2274,7 +2274,7 @@ func TestRawCompletionWithOptionalFields(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/chat/complete": func(w http.ResponseWriter, r *http.Request) {
 			var body map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&body)
+			_ = json.NewDecoder(r.Body).Decode(&body)
 			if body["provider"] != "openai" {
 				w.WriteHeader(http.StatusBadRequest)
 				return
@@ -2284,7 +2284,7 @@ func TestRawCompletionWithOptionalFields(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(RawCompletionResponse{Content: "Response."})
+			_ = json.NewEncoder(w).Encode(RawCompletionResponse{Content: "Response."})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -2313,7 +2313,7 @@ func TestRawCompletionServerError(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/chat/complete": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`{"error":"llm unavailable"}`))
+			_, _ = w.Write([]byte(`{"error":"llm unavailable"}`))
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -2411,7 +2411,7 @@ func TestRawCompletionStreamHTTPError(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/chat/complete/stream": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte("Unauthorized"))
+			_, _ = w.Write([]byte("Unauthorized"))
 		},
 	}
 	server := createTestServer(t, handlers)

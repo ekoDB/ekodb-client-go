@@ -14,7 +14,7 @@ func TestUpsert_UpdatePath(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"PUT /api/update/users/user_123": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(Record{"id": "user_123", "name": "Alice Updated"})
+			_ = json.NewEncoder(w).Encode(Record{"id": "user_123", "name": "Alice Updated"})
 		},
 	})
 	defer server.Close()
@@ -36,12 +36,12 @@ func TestUpsert_InsertPath(t *testing.T) {
 		"PUT /api/update/users/new_id": func(w http.ResponseWriter, r *http.Request) {
 			callCount++
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "Not found"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Not found"})
 		},
 		"POST /api/insert/users": func(w http.ResponseWriter, r *http.Request) {
 			callCount++
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(Record{"id": "new_id", "name": "Bob"})
+			_ = json.NewEncoder(w).Encode(Record{"id": "new_id", "name": "Bob"})
 		},
 	})
 	defer server.Close()
@@ -64,7 +64,7 @@ func TestFindOne_Found(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]Record{
+			_ = json.NewEncoder(w).Encode([]Record{
 				{"id": "user_123", "email": "alice@example.com"},
 			})
 		},
@@ -88,7 +88,7 @@ func TestFindOne_NotFound(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]Record{})
+			_ = json.NewEncoder(w).Encode([]Record{})
 		},
 	})
 	defer server.Close()
@@ -107,7 +107,7 @@ func TestExists_True(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/find/users/user_123": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(Record{"id": "user_123", "name": "Alice"})
+			_ = json.NewEncoder(w).Encode(Record{"id": "user_123", "name": "Alice"})
 		},
 	})
 	defer server.Close()
@@ -126,7 +126,7 @@ func TestExists_False(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/find/users/nonexistent": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "Not found"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Not found"})
 		},
 	})
 	defer server.Close()
@@ -145,7 +145,7 @@ func TestPaginate_Page1(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]Record{
+			_ = json.NewEncoder(w).Encode([]Record{
 				{"id": "1"}, {"id": "2"}, {"id": "3"},
 			})
 		},
@@ -166,7 +166,7 @@ func TestPaginate_Page2(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]Record{
+			_ = json.NewEncoder(w).Encode([]Record{
 				{"id": "11"}, {"id": "12"},
 			})
 		},

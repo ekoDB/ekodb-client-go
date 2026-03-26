@@ -212,7 +212,7 @@ func (ws *WebSocketClient) readLoop() {
 
 		var msgType string
 		if t, ok := msg["type"]; ok {
-			json.Unmarshal(t, &msgType)
+			_ = json.Unmarshal(t, &msgType)
 		}
 
 		ws.routeMessage(msgType, msg, data)
@@ -244,21 +244,26 @@ func (ws *WebSocketClient) routeMessage(msgType string, msg map[string]json.RawM
 func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]json.RawMessage) {
 	ws.mu.Lock()
 
-	// Try to extract messageId from top-level, then from payload
+	// Try to extract messageId from top-level, then from payload.
+	// Only fall back to the "single pending request" path when no
+	// message-id field was present at all — not when parsing failed.
 	var messageID string
+	hasMessageIDField := false
 	if midRaw, ok := msg["messageId"]; ok {
-		json.Unmarshal(midRaw, &messageID)
+		hasMessageIDField = true
+		_ = json.Unmarshal(midRaw, &messageID)
 	} else if midRaw, ok := msg["message_id"]; ok {
-		json.Unmarshal(midRaw, &messageID)
+		hasMessageIDField = true
+		_ = json.Unmarshal(midRaw, &messageID)
 	}
-	if messageID == "" {
+	if messageID == "" && !hasMessageIDField {
 		if payloadRaw, ok := msg["payload"]; ok {
 			var payload map[string]json.RawMessage
 			if json.Unmarshal(payloadRaw, &payload) == nil {
 				if midRaw, ok := payload["message_id"]; ok {
-					json.Unmarshal(midRaw, &messageID)
+					_ = json.Unmarshal(midRaw, &messageID)
 				} else if midRaw, ok := payload["messageId"]; ok {
-					json.Unmarshal(midRaw, &messageID)
+					_ = json.Unmarshal(midRaw, &messageID)
 				}
 			}
 		}
@@ -275,7 +280,9 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 
 	// Server doesn't echo messageId — if there's exactly one pending
 	// request, deliver the response to it (sequential request/response).
-	if target == nil && len(ws.pendingRequests) == 1 {
+	// Only use this fallback when no message-id field was present at all;
+	// if a field existed but was malformed, don't risk misrouting.
+	if target == nil && !hasMessageIDField && len(ws.pendingRequests) == 1 {
 		for id, ch := range ws.pendingRequests {
 			target = ch
 			delete(ws.pendingRequests, id)
@@ -290,7 +297,7 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 		if msgType == "Error" {
 			var errMsg string
 			if raw, ok := msg["message"]; ok {
-				json.Unmarshal(raw, &errMsg)
+				_ = json.Unmarshal(raw, &errMsg)
 			}
 			if errMsg == "" {
 				errMsg = "unknown error"
@@ -341,7 +348,7 @@ func (ws *WebSocketClient) extractChatID(msg map[string]json.RawMessage) string 
 	}
 	var chatID string
 	if raw, ok := payload["chat_id"]; ok {
-		json.Unmarshal(raw, &chatID)
+		_ = json.Unmarshal(raw, &chatID)
 	}
 	return chatID
 }
@@ -356,7 +363,9 @@ func (ws *WebSocketClient) routeChatStreamChunk(msg map[string]json.RawMessage) 
 		Content string `json:"content"`
 	}
 	if raw, ok := msg["payload"]; ok {
-		json.Unmarshal(raw, &payload)
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return
+		}
 	}
 
 	ws.mu.Lock()
@@ -385,8 +394,9 @@ func (ws *WebSocketClient) routeChatStreamEnd(msg map[string]json.RawMessage) {
 		ExecutionTimeMs uint64          `json:"execution_time_ms"`
 		ContextWindow   uint32          `json:"context_window"`
 	}
+	var unmarshalErr error
 	if raw, ok := msg["payload"]; ok {
-		json.Unmarshal(raw, &payload)
+		unmarshalErr = json.Unmarshal(raw, &payload)
 	}
 
 	ws.mu.Lock()
@@ -397,16 +407,24 @@ func (ws *WebSocketClient) routeChatStreamEnd(msg map[string]json.RawMessage) {
 	ws.mu.Unlock()
 
 	if ok {
-		select {
-		case ch <- ChatStreamEvent{
-			Type:            "end",
-			MessageID:       payload.MessageID,
-			TokenUsage:      payload.TokenUsage,
-			ToolCallHistory: payload.ToolCallHistory,
-			ExecutionTimeMs: payload.ExecutionTimeMs,
-			ContextWindow:   payload.ContextWindow,
-		}:
-		default:
+		if unmarshalErr != nil {
+			// Send error event so consumer isn't left hanging
+			select {
+			case ch <- ChatStreamEvent{Type: "error", Error: "malformed end payload: " + unmarshalErr.Error()}:
+			default:
+			}
+		} else {
+			select {
+			case ch <- ChatStreamEvent{
+				Type:            "end",
+				MessageID:       payload.MessageID,
+				TokenUsage:      payload.TokenUsage,
+				ToolCallHistory: payload.ToolCallHistory,
+				ExecutionTimeMs: payload.ExecutionTimeMs,
+				ContextWindow:   payload.ContextWindow,
+			}:
+			default:
+			}
 		}
 		close(ch)
 	}
@@ -423,7 +441,10 @@ func (ws *WebSocketClient) routeChatStreamError(msg map[string]json.RawMessage) 
 		Message string `json:"message"`
 	}
 	if raw, ok := msg["payload"]; ok {
-		json.Unmarshal(raw, &payload)
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			// Payload is malformed — still need to close the stream
+			payload.Error = "malformed error payload: " + err.Error()
+		}
 	}
 
 	errMsg := payload.Error
@@ -462,7 +483,9 @@ func (ws *WebSocketClient) routeClientToolCall(msg map[string]json.RawMessage) {
 		Arguments json.RawMessage `json:"arguments"`
 	}
 	if raw, ok := msg["payload"]; ok {
-		json.Unmarshal(raw, &payload)
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return
+		}
 	}
 
 	ws.mu.Lock()

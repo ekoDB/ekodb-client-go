@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -95,6 +96,7 @@ type ChatMessageRequest struct {
 	ForceSummarize *bool       `json:"force_summarize,omitempty"`
 	MaxIterations  *int        `json:"max_iterations,omitempty"`
 	ToolConfig     *ToolConfig `json:"tool_config,omitempty"`
+	LLMModel       *string     `json:"llm_model,omitempty"`
 }
 
 // TokenUsage represents token usage statistics
@@ -401,6 +403,65 @@ func (c *Client) RawCompletionStreamWithProgress(request RawCompletionRequest, o
 	}
 
 	return &RawCompletionResponse{Content: content}, nil
+}
+
+// ExecuteToolRequest is the request body for POST /api/chat/tools/execute.
+type ExecuteToolRequest struct {
+	Tool   string                 `json:"tool"`
+	Params map[string]interface{} `json:"params"`
+	ChatID string                 `json:"chat_id,omitempty"`
+}
+
+// ExecuteToolResult is the response from POST /api/chat/tools/execute.
+type ExecuteToolResult struct {
+	Success bool                   `json:"success"`
+	Result  map[string]interface{} `json:"result,omitempty"`
+	Error   string                 `json:"error,omitempty"`
+}
+
+// ExecuteTool executes a tool via ekoDB's server-side tool pipeline.
+//
+// Calls POST /api/chat/tools/execute which goes through the same
+// execute_tool function as the LLM tool-calling loop — with all
+// collection filtering, permission enforcement, and internal collection
+// blocking. No LLM round-trip.
+//
+// Returns the tool result if executed, nil if the server doesn't
+// support the endpoint (older ekoDB versions), or an error.
+func (c *Client) ExecuteTool(toolName string, params map[string]interface{}, chatID string) (map[string]interface{}, error) {
+	if params == nil {
+		params = map[string]interface{}{}
+	}
+	request := ExecuteToolRequest{
+		Tool:   toolName,
+		Params: params,
+		ChatID: chatID,
+	}
+
+	respBody, err := c.makeRequest("POST", "/api/chat/tools/execute", request)
+	if err != nil {
+		// If 404/405, server doesn't support the endpoint — return nil
+		var httpErr *HTTPError
+		if errors.As(err, &httpErr) && (httpErr.StatusCode == 404 || httpErr.StatusCode == 405) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var result ExecuteToolResult
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+
+	if result.Success {
+		return result.Result, nil
+	}
+
+	errMsg := result.Error
+	if errMsg == "" {
+		errMsg = "tool execution failed"
+	}
+	return nil, errors.New(errMsg)
 }
 
 // GetChatTools retrieves all built-in server-side chat tool definitions.

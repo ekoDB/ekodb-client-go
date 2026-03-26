@@ -4,12 +4,166 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 )
 
 // ============================================================================
 // Chat Message Stream Tests
 // ============================================================================
+
+func TestExecuteToolSuccess(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("Failed to decode request body: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+			if body["tool"] != "count_records" {
+				t.Errorf("Expected tool count_records, got %v", body["tool"])
+			}
+
+			// Verify params are sent correctly
+			params, ok := body["params"].(map[string]interface{})
+			if !ok {
+				t.Errorf("Expected params to be a map, got %T", body["params"])
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if params["collection"] != "users" {
+				t.Errorf("Expected params.collection=users, got %v", params["collection"])
+			}
+
+			// Verify chat_id is omitted when empty
+			if _, exists := body["chat_id"]; exists {
+				t.Errorf("Expected chat_id to be omitted when empty, but it was present: %v", body["chat_id"])
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"result":  map[string]interface{}{"count": 42},
+			})
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.ExecuteTool("count_records", map[string]interface{}{"collection": "users"}, "")
+	if err != nil {
+		t.Fatalf("ExecuteTool failed: %v", err)
+	}
+	if result["count"] != float64(42) {
+		t.Errorf("Expected count 42, got %v", result["count"])
+	}
+}
+
+func TestExecuteToolWithChatID(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("Failed to decode request body: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+			if body["chat_id"] != "chat_456" {
+				t.Errorf("Expected chat_id chat_456, got %v", body["chat_id"])
+			}
+
+			// Verify params are sent correctly
+			params, ok := body["params"].(map[string]interface{})
+			if !ok {
+				t.Errorf("Expected params to be a map, got %T", body["params"])
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if params["key"] != "greeting" {
+				t.Errorf("Expected params.key=greeting, got %v", params["key"])
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"result":  map[string]interface{}{"value": "hello"},
+			})
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.ExecuteTool("kv_get", map[string]interface{}{"key": "greeting"}, "chat_456")
+	if err != nil {
+		t.Fatalf("ExecuteTool failed: %v", err)
+	}
+	if result["value"] != "hello" {
+		t.Errorf("Expected value hello, got %v", result["value"])
+	}
+}
+
+func TestExecuteToolFailure(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "permission denied",
+			})
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.ExecuteTool("delete_collection", map[string]interface{}{"collection": "system"}, "")
+	if err == nil {
+		t.Fatal("Expected error for failed tool execution")
+	}
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("Expected permission denied error, got %v", err)
+	}
+}
+
+func TestExecuteToolNotFound(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte("Not Found"))
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.ExecuteTool("count_records", map[string]interface{}{"collection": "users"}, "")
+	if err != nil {
+		t.Fatalf("Expected nil error for 404, got %v", err)
+	}
+	if result != nil {
+		t.Errorf("Expected nil result for 404, got %v", result)
+	}
+}
+
+func TestExecuteToolMethodNotAllowed(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/tools/execute": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			_, _ = w.Write([]byte("Method Not Allowed"))
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.ExecuteTool("count_records", map[string]interface{}{"collection": "users"}, "")
+	if err != nil {
+		t.Fatalf("Expected nil error for 405, got %v", err)
+	}
+	if result != nil {
+		t.Errorf("Expected nil result for 405, got %v", result)
+	}
+}
 
 func TestChatMessageStream(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
@@ -111,7 +265,7 @@ func TestChatMessageStreamHTTPError(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/session_1/messages/stream": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Internal Server Error"))
+			_, _ = w.Write([]byte("Internal Server Error"))
 		},
 	})
 	defer server.Close()
@@ -227,7 +381,7 @@ func TestSaveUserFunction(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/functions": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status": "created", "id": "fn_1",
 			})
 		},
@@ -254,7 +408,7 @@ func TestGetUserFunction(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/functions/my_fn": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"label": "my_fn", "name": "My Function",
 			})
 		},
@@ -278,7 +432,7 @@ func TestListUserFunctions(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/functions": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]map[string]interface{}{
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
 				{"label": "fn_a", "name": "Function A"},
 				{"label": "fn_b", "name": "Function B"},
 			})
@@ -304,7 +458,7 @@ func TestListUserFunctionsWithTags(t *testing.T) {
 				t.Error("Expected tags parameter")
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]map[string]interface{}{
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
 				{"label": "fn_a", "name": "Function A"},
 			})
 		},
@@ -326,7 +480,7 @@ func TestUpdateUserFunction(t *testing.T) {
 		"PUT /api/functions/my_fn": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("{}"))
+			_, _ = w.Write([]byte("{}"))
 		},
 	})
 	defer server.Close()
@@ -349,7 +503,7 @@ func TestDeleteUserFunction(t *testing.T) {
 		"DELETE /api/functions/my_fn": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("{}"))
+			_, _ = w.Write([]byte("{}"))
 		},
 	})
 	defer server.Close()
@@ -365,7 +519,7 @@ func TestGetUserFunctionNotFound(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/functions/nonexistent": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("Not Found"))
+			_, _ = w.Write([]byte("Not Found"))
 		},
 	})
 	defer server.Close()

@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.15.0] - 2026-03-25
+
+### Added
+
+- **Server-side `ExecuteTool`** — `Client.ExecuteTool(toolName, params, chatID)`
+  delegates to ekoDB's `POST /api/chat/tools/execute` endpoint. All collection
+  filtering, permission enforcement, and internal collection blocking happen
+  server-side. Accepts optional `chatID` for memory-tool context. Returns
+  `nil, nil` on 404/405 so callers can fall back to chat/LLM routing. New
+  `ExecuteToolRequest`/`ExecuteToolResult` types.
+
+### Fixed
+
+- **`ExecuteTool` 404/405 fallback used fragile string matching** — Was using
+  `strings.Contains(err.Error(), "404")` which could false-positive on unrelated
+  error bodies. Now uses `errors.As` to type-assert `*HTTPError` and checks
+  `StatusCode` directly.
+
 ## [0.14.0] - 2026-03-23
 
 ### Added

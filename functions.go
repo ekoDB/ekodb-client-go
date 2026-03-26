@@ -502,7 +502,7 @@ func StageIf(condition ScriptCondition, thenFunctions []FunctionStageConfig, els
 		"condition":      condition,
 		"then_functions": thenFunctions,
 	}
-	if elseFunctions != nil && len(elseFunctions) > 0 {
+	if len(elseFunctions) > 0 {
 		data["else_functions"] = elseFunctions
 	}
 	return FunctionStageConfig{
