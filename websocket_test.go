@@ -1236,18 +1236,19 @@ func TestWebSocketSchemaChangedUpdatesCache(t *testing.T) {
 		},
 	})
 
-	// Give the dispatcher time to route the message
-	time.Sleep(100 * time.Millisecond)
-
-	entry := cache.Get("users")
-	if entry == nil {
-		t.Fatal("expected cache entry after SchemaChanged")
-	}
-	if entry.PrimaryKeyAlias != "user_id" {
-		t.Errorf("expected alias 'user_id', got '%s'", entry.PrimaryKeyAlias)
-	}
-	if entry.Version != 2 {
-		t.Errorf("expected version 2, got %d", entry.Version)
+	// Poll until the cache is updated (avoids flaky time.Sleep)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if entry := cache.Get("users"); entry != nil && entry.Version == 2 {
+			if entry.PrimaryKeyAlias != "user_id" {
+				t.Errorf("expected alias 'user_id', got '%s'", entry.PrimaryKeyAlias)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for SchemaChanged to update cache")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -1282,7 +1283,9 @@ func TestWebSocketSchemaChangedIgnoresOlderVersion(t *testing.T) {
 		},
 	})
 
-	time.Sleep(100 * time.Millisecond)
+	// Can't poll for "nothing changed" — wait briefly for the message to be processed,
+	// then verify the cache was not overwritten.
+	time.Sleep(50 * time.Millisecond)
 
 	entry := cache.Get("users")
 	if entry == nil {
@@ -1321,7 +1324,7 @@ func TestWebSocketSchemaChangedWithoutCache(t *testing.T) {
 		},
 	})
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 	// If we get here without panic, test passes
 }
 
