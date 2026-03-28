@@ -108,7 +108,7 @@ func (c *Client) WebSocket(wsURL string) (*WebSocketClient, error) {
 	}
 
 	ws.dispatcherDone = make(chan struct{})
-	go ws.readLoop()
+	go ws.readLoop(ws.conn)
 
 	return ws, nil
 }
@@ -205,11 +205,9 @@ func (ws *WebSocketClient) writeJSON(v interface{}) error {
 }
 
 // readLoop is the dispatcher goroutine that routes incoming messages.
-func (ws *WebSocketClient) readLoop() {
+// conn is passed as a parameter to avoid a data race with Close() which nils ws.conn.
+func (ws *WebSocketClient) readLoop(conn *websocket.Conn) {
 	defer close(ws.dispatcherDone)
-
-	// Capture conn reference — Close() may set ws.conn to nil
-	conn := ws.conn
 
 	for {
 		_, data, err := conn.ReadMessage()
