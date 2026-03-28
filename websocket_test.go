@@ -818,6 +818,513 @@ func TestWebSocketRawCompletionWithOptionalFields(t *testing.T) {
 	}
 }
 
+// =========================================================================
+// WS CRUD Tests
+// =========================================================================
+
+func TestWebSocketInsert(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	resultCh := make(chan json.RawMessage, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := ws.Insert("users", map[string]interface{}{
+			"name": "Alice", "email": "a@b.com",
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- result
+	}()
+
+	msg := readMessage(t, serverConn)
+	if msg["type"] != "Insert" {
+		t.Fatalf("expected Insert, got %v", msg["type"])
+	}
+	payload := msg["payload"].(map[string]interface{})
+	if payload["collection"] != "users" {
+		t.Fatalf("expected collection users, got %v", payload["collection"])
+	}
+	record := payload["record"].(map[string]interface{})
+	if record["name"] != "Alice" {
+		t.Fatalf("expected name Alice, got %v", record["name"])
+	}
+
+	mustWriteJSON(t, serverConn, map[string]interface{}{
+		"type": "Success",
+		"payload": map[string]interface{}{
+			"message_id": msg["messageId"],
+			"data":       map[string]interface{}{"id": "new-1", "name": "Alice", "email": "a@b.com"},
+		},
+	})
+
+	select {
+	case result := <-resultCh:
+		var rec map[string]interface{}
+		if err := json.Unmarshal(result, &rec); err != nil {
+			t.Fatalf("failed to unmarshal result: %v", err)
+		}
+		if rec["id"] != "new-1" {
+			t.Fatalf("expected id new-1, got %v", rec["id"])
+		}
+	case err := <-errCh:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestWebSocketInsertWithBypassRipple(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := ws.Insert("users", map[string]interface{}{"name": "Bob"}, true)
+		errCh <- err
+	}()
+
+	msg := readMessage(t, serverConn)
+	payload := msg["payload"].(map[string]interface{})
+	if payload["bypass_ripple"] != true {
+		t.Fatalf("expected bypass_ripple true, got %v", payload["bypass_ripple"])
+	}
+
+	mustWriteJSON(t, serverConn, map[string]interface{}{
+		"type": "Success",
+		"payload": map[string]interface{}{
+			"message_id": msg["messageId"],
+			"data":       map[string]interface{}{"id": "new-2", "name": "Bob"},
+		},
+	})
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestWebSocketQuery(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	resultCh := make(chan json.RawMessage, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := ws.Query("users", QueryOptions{
+			Limit: 10,
+			Sort:  "name",
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- result
+	}()
+
+	msg := readMessage(t, serverConn)
+	if msg["type"] != "Query" {
+		t.Fatalf("expected Query, got %v", msg["type"])
+	}
+	payload := msg["payload"].(map[string]interface{})
+	if payload["collection"] != "users" {
+		t.Fatalf("expected collection users, got %v", payload["collection"])
+	}
+	if payload["limit"] != float64(10) {
+		t.Fatalf("expected limit 10, got %v", payload["limit"])
+	}
+
+	mustWriteJSON(t, serverConn, map[string]interface{}{
+		"type": "Success",
+		"payload": map[string]interface{}{
+			"message_id": msg["messageId"],
+			"data": []map[string]interface{}{
+				{"id": "1", "name": "Alice"},
+				{"id": "2", "name": "Bob"},
+			},
+		},
+	})
+
+	select {
+	case result := <-resultCh:
+		var records []map[string]interface{}
+		if err := json.Unmarshal(result, &records); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+		if len(records) != 2 {
+			t.Fatalf("expected 2 records, got %d", len(records))
+		}
+	case err := <-errCh:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestWebSocketUpdate(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	resultCh := make(chan json.RawMessage, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := ws.Update("users", "u-1", map[string]interface{}{"name": "Alice Updated"})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- result
+	}()
+
+	msg := readMessage(t, serverConn)
+	if msg["type"] != "Update" {
+		t.Fatalf("expected Update, got %v", msg["type"])
+	}
+	payload := msg["payload"].(map[string]interface{})
+	if payload["id"] != "u-1" {
+		t.Fatalf("expected id u-1, got %v", payload["id"])
+	}
+
+	mustWriteJSON(t, serverConn, map[string]interface{}{
+		"type": "Success",
+		"payload": map[string]interface{}{
+			"message_id": msg["messageId"],
+			"data":       map[string]interface{}{"id": "u-1", "name": "Alice Updated"},
+		},
+	})
+
+	select {
+	case result := <-resultCh:
+		var rec map[string]interface{}
+		if err := json.Unmarshal(result, &rec); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+		if rec["name"] != "Alice Updated" {
+			t.Fatalf("expected 'Alice Updated', got %v", rec["name"])
+		}
+	case err := <-errCh:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestWebSocketDelete(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- ws.Delete("users", "u-1")
+	}()
+
+	msg := readMessage(t, serverConn)
+	if msg["type"] != "Delete" {
+		t.Fatalf("expected Delete, got %v", msg["type"])
+	}
+	payload := msg["payload"].(map[string]interface{})
+	if payload["id"] != "u-1" {
+		t.Fatalf("expected id u-1, got %v", payload["id"])
+	}
+
+	mustWriteJSON(t, serverConn, map[string]interface{}{
+		"type": "Success",
+		"payload": map[string]interface{}{
+			"message_id": msg["messageId"],
+		},
+	})
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestWebSocketBatchInsert(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	resultCh := make(chan json.RawMessage, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := ws.BatchInsert("users", []map[string]interface{}{
+			{"name": "Alice"},
+			{"name": "Bob"},
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- result
+	}()
+
+	msg := readMessage(t, serverConn)
+	if msg["type"] != "BatchInsert" {
+		t.Fatalf("expected BatchInsert, got %v", msg["type"])
+	}
+
+	mustWriteJSON(t, serverConn, map[string]interface{}{
+		"type": "Success",
+		"payload": map[string]interface{}{
+			"message_id": msg["messageId"],
+			"data": map[string]interface{}{
+				"inserted": 2,
+				"ids":      []string{"id-1", "id-2"},
+			},
+		},
+	})
+
+	select {
+	case <-resultCh:
+		// success
+	case err := <-errCh:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestWebSocketCRUDError(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := ws.FindByID("users", "nonexistent")
+		errCh <- err
+	}()
+
+	msg := readMessage(t, serverConn)
+	if msg["type"] != "FindById" {
+		t.Fatalf("expected FindById, got %v", msg["type"])
+	}
+
+	mustWriteJSON(t, serverConn, map[string]interface{}{
+		"type":    "Error",
+		"code":    float64(404),
+		"message": "Record not found",
+		"payload": map[string]interface{}{
+			"message_id": msg["messageId"],
+		},
+	})
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "Record not found") {
+			t.Fatalf("expected 'Record not found', got: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+// =========================================================================
+// SchemaChanged Routing Tests
+// =========================================================================
+
+func TestWebSocketSchemaChangedUpdatesCache(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	cache := NewSchemaCache(SchemaCacheConfig{
+		Enabled:    true,
+		MaxEntries: 10,
+		TTL:        60 * time.Second,
+	})
+	cache.Insert("users", "id", 1)
+
+	client := &Client{token: "test-token", schemaCache: cache}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	// Server pushes SchemaChanged with newer version
+	mustWriteJSON(t, serverConn, map[string]interface{}{
+		"type": "SchemaChanged",
+		"payload": map[string]interface{}{
+			"collection":        "users",
+			"version":           float64(2),
+			"primary_key_alias": "user_id",
+		},
+	})
+
+	// Give the dispatcher time to route the message
+	time.Sleep(100 * time.Millisecond)
+
+	entry := cache.Get("users")
+	if entry == nil {
+		t.Fatal("expected cache entry after SchemaChanged")
+	}
+	if entry.PrimaryKeyAlias != "user_id" {
+		t.Errorf("expected alias 'user_id', got '%s'", entry.PrimaryKeyAlias)
+	}
+	if entry.Version != 2 {
+		t.Errorf("expected version 2, got %d", entry.Version)
+	}
+}
+
+func TestWebSocketSchemaChangedIgnoresOlderVersion(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	cache := NewSchemaCache(SchemaCacheConfig{
+		Enabled:    true,
+		MaxEntries: 10,
+		TTL:        60 * time.Second,
+	})
+	cache.Insert("users", "user_id", 5)
+
+	client := &Client{token: "test-token", schemaCache: cache}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	// Server pushes SchemaChanged with OLDER version
+	mustWriteJSON(t, serverConn, map[string]interface{}{
+		"type": "SchemaChanged",
+		"payload": map[string]interface{}{
+			"collection":        "users",
+			"version":           float64(3),
+			"primary_key_alias": "id",
+		},
+	})
+
+	time.Sleep(100 * time.Millisecond)
+
+	entry := cache.Get("users")
+	if entry == nil {
+		t.Fatal("expected cache entry")
+	}
+	if entry.PrimaryKeyAlias != "user_id" {
+		t.Errorf("expected alias 'user_id' unchanged, got '%s'", entry.PrimaryKeyAlias)
+	}
+	if entry.Version != 5 {
+		t.Errorf("expected version 5 unchanged, got %d", entry.Version)
+	}
+}
+
+func TestWebSocketSchemaChangedWithoutCache(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	// No schema cache attached
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	// Should not panic when no cache is attached
+	mustWriteJSON(t, serverConn, map[string]interface{}{
+		"type": "SchemaChanged",
+		"payload": map[string]interface{}{
+			"collection":        "users",
+			"version":           float64(1),
+			"primary_key_alias": "id",
+		},
+	})
+
+	time.Sleep(100 * time.Millisecond)
+	// If we get here without panic, test passes
+}
+
 func TestWebSocketRawCompletionError(t *testing.T) {
 	wsURL, connCh, server := setupTestWSServer(t)
 	defer server.Close()
