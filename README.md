@@ -352,7 +352,7 @@ results, err := client.Find("users", query)
 - `WebSocket(wsURL string) (*WebSocketClient, error)` — manual URL
 - `Close() error`
 
-**Full CRUD (14 methods):**
+**Full CRUD (15 methods):**
 
 - `FindAll(collection) ([]Record, error)`
 - `Insert(collection, record, bypassRipple?) (json.RawMessage, error)`
@@ -378,10 +378,12 @@ results, err := client.Find("users", query)
 ```go
 client.EnableSchemaCache(5*time.Minute, 100)
 ws, _ := client.ConnectWS()
-result, _ := ws.Insert("users", map[string]interface{}{
+raw, _ := ws.Insert("users", map[string]interface{}{
     "name": "Alice", "email": "a@b.com",
 })
-id := client.ExtractRecordID("users", result)
+var inserted map[string]interface{}
+_ = json.Unmarshal(raw, &inserted)
+id := client.ExtractRecordID("users", inserted)
 ```
 
 ### Goals, Tasks & Agents

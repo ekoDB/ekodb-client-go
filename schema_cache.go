@@ -150,17 +150,17 @@ func (sc *SchemaCache) InvalidateAll() {
 // Updates the cache if the event version is newer.
 func (sc *SchemaCache) HandleSchemaChanged(collection string, version uint64, primaryKeyAlias string) {
 	sc.mu.Lock()
-	defer sc.mu.Unlock()
 	if !sc.enabled {
+		sc.mu.Unlock()
 		return
 	}
 	if entry, ok := sc.entries[collection]; ok && version <= entry.Version {
+		sc.mu.Unlock()
 		return // ignore older versions
 	}
-	// Release lock and call Insert (which re-acquires)
+	// Release lock before calling Insert (which re-acquires)
 	sc.mu.Unlock()
 	sc.Insert(collection, primaryKeyAlias, version)
-	sc.mu.Lock()
 }
 
 // Len returns the number of cached entries.
@@ -196,6 +196,14 @@ func (sc *SchemaCache) ExtractRecordID(collection string, record map[string]inte
 		if id, ok := record[alias]; ok {
 			if s, ok := id.(string); ok {
 				return s
+			}
+			// Handle typed wrapper {"type": "String", "value": "..."}
+			if m, ok := id.(map[string]interface{}); ok {
+				if v, ok := m["value"]; ok {
+					if s, ok := v.(string); ok {
+						return s
+					}
+				}
 			}
 		}
 	}

@@ -101,19 +101,20 @@ func (c *Client) WebSocket(wsURL string) (*WebSocketClient, error) {
 		return nil, err
 	}
 
-	ws.dispatcherDone = make(chan struct{})
-	go ws.readLoop()
-
-	// Attach schema cache if the client has one
+	// Attach schema cache before starting readLoop to avoid a race
+	// where a SchemaChanged message arrives before the cache is set.
 	if c.schemaCache != nil {
 		ws.schemaCache = c.schemaCache
 	}
+
+	ws.dispatcherDone = make(chan struct{})
+	go ws.readLoop()
 
 	return ws, nil
 }
 
 // ConnectWS creates a WebSocket client by deriving the WS URL from the base URL.
-// Converts http→ws, https→wss and appends /api/ws.
+// Converts http→ws, https→wss (path /api/ws is appended during connect).
 func (c *Client) ConnectWS() (*WebSocketClient, error) {
 	wsURL := strings.Replace(c.baseURL, "https://", "wss://", 1)
 	wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
@@ -145,6 +146,14 @@ func (c *Client) ExtractRecordID(collection string, record map[string]interface{
 		if id, ok := record[key]; ok {
 			if s, ok := id.(string); ok {
 				return s
+			}
+			// Handle typed wrapper {"type": "String", "value": "..."}
+			if m, ok := id.(map[string]interface{}); ok {
+				if v, ok := m["value"]; ok {
+					if s, ok := v.(string); ok {
+						return s
+					}
+				}
 			}
 		}
 	}
