@@ -346,9 +346,43 @@ results, err := client.Find("users", query)
 
 ### WebSocket Methods
 
-- `WebSocket(wsURL string) (*WebSocketClient, error)`
-- `FindAll(collection string) ([]Record, error)`
+**Connection:**
+
+- `ConnectWS() (*WebSocketClient, error)` — derives WS URL from base URL
+- `WebSocket(wsURL string) (*WebSocketClient, error)` — manual URL
 - `Close() error`
+
+**Full CRUD (14 methods):**
+
+- `FindAll(collection) ([]Record, error)`
+- `Insert(collection, record, bypassRipple?) (json.RawMessage, error)`
+- `Query(collection, opts?) (json.RawMessage, error)`
+- `FindByID(collection, id) (json.RawMessage, error)`
+- `Update(collection, id, record, bypassRipple?) (json.RawMessage, error)`
+- `Delete(collection, id, bypassRipple?) error`
+- `BatchInsert(collection, records, bypassRipple?) (json.RawMessage, error)`
+- `BatchUpdate(collection, updates, bypassRipple?) (json.RawMessage, error)`
+- `BatchDelete(collection, ids, bypassRipple?) error`
+- `TextSearch(collection, query, fields, limit) (json.RawMessage, error)`
+- `DistinctValues(collection, field, filter?) (json.RawMessage, error)`
+- `UpdateWithAction(collection, id, action, field, value?) (json.RawMessage, error)`
+- `CreateCollection(name, schema?) error`
+- `ListCollections() ([]string, error)`
+- `DeleteCollection(name) error`
+
+**Schema Cache:**
+
+- `EnableSchemaCache(ttl, maxEntries)` — opt-in LRU cache
+- `ExtractRecordID(collection, record) string` — alias-aware ID extraction
+
+```go
+client.EnableSchemaCache(5*time.Minute, 100)
+ws, _ := client.ConnectWS()
+result, _ := ws.Insert("users", map[string]interface{}{
+    "name": "Alice", "email": "a@b.com",
+})
+id := client.ExtractRecordID("users", result)
+```
 
 ### Goals, Tasks & Agents
 

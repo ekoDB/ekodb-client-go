@@ -75,6 +75,7 @@ type WebSocketClient struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	messageCounter  atomic.Int64
+	schemaCache     *SchemaCache // optional, for auto-invalidation on SchemaChanged
 }
 
 type wsResponse struct {
@@ -103,7 +104,51 @@ func (c *Client) WebSocket(wsURL string) (*WebSocketClient, error) {
 	ws.dispatcherDone = make(chan struct{})
 	go ws.readLoop()
 
+	// Attach schema cache if the client has one
+	if c.schemaCache != nil {
+		ws.schemaCache = c.schemaCache
+	}
+
 	return ws, nil
+}
+
+// ConnectWS creates a WebSocket client by deriving the WS URL from the base URL.
+// Converts http→ws, https→wss and appends /api/ws.
+func (c *Client) ConnectWS() (*WebSocketClient, error) {
+	wsURL := strings.Replace(c.baseURL, "https://", "wss://", 1)
+	wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
+	return c.WebSocket(wsURL)
+}
+
+// EnableSchemaCache enables the in-memory schema cache on this client.
+func (c *Client) EnableSchemaCache(ttl time.Duration, maxEntries int) {
+	c.schemaCache = NewSchemaCache(SchemaCacheConfig{
+		Enabled:    true,
+		MaxEntries: maxEntries,
+		TTL:        ttl,
+	})
+}
+
+// GetSchemaCache returns the client's schema cache (may be nil if not enabled).
+func (c *Client) GetSchemaCache() *SchemaCache {
+	return c.schemaCache
+}
+
+// ExtractRecordID extracts the record ID from a record map using the
+// schema cache's primary_key_alias for the collection.
+func (c *Client) ExtractRecordID(collection string, record map[string]interface{}) string {
+	if c.schemaCache != nil {
+		return c.schemaCache.ExtractRecordID(collection, record)
+	}
+	// No cache — try defaults
+	for _, key := range []string{"id", "_id"} {
+		if id, ok := record[key]; ok {
+			if s, ok := id.(string); ok {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 // connect establishes a WebSocket connection.
@@ -238,6 +283,9 @@ func (ws *WebSocketClient) routeMessage(msgType string, msg map[string]json.RawM
 
 	case "ClientToolCall":
 		ws.routeClientToolCall(msg)
+
+	case "SchemaChanged":
+		ws.routeSchemaChanged(msg)
 	}
 }
 
@@ -744,6 +792,298 @@ func (ws *WebSocketClient) RawCompletion(request RawCompletionRequest) (*RawComp
 	}
 
 	return &RawCompletionResponse{Content: result.Data.Content}, nil
+}
+
+// SetSchemaCache attaches a schema cache for automatic invalidation on SchemaChanged events.
+func (ws *WebSocketClient) SetSchemaCache(cache *SchemaCache) {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	ws.schemaCache = cache
+}
+
+func (ws *WebSocketClient) routeSchemaChanged(msg map[string]json.RawMessage) {
+	payloadRaw, ok := msg["payload"]
+	if !ok {
+		return
+	}
+	var payload struct {
+		Collection      string `json:"collection"`
+		Version         uint64 `json:"version"`
+		PrimaryKeyAlias string `json:"primary_key_alias"`
+	}
+	if json.Unmarshal(payloadRaw, &payload) != nil {
+		return
+	}
+	ws.mu.Lock()
+	cache := ws.schemaCache
+	ws.mu.Unlock()
+	if cache != nil {
+		cache.HandleSchemaChanged(payload.Collection, payload.Version, payload.PrimaryKeyAlias)
+	}
+}
+
+// sendCRUD is a helper for all CRUD operations: build request, send, extract data from response.
+func (ws *WebSocketClient) sendCRUD(msgType string, payload map[string]interface{}) (json.RawMessage, error) {
+	messageID := ws.genMessageID()
+	request := map[string]interface{}{
+		"type":      msgType,
+		"messageId": messageID,
+		"payload":   payload,
+	}
+	return ws.sendRequest(request, messageID)
+}
+
+// extractData pulls the "data" field from a response payload.
+func extractData(payloadRaw json.RawMessage) (json.RawMessage, error) {
+	var wrapper struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(payloadRaw, &wrapper); err != nil {
+		return payloadRaw, nil // Return raw if no "data" wrapper
+	}
+	if wrapper.Data != nil {
+		return wrapper.Data, nil
+	}
+	return payloadRaw, nil
+}
+
+// =========================================================================
+// WS CRUD Methods — Full Parity with Server
+// =========================================================================
+
+// Insert inserts a single record into a collection via WebSocket.
+func (ws *WebSocketClient) Insert(collection string, record map[string]interface{}, bypassRipple ...bool) (json.RawMessage, error) {
+	payload := map[string]interface{}{
+		"collection": collection,
+		"record":     record,
+	}
+	if len(bypassRipple) > 0 {
+		payload["bypass_ripple"] = bypassRipple[0]
+	}
+	resp, err := ws.sendCRUD("Insert", payload)
+	if err != nil {
+		return nil, err
+	}
+	return extractData(resp)
+}
+
+// Query queries records from a collection via WebSocket.
+func (ws *WebSocketClient) Query(collection string, opts ...QueryOptions) (json.RawMessage, error) {
+	payload := map[string]interface{}{
+		"collection": collection,
+	}
+	if len(opts) > 0 {
+		o := opts[0]
+		if o.Filter != nil {
+			payload["filter"] = o.Filter
+		}
+		if o.Sort != nil {
+			payload["sort"] = o.Sort
+		}
+		if o.Limit > 0 {
+			payload["limit"] = o.Limit
+		}
+		if o.Skip > 0 {
+			payload["skip"] = o.Skip
+		}
+	}
+	resp, err := ws.sendCRUD("Query", payload)
+	if err != nil {
+		return nil, err
+	}
+	return extractData(resp)
+}
+
+// QueryOptions are optional parameters for WS Query.
+type QueryOptions struct {
+	Filter interface{} `json:"filter,omitempty"`
+	Sort   interface{} `json:"sort,omitempty"`
+	Limit  int         `json:"limit,omitempty"`
+	Skip   int         `json:"skip,omitempty"`
+}
+
+// FindByID finds a single record by ID via WebSocket.
+func (ws *WebSocketClient) FindByID(collection, id string) (json.RawMessage, error) {
+	resp, err := ws.sendCRUD("FindById", map[string]interface{}{
+		"collection": collection,
+		"id":         id,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return extractData(resp)
+}
+
+// Update updates a record by ID via WebSocket.
+func (ws *WebSocketClient) Update(collection, id string, record map[string]interface{}, bypassRipple ...bool) (json.RawMessage, error) {
+	payload := map[string]interface{}{
+		"collection": collection,
+		"id":         id,
+		"record":     record,
+	}
+	if len(bypassRipple) > 0 {
+		payload["bypass_ripple"] = bypassRipple[0]
+	}
+	resp, err := ws.sendCRUD("Update", payload)
+	if err != nil {
+		return nil, err
+	}
+	return extractData(resp)
+}
+
+// Delete deletes a record by ID via WebSocket.
+func (ws *WebSocketClient) Delete(collection, id string, bypassRipple ...bool) error {
+	payload := map[string]interface{}{
+		"collection": collection,
+		"id":         id,
+	}
+	if len(bypassRipple) > 0 {
+		payload["bypass_ripple"] = bypassRipple[0]
+	}
+	_, err := ws.sendCRUD("Delete", payload)
+	return err
+}
+
+// BatchInsert inserts multiple records at once via WebSocket.
+func (ws *WebSocketClient) BatchInsert(collection string, records []map[string]interface{}, bypassRipple ...bool) (json.RawMessage, error) {
+	payload := map[string]interface{}{
+		"collection": collection,
+		"records":    records,
+	}
+	if len(bypassRipple) > 0 {
+		payload["bypass_ripple"] = bypassRipple[0]
+	}
+	resp, err := ws.sendCRUD("BatchInsert", payload)
+	if err != nil {
+		return nil, err
+	}
+	return extractData(resp)
+}
+
+// BatchUpdate updates multiple records at once via WebSocket.
+// Each update is a [id, data] pair.
+func (ws *WebSocketClient) BatchUpdate(collection string, updates [][2]interface{}, bypassRipple ...bool) (json.RawMessage, error) {
+	payload := map[string]interface{}{
+		"collection": collection,
+		"updates":    updates,
+	}
+	if len(bypassRipple) > 0 {
+		payload["bypass_ripple"] = bypassRipple[0]
+	}
+	resp, err := ws.sendCRUD("BatchUpdate", payload)
+	if err != nil {
+		return nil, err
+	}
+	return extractData(resp)
+}
+
+// BatchDelete deletes multiple records by IDs via WebSocket.
+func (ws *WebSocketClient) BatchDelete(collection string, ids []string, bypassRipple ...bool) error {
+	payload := map[string]interface{}{
+		"collection": collection,
+		"ids":        ids,
+	}
+	if len(bypassRipple) > 0 {
+		payload["bypass_ripple"] = bypassRipple[0]
+	}
+	_, err := ws.sendCRUD("BatchDelete", payload)
+	return err
+}
+
+// TextSearch performs full-text search via WebSocket.
+func (ws *WebSocketClient) TextSearch(collection, query string, fields []string, limit int) (json.RawMessage, error) {
+	payload := map[string]interface{}{
+		"collection": collection,
+		"query":      query,
+	}
+	opts := map[string]interface{}{}
+	if len(fields) > 0 {
+		opts["fields"] = fields
+	}
+	if limit > 0 {
+		opts["limit"] = limit
+	}
+	if len(opts) > 0 {
+		payload["options"] = opts
+	}
+	resp, err := ws.sendCRUD("TextSearch", payload)
+	if err != nil {
+		return nil, err
+	}
+	return extractData(resp)
+}
+
+// DistinctValues returns distinct values for a field via WebSocket.
+func (ws *WebSocketClient) DistinctValues(collection, field string, filter ...interface{}) (json.RawMessage, error) {
+	payload := map[string]interface{}{
+		"collection": collection,
+		"field":      field,
+	}
+	if len(filter) > 0 && filter[0] != nil {
+		payload["filter"] = filter[0]
+	}
+	resp, err := ws.sendCRUD("DistinctValues", payload)
+	if err != nil {
+		return nil, err
+	}
+	return extractData(resp)
+}
+
+// UpdateWithAction applies an atomic field action to a record via WebSocket.
+func (ws *WebSocketClient) UpdateWithAction(collection, id, action, field string, value ...interface{}) (json.RawMessage, error) {
+	payload := map[string]interface{}{
+		"collection": collection,
+		"id":         id,
+		"action":     action,
+		"field":      field,
+	}
+	if len(value) > 0 && value[0] != nil {
+		payload["value"] = value[0]
+	}
+	resp, err := ws.sendCRUD("UpdateWithAction", payload)
+	if err != nil {
+		return nil, err
+	}
+	return extractData(resp)
+}
+
+// CreateCollection creates a new collection with optional schema via WebSocket.
+func (ws *WebSocketClient) CreateCollection(name string, schema ...interface{}) error {
+	payload := map[string]interface{}{
+		"name": name,
+	}
+	if len(schema) > 0 && schema[0] != nil {
+		payload["schema"] = schema[0]
+	} else {
+		payload["schema"] = map[string]interface{}{}
+	}
+	_, err := ws.sendCRUD("CreateCollection", payload)
+	return err
+}
+
+// ListCollections lists all collections via WebSocket.
+func (ws *WebSocketClient) ListCollections() ([]string, error) {
+	resp, err := ws.sendCRUD("GetCollections", map[string]interface{}{})
+	if err != nil {
+		return nil, err
+	}
+	data, err := extractData(resp)
+	if err != nil {
+		return nil, err
+	}
+	var collections []string
+	if err := json.Unmarshal(data, &collections); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal collections: %w", err)
+	}
+	return collections, nil
+}
+
+// DeleteCollection deletes a collection via WebSocket.
+func (ws *WebSocketClient) DeleteCollection(name string) error {
+	_, err := ws.sendCRUD("DeleteCollection", map[string]interface{}{
+		"name": name,
+	})
+	return err
 }
 
 // Close closes the WebSocket connection and cleans up resources.
