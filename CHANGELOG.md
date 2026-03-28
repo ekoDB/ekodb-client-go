@@ -6,7 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.16.0] - 2026-03-27
+
+### Added
+
+- **Full WebSocket CRUD parity** — 14 new methods on `WebSocketClient`:
+  `Insert`, `Query`, `FindByID`, `Update`, `Delete`, `BatchInsert`,
+  `BatchUpdate`, `BatchDelete`, `TextSearch`, `DistinctValues`,
+  `UpdateWithAction`, `CreateCollection`, `ListCollections`, `DeleteCollection`.
+  All use `messageId` for concurrent request correlation via `sendCRUD` helper.
+
+- **Schema cache** (`schema_cache.go`) — `SchemaCache` struct with LRU eviction,
+  TTL expiry, and realtime invalidation via WS `SchemaChanged` events. Enable
+  with `client.EnableSchemaCache(5*time.Minute, 100)`.
+
+- **`SchemaChanged` event handling** — WS dispatcher routes `SchemaChanged`
+  events to the schema cache for automatic invalidation when schema/primary_key
+  changes.
+
+- **`ConnectWS()`** — Convenience method on `Client` that derives the WS URL
+  from the base URL (http→ws, https→wss) and attaches the schema cache
+  automatically.
+
+- **`ExtractRecordID(collection, record)`** — On both `Client` and
+  `SchemaCache`. Uses cached `primary_key_alias` first, then falls back to
+  `"id"` / `"_id"`. Handles typed wrapper format.
+
+- **`QueryOptions`** — Struct for WS `Query` method with `Filter`, `Sort`,
+  `Limit`, `Skip` fields.
 
 ## [0.15.0] - 2026-03-25
 

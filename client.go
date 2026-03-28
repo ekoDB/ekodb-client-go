@@ -103,6 +103,7 @@ type Client struct {
 	maxRetries    int
 	format        SerializationFormat
 	rateLimitInfo *RateLimitInfo
+	schemaCache   *SchemaCache // Optional schema cache for primary_key_alias resolution
 }
 
 // Record represents a document in ekoDB
