@@ -1373,7 +1373,7 @@ func TestTextSearchSuccess(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"results": []map[string]interface{}{
-					{"id": "doc_1", "title": "Matching document"},
+					{"record": map[string]interface{}{"id": "doc_1", "title": "Matching document"}, "score": 0.85, "matched_fields": []string{"title"}},
 				},
 			})
 		},
@@ -1389,6 +1389,11 @@ func TestTextSearchSuccess(t *testing.T) {
 	if len(results) != 1 {
 		t.Errorf("TextSearch returned %d results, want 1", len(results))
 	}
+	// Verify _score is injected into the record
+	score, ok := results[0]["_score"].(float64)
+	if !ok || score != 0.85 {
+		t.Errorf("TextSearch _score = %v, want 0.85", results[0]["_score"])
+	}
 }
 
 func TestHybridSearchSuccess(t *testing.T) {
@@ -1397,8 +1402,8 @@ func TestHybridSearchSuccess(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"results": []map[string]interface{}{
-					{"id": "doc_1", "score": 0.9},
-					{"id": "doc_2", "score": 0.8},
+					{"record": map[string]interface{}{"id": "doc_1"}, "score": 0.9, "matched_fields": []string{}},
+					{"record": map[string]interface{}{"id": "doc_2"}, "score": 0.7, "matched_fields": []string{}},
 				},
 			})
 		},
@@ -1414,6 +1419,15 @@ func TestHybridSearchSuccess(t *testing.T) {
 	}
 	if len(results) != 2 {
 		t.Errorf("HybridSearch returned %d results, want 2", len(results))
+	}
+	// Verify _score is injected into each record
+	score0, ok := results[0]["_score"].(float64)
+	if !ok || score0 != 0.9 {
+		t.Errorf("HybridSearch results[0]._score = %v, want 0.9", results[0]["_score"])
+	}
+	score1, ok := results[1]["_score"].(float64)
+	if !ok || score1 != 0.7 {
+		t.Errorf("HybridSearch results[1]._score = %v, want 0.7", results[1]["_score"])
 	}
 }
 
