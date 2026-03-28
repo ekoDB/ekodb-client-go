@@ -44,7 +44,7 @@ func NewSchemaCache(config SchemaCacheConfig) *SchemaCache {
 	}
 }
 
-// NewDisabledSchemaCache creates a disabled cache (zero overhead).
+// NewDisabledSchemaCache creates a cache instance that is disabled by default.
 func NewDisabledSchemaCache() *SchemaCache {
 	return NewSchemaCache(SchemaCacheConfig{})
 }
