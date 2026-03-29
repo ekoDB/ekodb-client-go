@@ -98,10 +98,15 @@ func (c *Client) TextSearch(collection, queryText string, limit int) ([]Record, 
 		return nil, err
 	}
 
-	// Extract records from results
+	// Extract records from results, injecting _score so callers can access it
 	records := make([]Record, len(response.Results))
 	for i, result := range response.Results {
-		records[i] = result.Record
+		rec := result.Record
+		if rec == nil {
+			rec = Record{}
+		}
+		rec["_score"] = result.Score
+		records[i] = rec
 	}
 
 	return records, nil
@@ -131,10 +136,15 @@ func (c *Client) HybridSearch(collection, queryText string, queryVector []float6
 		return nil, err
 	}
 
-	// Extract records from results
+	// Extract records from results, injecting _score so callers can access it
 	records := make([]Record, len(response.Results))
 	for i, result := range response.Results {
-		records[i] = result.Record
+		rec := result.Record
+		if rec == nil {
+			rec = Record{}
+		}
+		rec["_score"] = result.Score
+		records[i] = rec
 	}
 
 	return records, nil
