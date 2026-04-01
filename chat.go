@@ -80,6 +80,7 @@ type CreateChatSessionRequest struct {
 	LLMProvider        string             `json:"llm_provider"`
 	LLMModel           *string            `json:"llm_model,omitempty"`
 	SystemPrompt       *string            `json:"system_prompt,omitempty"`
+	AgentID            *string            `json:"agent_id,omitempty"`
 	BypassRipple       *bool              `json:"bypass_ripple,omitempty"`
 	ParentID           *string            `json:"parent_id,omitempty"`
 	BranchPointIdx     *int               `json:"branch_point_idx,omitempty"`
@@ -125,6 +126,7 @@ type ChatSession struct {
 	LLMModel     string             `json:"llm_model"`
 	Collections  []CollectionConfig `json:"collections"`
 	SystemPrompt *string            `json:"system_prompt,omitempty"`
+	AgentID      *string            `json:"agent_id,omitempty"`
 	Title        *string            `json:"title,omitempty"`
 	MessageCount int                `json:"message_count"`
 }
