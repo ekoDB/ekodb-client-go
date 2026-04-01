@@ -873,3 +873,95 @@ func (c *Client) ChatMessageStream(chatID string, request ChatMessageRequest) (c
 
 	return ch, nil
 }
+
+// SubscribeSSEOptions are optional parameters for SubscribeSSE.
+type SubscribeSSEOptions struct {
+	FilterField string
+	FilterValue string
+}
+
+// SubscribeSSE subscribes to collection mutations via SSE (Server-Sent Events).
+//
+// Returns a channel that yields MutationNotification events. The channel is
+// closed when the SSE stream ends or an error occurs.
+//
+// Use this when WebSocket connections aren't available (e.g. behind reverse
+// proxies that block WS upgrades).
+func (c *Client) SubscribeSSE(collection string, opts *SubscribeSSEOptions) (<-chan MutationNotification, error) {
+	sseURL := c.baseURL + "/api/subscribe/" + collection
+	if opts != nil {
+		params := []string{}
+		if opts.FilterField != "" {
+			params = append(params, "filter_field="+opts.FilterField)
+		}
+		if opts.FilterValue != "" {
+			params = append(params, "filter_value="+opts.FilterValue)
+		}
+		if len(params) > 0 {
+			sseURL += "?" + strings.Join(params, "&")
+		}
+	}
+
+	token := c.getToken()
+	if token == "" {
+		if err := c.refreshToken(); err != nil {
+			return nil, fmt.Errorf("failed to get auth token: %w", err)
+		}
+		token = c.getToken()
+	}
+
+	req, err := http.NewRequest("GET", sseURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SSE request: %w", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.streamClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("SSE connection failed: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("SSE subscribe failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	ch := make(chan MutationNotification, 256)
+
+	go func() {
+		defer resp.Body.Close()
+		defer close(ch)
+
+		scanner := bufio.NewScanner(resp.Body)
+		var eventType string
+		var dataLines []string
+
+		for scanner.Scan() {
+			line := scanner.Text()
+
+			if line == "" {
+				// Empty line = end of event block
+				if eventType == "mutation" && len(dataLines) > 0 {
+					eventData := strings.Join(dataLines, "\n")
+					var notification MutationNotification
+					if err := json.Unmarshal([]byte(eventData), &notification); err == nil {
+						ch <- notification
+					}
+				}
+				eventType = ""
+				dataLines = nil
+				continue
+			}
+
+			if strings.HasPrefix(line, "event: ") {
+				eventType = strings.TrimSpace(strings.TrimPrefix(line, "event: "))
+			} else if strings.HasPrefix(line, "data: ") {
+				dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data: ")))
+			}
+		}
+	}()
+
+	return ch, nil
+}

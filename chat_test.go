@@ -530,3 +530,325 @@ func TestGetUserFunctionNotFound(t *testing.T) {
 		t.Fatal("Expected error for non-existent function")
 	}
 }
+
+// ============================================================================
+// agent_id Tests
+// ============================================================================
+
+func TestCreateChatSessionRequestAgentID(t *testing.T) {
+	agentName := "my-agent"
+	req := CreateChatSessionRequest{
+		Collections: []CollectionConfig{{CollectionName: "docs"}},
+		LLMProvider: "openai",
+		AgentID:     &agentName,
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+	if m["agent_id"] != "my-agent" {
+		t.Errorf("Expected agent_id=my-agent, got %v", m["agent_id"])
+	}
+}
+
+func TestCreateChatSessionRequestAgentIDOmitted(t *testing.T) {
+	req := CreateChatSessionRequest{
+		Collections: []CollectionConfig{{CollectionName: "docs"}},
+		LLMProvider: "openai",
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+	if _, exists := m["agent_id"]; exists {
+		t.Error("Expected agent_id to be omitted when nil")
+	}
+}
+
+func TestChatSessionAgentIDDeserialization(t *testing.T) {
+	raw := `{"chat_id":"c1","created_at":"2026-01-01","updated_at":"2026-01-01","llm_provider":"openai","llm_model":"gpt-4","collections":[],"agent_id":"bot-1","message_count":0}`
+	var session ChatSession
+	if err := json.Unmarshal([]byte(raw), &session); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+	if session.AgentID == nil || *session.AgentID != "bot-1" {
+		t.Errorf("Expected agent_id=bot-1, got %v", session.AgentID)
+	}
+}
+
+func TestChatSessionAgentIDMissing(t *testing.T) {
+	raw := `{"chat_id":"c1","created_at":"2026-01-01","updated_at":"2026-01-01","llm_provider":"openai","llm_model":"gpt-4","collections":[],"message_count":0}`
+	var session ChatSession
+	if err := json.Unmarshal([]byte(raw), &session); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+	if session.AgentID != nil {
+		t.Error("Expected agent_id to be nil when absent")
+	}
+}
+
+// ============================================================================
+// client_tools / confirm_tools / exclude_tools Tests
+// ============================================================================
+
+func TestChatMessageRequestClientTools(t *testing.T) {
+	req := ChatMessageRequest{
+		Message: "hello",
+		ClientTools: []ClientToolDef{
+			{Name: "weather", Description: "Get weather", Parameters: map[string]interface{}{"type": "object"}},
+		},
+		ConfirmTools: []string{"shell_exec"},
+		ExcludeTools: []string{"file_delete"},
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+	tools := m["client_tools"].([]interface{})
+	if len(tools) != 1 {
+		t.Fatalf("Expected 1 client tool, got %d", len(tools))
+	}
+	tool := tools[0].(map[string]interface{})
+	if tool["name"] != "weather" {
+		t.Errorf("Expected tool name=weather, got %v", tool["name"])
+	}
+	confirm := m["confirm_tools"].([]interface{})
+	if len(confirm) != 1 || confirm[0] != "shell_exec" {
+		t.Errorf("Unexpected confirm_tools: %v", confirm)
+	}
+	exclude := m["exclude_tools"].([]interface{})
+	if len(exclude) != 1 || exclude[0] != "file_delete" {
+		t.Errorf("Unexpected exclude_tools: %v", exclude)
+	}
+}
+
+func TestChatMessageRequestToolsOmittedWhenNil(t *testing.T) {
+	req := ChatMessageRequest{Message: "hi"}
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+	for _, field := range []string{"client_tools", "confirm_tools", "exclude_tools"} {
+		if _, exists := m[field]; exists {
+			t.Errorf("Expected %s to be omitted when nil", field)
+		}
+	}
+}
+
+func TestClientToolDefSerialization(t *testing.T) {
+	tool := ClientToolDef{
+		Name:        "calc",
+		Description: "Calculator",
+		Parameters:  map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+	}
+	data, err := json.Marshal(tool)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+	if m["name"] != "calc" {
+		t.Errorf("Expected name=calc, got %v", m["name"])
+	}
+	if m["description"] != "Calculator" {
+		t.Errorf("Expected description=Calculator, got %v", m["description"])
+	}
+}
+
+// ============================================================================
+// SubmitChatToolResult Tests
+// ============================================================================
+
+func TestSubmitChatToolResult(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/chat-123/tool-result": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("Failed to decode request body: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if body["call_id"] != "call-456" {
+				t.Errorf("Expected call_id=call-456, got %v", body["call_id"])
+			}
+			if body["success"] != true {
+				t.Errorf("Expected success=true, got %v", body["success"])
+			}
+			result := body["result"].(map[string]interface{})
+			if result["temp"] != "72F" {
+				t.Errorf("Expected result.temp=72F, got %v", result["temp"])
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	err := client.SubmitChatToolResult("chat-123", "call-456", true, map[string]interface{}{"temp": "72F"}, "")
+	if err != nil {
+		t.Fatalf("SubmitChatToolResult failed: %v", err)
+	}
+}
+
+func TestSubmitChatToolResultError(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/chat-123/tool-result": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("Failed to decode request body: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if body["success"] != false {
+				t.Errorf("Expected success=false, got %v", body["success"])
+			}
+			if body["error"] != "tool crashed" {
+				t.Errorf("Expected error='tool crashed', got %v", body["error"])
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	err := client.SubmitChatToolResult("chat-123", "call-456", false, nil, "tool crashed")
+	if err != nil {
+		t.Fatalf("SubmitChatToolResult failed: %v", err)
+	}
+}
+
+// ============================================================================
+// SubscribeSSE Tests
+// ============================================================================
+
+func TestSubscribeSSEParsesMutations(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"GET /api/subscribe/orders": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprintf(w, "event: subscribed\ndata: {}\n\n")
+			_, _ = fmt.Fprintf(w, "event: mutation\ndata: %s\n\n",
+				`{"collection":"orders","event":"insert","record_ids":["r1"],"timestamp":"2026-04-01T00:00:00Z"}`)
+			_, _ = fmt.Fprintf(w, "event: mutation\ndata: %s\n\n",
+				`{"collection":"orders","event":"update","record_ids":["r2"],"timestamp":"2026-04-01T00:01:00Z"}`)
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	ch, err := client.SubscribeSSE("orders", nil)
+	if err != nil {
+		t.Fatalf("SubscribeSSE failed: %v", err)
+	}
+
+	var events []MutationNotification
+	for n := range ch {
+		events = append(events, n)
+	}
+
+	if len(events) != 2 {
+		t.Fatalf("Expected 2 events, got %d", len(events))
+	}
+	if events[0].Event != "insert" || events[0].RecordIDs[0] != "r1" {
+		t.Errorf("Unexpected first event: %+v", events[0])
+	}
+	if events[1].Event != "update" || events[1].RecordIDs[0] != "r2" {
+		t.Errorf("Unexpected second event: %+v", events[1])
+	}
+}
+
+func TestSubscribeSSEWithFilter(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"GET /api/subscribe/orders": func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("filter_field") != "status" {
+				t.Errorf("Expected filter_field=status, got %s", r.URL.Query().Get("filter_field"))
+			}
+			if r.URL.Query().Get("filter_value") != "active" {
+				t.Errorf("Expected filter_value=active, got %s", r.URL.Query().Get("filter_value"))
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprintf(w, "event: mutation\ndata: %s\n\n",
+				`{"collection":"orders","event":"insert","record_ids":["r1"],"timestamp":"t"}`)
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	ch, err := client.SubscribeSSE("orders", &SubscribeSSEOptions{
+		FilterField: "status",
+		FilterValue: "active",
+	})
+	if err != nil {
+		t.Fatalf("SubscribeSSE failed: %v", err)
+	}
+
+	var events []MutationNotification
+	for n := range ch {
+		events = append(events, n)
+	}
+	if len(events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(events))
+	}
+}
+
+func TestSubscribeSSEAuthFailure(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{})
+	defer server.Close()
+
+	// Create a client with a bad token that will fail auth
+	client, err := NewClientWithConfig(ClientConfig{
+		BaseURL:     server.URL,
+		APIKey:      "bad-key",
+		ShouldRetry: false,
+		Format:      JSON,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+	// Override token to bypass token refresh
+	client.tokenMu.Lock()
+	client.token = "bad-token"
+	client.tokenMu.Unlock()
+
+	_, sseErr := client.SubscribeSSE("orders", nil)
+	if sseErr == nil {
+		t.Fatal("Expected error for unauthorized SSE")
+	}
+	if !strings.Contains(sseErr.Error(), "401") && !strings.Contains(sseErr.Error(), "Unauthorized") {
+		t.Errorf("Expected auth error, got: %v", sseErr)
+	}
+}
+
+func TestSubscribeSSEOptionsStruct(t *testing.T) {
+	opts := SubscribeSSEOptions{
+		FilterField: "type",
+		FilterValue: "order",
+	}
+	if opts.FilterField != "type" {
+		t.Errorf("Expected FilterField=type, got %s", opts.FilterField)
+	}
+	if opts.FilterValue != "order" {
+		t.Errorf("Expected FilterValue=order, got %s", opts.FilterValue)
+	}
+}
