@@ -90,14 +90,24 @@ type CreateChatSessionRequest struct {
 	ToolConfig         *ToolConfig        `json:"tool_config,omitempty"`
 }
 
+// ClientToolDef defines a client-side tool the LLM can call (HTTP path).
+type ClientToolDef struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Parameters  interface{} `json:"parameters"`
+}
+
 // ChatMessageRequest represents a request to send a message in an existing session
 type ChatMessageRequest struct {
-	Message        string      `json:"message"`
-	BypassRipple   *bool       `json:"bypass_ripple,omitempty"`
-	ForceSummarize *bool       `json:"force_summarize,omitempty"`
-	MaxIterations  *int        `json:"max_iterations,omitempty"`
-	ToolConfig     *ToolConfig `json:"tool_config,omitempty"`
-	LLMModel       *string     `json:"llm_model,omitempty"`
+	Message        string          `json:"message"`
+	BypassRipple   *bool           `json:"bypass_ripple,omitempty"`
+	ForceSummarize *bool           `json:"force_summarize,omitempty"`
+	MaxIterations  *int            `json:"max_iterations,omitempty"`
+	ToolConfig     *ToolConfig     `json:"tool_config,omitempty"`
+	LLMModel       *string         `json:"llm_model,omitempty"`
+	ClientTools    []ClientToolDef `json:"client_tools,omitempty"`
+	ConfirmTools   []string        `json:"confirm_tools,omitempty"`
+	ExcludeTools   []string        `json:"exclude_tools,omitempty"`
 }
 
 // TokenUsage represents token usage statistics
@@ -405,6 +415,24 @@ func (c *Client) RawCompletionStreamWithProgress(request RawCompletionRequest, o
 	}
 
 	return &RawCompletionResponse{Content: content}, nil
+}
+
+// SubmitChatToolResult submits a client tool result for an in-flight SSE chat stream.
+// This unblocks ekoDB's tool loop so it can feed the result to the LLM.
+func (c *Client) SubmitChatToolResult(chatID, callID string, success bool, result interface{}, errMsg string) error {
+	body := map[string]interface{}{
+		"call_id": callID,
+		"success": success,
+	}
+	if result != nil {
+		body["result"] = result
+	}
+	if errMsg != "" {
+		body["error"] = errMsg
+	}
+
+	_, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/%s/tool-result", chatID), body)
+	return err
 }
 
 // ExecuteToolRequest is the request body for POST /api/chat/tools/execute.
