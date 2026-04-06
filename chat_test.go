@@ -1,6 +1,7 @@
 package ekodb
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -756,7 +757,7 @@ func TestSubscribeSSEParsesMutations(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	ch, err := client.SubscribeSSE("orders", nil)
+	ch, err := client.SubscribeSSE(context.Background(), "orders", nil)
 	if err != nil {
 		t.Fatalf("SubscribeSSE failed: %v", err)
 	}
@@ -795,7 +796,7 @@ func TestSubscribeSSEWithFilter(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	ch, err := client.SubscribeSSE("orders", &SubscribeSSEOptions{
+	ch, err := client.SubscribeSSE(context.Background(), "orders", &SubscribeSSEOptions{
 		FilterField: "status",
 		FilterValue: "active",
 	})
@@ -831,7 +832,7 @@ func TestSubscribeSSEAuthFailure(t *testing.T) {
 	client.token = "bad-token"
 	client.tokenMu.Unlock()
 
-	_, sseErr := client.SubscribeSSE("orders", nil)
+	_, sseErr := client.SubscribeSSE(context.Background(), "orders", nil)
 	if sseErr == nil {
 		t.Fatal("Expected error for unauthorized SSE")
 	}

@@ -4,6 +4,7 @@ package ekodb
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -883,11 +884,13 @@ type SubscribeSSEOptions struct {
 // SubscribeSSE subscribes to collection mutations via SSE (Server-Sent Events).
 //
 // Returns a channel that yields MutationNotification events. The channel is
-// closed when the SSE stream ends or an error occurs.
+// closed when the SSE stream ends, an error occurs, or the context is cancelled.
+//
+// Cancel the context to stop the subscription and release resources.
 //
 // Use this when WebSocket connections aren't available (e.g. behind reverse
 // proxies that block WS upgrades).
-func (c *Client) SubscribeSSE(collection string, opts *SubscribeSSEOptions) (<-chan MutationNotification, error) {
+func (c *Client) SubscribeSSE(ctx context.Context, collection string, opts *SubscribeSSEOptions) (<-chan MutationNotification, error) {
 	sseURL := c.baseURL + "/api/subscribe/" + url.PathEscape(collection)
 	if opts != nil {
 		params := url.Values{}
@@ -910,7 +913,7 @@ func (c *Client) SubscribeSSE(collection string, opts *SubscribeSSEOptions) (<-c
 		token = c.getToken()
 	}
 
-	req, err := http.NewRequest("GET", sseURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", sseURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create SSE request: %w", err)
 	}
