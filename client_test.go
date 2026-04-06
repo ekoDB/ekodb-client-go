@@ -1612,10 +1612,10 @@ func searchString(s, substr string) bool {
 }
 
 // ============================================================================
-// Functions/Scripts Tests
+// Functions Tests
 // ============================================================================
 
-func TestSaveScriptSuccess(t *testing.T) {
+func TestSaveFunctionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/functions": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -1629,23 +1629,23 @@ func TestSaveScriptSuccess(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	script := Script{
+	fn_ := UserFunction{
 		Label: "my_function",
 		Name:  "my_function",
 		Functions: []FunctionStageConfig{
 			StageFindAll("users"),
 		},
 	}
-	result, err := client.SaveScript(script)
+	result, err := client.SaveFunction(fn_)
 	if err != nil {
-		t.Fatalf("SaveScript failed: %v", err)
+		t.Fatalf("SaveFunction failed: %v", err)
 	}
 	if result == "" {
-		t.Error("SaveScript returned empty result")
+		t.Error("SaveFunction returned empty result")
 	}
 }
 
-func TestCallScriptSuccess(t *testing.T) {
+func TestCallFunctionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/functions/my_function": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -1661,16 +1661,16 @@ func TestCallScriptSuccess(t *testing.T) {
 
 	client := createTestClient(t, server)
 	params := map[string]interface{}{"limit": 10}
-	result, err := client.CallScript("my_function", params)
+	result, err := client.CallFunction("my_function", params)
 	if err != nil {
-		t.Fatalf("CallScript failed: %v", err)
+		t.Fatalf("CallFunction failed: %v", err)
 	}
 	if result == nil {
-		t.Error("Expected non-nil result from CallScript")
+		t.Error("Expected non-nil result from CallFunction")
 	}
 }
 
-func TestGetScriptSuccess(t *testing.T) {
+func TestGetFunctionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/functions/func_123": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -1685,16 +1685,16 @@ func TestGetScriptSuccess(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	result, err := client.GetScript("func_123")
+	result, err := client.GetFunction("func_123")
 	if err != nil {
-		t.Fatalf("GetScript failed: %v", err)
+		t.Fatalf("GetFunction failed: %v", err)
 	}
 	if result == nil {
-		t.Error("GetScript returned nil")
+		t.Error("GetFunction returned nil")
 	}
 }
 
-func TestListScriptsSuccess(t *testing.T) {
+func TestListFunctionsSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/functions": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -1708,16 +1708,16 @@ func TestListScriptsSuccess(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	results, err := client.ListScripts(nil)
+	results, err := client.ListFunctions(nil)
 	if err != nil {
-		t.Fatalf("ListScripts failed: %v", err)
+		t.Fatalf("ListFunctions failed: %v", err)
 	}
 	if len(results) != 2 {
-		t.Errorf("ListScripts returned %d scripts, want 2", len(results))
+		t.Errorf("ListFunctions returned %d scripts, want 2", len(results))
 	}
 }
 
-func TestDeleteScriptSuccess(t *testing.T) {
+func TestDeleteFunctionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"DELETE /api/functions/func_123": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -1727,9 +1727,9 @@ func TestDeleteScriptSuccess(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	err := client.DeleteScript("func_123")
+	err := client.DeleteFunction("func_123")
 	if err != nil {
-		t.Errorf("DeleteScript failed: %v", err)
+		t.Errorf("DeleteFunction failed: %v", err)
 	}
 }
 
@@ -1934,7 +1934,7 @@ func TestGetTransactionStatusSuccess(t *testing.T) {
 	}
 }
 
-func TestUpdateScriptSuccess(t *testing.T) {
+func TestUpdateFunctionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"PUT /api/functions/func_123": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -1948,16 +1948,16 @@ func TestUpdateScriptSuccess(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	script := Script{
+	fn_ := UserFunction{
 		Label: "updated_function",
 		Name:  "updated_function",
 		Functions: []FunctionStageConfig{
 			StageFindAll("users"),
 		},
 	}
-	err := client.UpdateScript("func_123", script)
+	err := client.UpdateFunction("func_123", fn_)
 	if err != nil {
-		t.Errorf("UpdateScript failed: %v", err)
+		t.Errorf("UpdateFunction failed: %v", err)
 	}
 }
 

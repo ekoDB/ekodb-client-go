@@ -6,7 +6,7 @@ import (
 )
 
 // ============================================================================
-// ScriptCondition Serialization Tests
+// FunctionCondition Serialization Tests
 // ============================================================================
 
 func TestConditionHasRecordsSerialization(t *testing.T) {
@@ -150,7 +150,7 @@ func TestConditionCountLessThanSerialization(t *testing.T) {
 }
 
 func TestConditionAndSerialization(t *testing.T) {
-	cond := ConditionAnd([]ScriptCondition{
+	cond := ConditionAnd([]FunctionCondition{
 		ConditionHasRecords(),
 		ConditionFieldExists("value"),
 	})
@@ -190,7 +190,7 @@ func TestConditionAndSerialization(t *testing.T) {
 }
 
 func TestConditionOrSerialization(t *testing.T) {
-	cond := ConditionOr([]ScriptCondition{
+	cond := ConditionOr([]FunctionCondition{
 		ConditionFieldEquals("status", "active"),
 		ConditionFieldEquals("status", "pending"),
 	})
@@ -249,8 +249,8 @@ func TestConditionNotSerialization(t *testing.T) {
 
 func TestNestedConditionsSerialization(t *testing.T) {
 	// Complex nested condition: (HasRecords AND FieldExists("value")) OR CountEquals(0)
-	cond := ConditionOr([]ScriptCondition{
-		ConditionAnd([]ScriptCondition{
+	cond := ConditionOr([]FunctionCondition{
+		ConditionAnd([]FunctionCondition{
 			ConditionHasRecords(),
 			ConditionFieldExists("value"),
 		}),

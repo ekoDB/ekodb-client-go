@@ -6,21 +6,8 @@ import (
 	"time"
 )
 
-// Script represents a server-side data processing script
-type Script struct {
-	Label       string                         `json:"label"`
-	Name        string                         `json:"name"`
-	Description *string                        `json:"description,omitempty"`
-	Version     *string                        `json:"version,omitempty"`
-	Parameters  map[string]ParameterDefinition `json:"parameters"`
-	Functions   []FunctionStageConfig          `json:"functions"`
-	Tags        []string                       `json:"tags,omitempty"`
-	ID          *string                        `json:"id,omitempty"`
-	CreatedAt   *time.Time                     `json:"created_at,omitempty"`
-	UpdatedAt   *time.Time                     `json:"updated_at,omitempty"`
-}
-
-// UserFunction is a reusable sequence of Functions that can be called by Scripts
+// UserFunction is a reusable sequence of Functions stored in ekoDB.
+// Called by label via the call_function chat tool or REST API.
 type UserFunction struct {
 	Label       string                         `json:"label"`
 	Name        string                         `json:"name"`
@@ -372,30 +359,30 @@ func StageUpdateWithAction(collection string, recordId string, action string, fi
 	}
 }
 
-// ScriptCondition represents a conditional expression for If stages in Scripts.
+// FunctionCondition represents a conditional expression for If stages in functions.
 // Conditions are evaluated against the current pipeline state (records, counts, field values)
 // and can be composed using logical operators (And, Or, Not).
 //
 // Example usage:
 //
-//	cond := ConditionAnd([]ScriptCondition{
+//	cond := ConditionAnd([]FunctionCondition{
 //		ConditionHasRecords(),
 //		ConditionCountGreaterThan(5),
 //	})
 //	StageIf(cond, thenFunctions, elseFunctions)
-type ScriptCondition struct {
-	Type       string            // Condition type (HasRecords, FieldEquals, CountEquals, And, Or, Not, etc.)
-	Field      string            // Field name for field-based conditions
-	FieldValue interface{}       // Expected value for comparison conditions (FieldEquals)
-	Count      int               // Count threshold for count-based conditions
-	Conditions []ScriptCondition // Child conditions for And/Or operators
-	Condition  *ScriptCondition  // Single child condition for Not operator
+type FunctionCondition struct {
+	Type       string              // Condition type (HasRecords, FieldEquals, CountEquals, And, Or, Not, etc.)
+	Field      string              // Field name for field-based conditions
+	FieldValue interface{}         // Expected value for comparison conditions (FieldEquals)
+	Count      int                 // Count threshold for count-based conditions
+	Conditions []FunctionCondition // Child conditions for And/Or operators
+	Condition  *FunctionCondition  // Single child condition for Not operator
 }
 
-// MarshalJSON implements adjacently-tagged serialization for ScriptCondition.
+// MarshalJSON implements adjacently-tagged serialization for FunctionCondition.
 // Format: { "type": "...", "value": { ...data } } for variants with data
 // Unit variants like HasRecords have no value field.
-func (c ScriptCondition) MarshalJSON() ([]byte, error) {
+func (c FunctionCondition) MarshalJSON() ([]byte, error) {
 	switch c.Type {
 	case "HasRecords":
 		return json.Marshal(map[string]string{"type": c.Type})
@@ -444,60 +431,60 @@ func (c ScriptCondition) MarshalJSON() ([]byte, error) {
 
 // ConditionHasRecords creates a condition that is satisfied when the current pipeline
 // stage has one or more records. Useful for checking if a query returned any results.
-func ConditionHasRecords() ScriptCondition {
-	return ScriptCondition{Type: "HasRecords"}
+func ConditionHasRecords() FunctionCondition {
+	return FunctionCondition{Type: "HasRecords"}
 }
 
 // ConditionFieldEquals creates a condition that is satisfied when the specified field
 // in the current record(s) equals the provided value. Field comparison is type-aware.
-func ConditionFieldEquals(field string, value interface{}) ScriptCondition {
-	return ScriptCondition{Type: "FieldEquals", Field: field, FieldValue: value}
+func ConditionFieldEquals(field string, value interface{}) FunctionCondition {
+	return FunctionCondition{Type: "FieldEquals", Field: field, FieldValue: value}
 }
 
 // ConditionFieldExists creates a condition that is satisfied when the specified field
 // exists in the current record(s), regardless of its value (including null).
-func ConditionFieldExists(field string) ScriptCondition {
-	return ScriptCondition{Type: "FieldExists", Field: field}
+func ConditionFieldExists(field string) FunctionCondition {
+	return FunctionCondition{Type: "FieldExists", Field: field}
 }
 
 // ConditionCountEquals creates a condition that is satisfied when the number of
 // records in the current pipeline stage exactly equals the provided count.
-func ConditionCountEquals(count int) ScriptCondition {
-	return ScriptCondition{Type: "CountEquals", Count: count}
+func ConditionCountEquals(count int) FunctionCondition {
+	return FunctionCondition{Type: "CountEquals", Count: count}
 }
 
 // ConditionCountGreaterThan creates a condition that is satisfied when the number
 // of records in the current pipeline stage is strictly greater than the provided count.
-func ConditionCountGreaterThan(count int) ScriptCondition {
-	return ScriptCondition{Type: "CountGreaterThan", Count: count}
+func ConditionCountGreaterThan(count int) FunctionCondition {
+	return FunctionCondition{Type: "CountGreaterThan", Count: count}
 }
 
 // ConditionCountLessThan creates a condition that is satisfied when the number
 // of records in the current pipeline stage is strictly less than the provided count.
-func ConditionCountLessThan(count int) ScriptCondition {
-	return ScriptCondition{Type: "CountLessThan", Count: count}
+func ConditionCountLessThan(count int) FunctionCondition {
+	return FunctionCondition{Type: "CountLessThan", Count: count}
 }
 
 // ConditionAnd creates a condition that requires all of the provided child conditions
 // to be satisfied (logical AND). All conditions are evaluated and must pass.
-func ConditionAnd(conditions []ScriptCondition) ScriptCondition {
-	return ScriptCondition{Type: "And", Conditions: conditions}
+func ConditionAnd(conditions []FunctionCondition) FunctionCondition {
+	return FunctionCondition{Type: "And", Conditions: conditions}
 }
 
 // ConditionOr creates a condition that is satisfied when at least one of the provided
 // child conditions is satisfied (logical OR). Evaluation may short-circuit.
-func ConditionOr(conditions []ScriptCondition) ScriptCondition {
-	return ScriptCondition{Type: "Or", Conditions: conditions}
+func ConditionOr(conditions []FunctionCondition) FunctionCondition {
+	return FunctionCondition{Type: "Or", Conditions: conditions}
 }
 
 // ConditionNot creates a condition that inverts the result of the provided child
 // condition (logical NOT). Returns true when the child condition is false.
-func ConditionNot(condition ScriptCondition) ScriptCondition {
-	return ScriptCondition{Type: "Not", Condition: &condition}
+func ConditionNot(condition FunctionCondition) FunctionCondition {
+	return FunctionCondition{Type: "Not", Condition: &condition}
 }
 
 // StageIf executes functions conditionally
-func StageIf(condition ScriptCondition, thenFunctions []FunctionStageConfig, elseFunctions []FunctionStageConfig) FunctionStageConfig {
+func StageIf(condition FunctionCondition, thenFunctions []FunctionStageConfig, elseFunctions []FunctionStageConfig) FunctionStageConfig {
 	data := map[string]interface{}{
 		"condition":      condition,
 		"then_functions": thenFunctions,
@@ -749,9 +736,9 @@ type StageStats struct {
 
 // Client methods for scripts
 
-// SaveScript creates a new script
-func (c *Client) SaveScript(script Script) (string, error) {
-	respBody, err := c.makeRequest("POST", "/api/functions", script)
+// SaveFunction creates a new function
+func (c *Client) SaveFunction(function UserFunction) (string, error) {
+	respBody, err := c.makeRequest("POST", "/api/functions", function)
 	if err != nil {
 		return "", err
 	}
@@ -767,23 +754,23 @@ func (c *Client) SaveScript(script Script) (string, error) {
 	return result.ID, nil
 }
 
-// GetScript retrieves a script by ID
-func (c *Client) GetScript(id string) (*Script, error) {
+// GetFunction retrieves a function by ID
+func (c *Client) GetFunction(id string) (*UserFunction, error) {
 	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/functions/%s", id), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	var script Script
-	if err := json.Unmarshal(respBody, &script); err != nil {
+	var fn UserFunction
+	if err := json.Unmarshal(respBody, &fn); err != nil {
 		return nil, err
 	}
 
-	return &script, nil
+	return &fn, nil
 }
 
-// ListScripts lists all scripts, optionally filtered by tags
-func (c *Client) ListScripts(tags []string) ([]Script, error) {
+// ListFunctions lists all scripts, optionally filtered by tags
+func (c *Client) ListFunctions(tags []string) ([]UserFunction, error) {
 	url := "/api/functions"
 	if len(tags) > 0 {
 		url += "?tags=" + joinStrings(tags, ",")
@@ -794,28 +781,28 @@ func (c *Client) ListScripts(tags []string) ([]Script, error) {
 		return nil, err
 	}
 
-	var scripts []Script
-	if err := json.Unmarshal(respBody, &scripts); err != nil {
+	var fns []UserFunction
+	if err := json.Unmarshal(respBody, &fns); err != nil {
 		return nil, err
 	}
 
-	return scripts, nil
+	return fns, nil
 }
 
-// UpdateScript updates an existing script by ID
-func (c *Client) UpdateScript(id string, script Script) error {
-	_, err := c.makeRequest("PUT", fmt.Sprintf("/api/functions/%s", id), script)
+// UpdateFunction updates an existing function by ID
+func (c *Client) UpdateFunction(id string, function UserFunction) error {
+	_, err := c.makeRequest("PUT", fmt.Sprintf("/api/functions/%s", id), function)
 	return err
 }
 
-// DeleteScript deletes a script by ID
-func (c *Client) DeleteScript(id string) error {
+// DeleteFunction deletes a script by ID
+func (c *Client) DeleteFunction(id string) error {
 	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/functions/%s", id), nil)
 	return err
 }
 
-// CallScript executes a script by label or ID
-func (c *Client) CallScript(labelOrID string, params map[string]interface{}) (*FunctionResult, error) {
+// CallFunction executes a script by label or ID
+func (c *Client) CallFunction(labelOrID string, params map[string]interface{}) (*FunctionResult, error) {
 	// Convert nil params to empty map to avoid sending JSON null
 	if params == nil {
 		params = make(map[string]interface{})
