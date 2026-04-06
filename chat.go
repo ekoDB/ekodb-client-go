@@ -964,6 +964,15 @@ func (c *Client) SubscribeSSE(collection string, opts *SubscribeSSEOptions) (<-c
 				dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
 			}
 		}
+
+		// Flush any pending event if stream ended without a trailing blank line
+		if eventType == "mutation" && len(dataLines) > 0 {
+			eventData := strings.Join(dataLines, "\n")
+			var notification MutationNotification
+			if err := json.Unmarshal([]byte(eventData), &notification); err == nil {
+				ch <- notification
+			}
+		}
 	}()
 
 	return ch, nil
