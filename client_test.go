@@ -1713,7 +1713,7 @@ func TestListFunctionsSuccess(t *testing.T) {
 		t.Fatalf("ListFunctions failed: %v", err)
 	}
 	if len(results) != 2 {
-		t.Errorf("ListFunctions returned %d scripts, want 2", len(results))
+		t.Errorf("ListFunctions returned %d functions, want 2", len(results))
 	}
 }
 

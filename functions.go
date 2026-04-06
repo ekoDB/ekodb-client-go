@@ -734,7 +734,7 @@ type StageStats struct {
 	ExecutionTimeMs int64  `json:"execution_time_ms"`
 }
 
-// Client methods for scripts
+// Client methods for functions
 
 // SaveFunction creates a new function
 func (c *Client) SaveFunction(function UserFunction) (string, error) {
@@ -769,7 +769,7 @@ func (c *Client) GetFunction(id string) (*UserFunction, error) {
 	return &fn, nil
 }
 
-// ListFunctions lists all scripts, optionally filtered by tags
+// ListFunctions lists all functions, optionally filtered by tags
 func (c *Client) ListFunctions(tags []string) ([]UserFunction, error) {
 	url := "/api/functions"
 	if len(tags) > 0 {
@@ -795,13 +795,13 @@ func (c *Client) UpdateFunction(id string, function UserFunction) error {
 	return err
 }
 
-// DeleteFunction deletes a script by ID
+// DeleteFunction deletes a function by ID
 func (c *Client) DeleteFunction(id string) error {
 	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/functions/%s", id), nil)
 	return err
 }
 
-// CallFunction executes a script by label or ID
+// CallFunction executes a function by label or ID
 func (c *Client) CallFunction(labelOrID string, params map[string]interface{}) (*FunctionResult, error) {
 	// Convert nil params to empty map to avoid sending JSON null
 	if params == nil {

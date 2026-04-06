@@ -888,17 +888,17 @@ type SubscribeSSEOptions struct {
 // Use this when WebSocket connections aren't available (e.g. behind reverse
 // proxies that block WS upgrades).
 func (c *Client) SubscribeSSE(collection string, opts *SubscribeSSEOptions) (<-chan MutationNotification, error) {
-	sseURL := c.baseURL + "/api/subscribe/" + collection
+	sseURL := c.baseURL + "/api/subscribe/" + url.PathEscape(collection)
 	if opts != nil {
-		params := []string{}
+		params := url.Values{}
 		if opts.FilterField != "" {
-			params = append(params, "filter_field="+opts.FilterField)
+			params.Set("filter_field", opts.FilterField)
 		}
 		if opts.FilterValue != "" {
-			params = append(params, "filter_value="+opts.FilterValue)
+			params.Set("filter_value", opts.FilterValue)
 		}
 		if len(params) > 0 {
-			sseURL += "?" + strings.Join(params, "&")
+			sseURL += "?" + params.Encode()
 		}
 	}
 
@@ -935,6 +935,8 @@ func (c *Client) SubscribeSSE(collection string, opts *SubscribeSSEOptions) (<-c
 		defer close(ch)
 
 		scanner := bufio.NewScanner(resp.Body)
+		// Allow SSE data lines up to 1MB (default 64K may truncate large payloads)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		var eventType string
 		var dataLines []string
 
@@ -955,10 +957,11 @@ func (c *Client) SubscribeSSE(collection string, opts *SubscribeSSEOptions) (<-c
 				continue
 			}
 
-			if strings.HasPrefix(line, "event: ") {
-				eventType = strings.TrimSpace(strings.TrimPrefix(line, "event: "))
-			} else if strings.HasPrefix(line, "data: ") {
-				dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data: ")))
+			// SSE spec: field name is followed by ":" with optional space
+			if strings.HasPrefix(line, "event:") {
+				eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			} else if strings.HasPrefix(line, "data:") {
+				dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
 			}
 		}
 	}()
