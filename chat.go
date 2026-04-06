@@ -4,6 +4,7 @@ package ekodb
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,6 +81,7 @@ type CreateChatSessionRequest struct {
 	LLMProvider        string             `json:"llm_provider"`
 	LLMModel           *string            `json:"llm_model,omitempty"`
 	SystemPrompt       *string            `json:"system_prompt,omitempty"`
+	AgentID            *string            `json:"agent_id,omitempty"`
 	BypassRipple       *bool              `json:"bypass_ripple,omitempty"`
 	ParentID           *string            `json:"parent_id,omitempty"`
 	BranchPointIdx     *int               `json:"branch_point_idx,omitempty"`
@@ -89,14 +91,24 @@ type CreateChatSessionRequest struct {
 	ToolConfig         *ToolConfig        `json:"tool_config,omitempty"`
 }
 
+// ClientToolDef defines a client-side tool the LLM can call (HTTP path).
+type ClientToolDef struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Parameters  interface{} `json:"parameters"`
+}
+
 // ChatMessageRequest represents a request to send a message in an existing session
 type ChatMessageRequest struct {
-	Message        string      `json:"message"`
-	BypassRipple   *bool       `json:"bypass_ripple,omitempty"`
-	ForceSummarize *bool       `json:"force_summarize,omitempty"`
-	MaxIterations  *int        `json:"max_iterations,omitempty"`
-	ToolConfig     *ToolConfig `json:"tool_config,omitempty"`
-	LLMModel       *string     `json:"llm_model,omitempty"`
+	Message        string          `json:"message"`
+	BypassRipple   *bool           `json:"bypass_ripple,omitempty"`
+	ForceSummarize *bool           `json:"force_summarize,omitempty"`
+	MaxIterations  *int            `json:"max_iterations,omitempty"`
+	ToolConfig     *ToolConfig     `json:"tool_config,omitempty"`
+	LLMModel       *string         `json:"llm_model,omitempty"`
+	ClientTools    []ClientToolDef `json:"client_tools,omitempty"`
+	ConfirmTools   []string        `json:"confirm_tools,omitempty"`
+	ExcludeTools   []string        `json:"exclude_tools,omitempty"`
 }
 
 // TokenUsage represents token usage statistics
@@ -125,6 +137,7 @@ type ChatSession struct {
 	LLMModel     string             `json:"llm_model"`
 	Collections  []CollectionConfig `json:"collections"`
 	SystemPrompt *string            `json:"system_prompt,omitempty"`
+	AgentID      *string            `json:"agent_id,omitempty"`
 	Title        *string            `json:"title,omitempty"`
 	MessageCount int                `json:"message_count"`
 }
@@ -403,6 +416,24 @@ func (c *Client) RawCompletionStreamWithProgress(request RawCompletionRequest, o
 	}
 
 	return &RawCompletionResponse{Content: content}, nil
+}
+
+// SubmitChatToolResult submits a client tool result for an in-flight SSE chat stream.
+// This unblocks ekoDB's tool loop so it can feed the result to the LLM.
+func (c *Client) SubmitChatToolResult(chatID, callID string, success bool, result interface{}, errMsg string) error {
+	body := map[string]interface{}{
+		"call_id": callID,
+		"success": success,
+	}
+	if result != nil {
+		body["result"] = result
+	}
+	if errMsg != "" {
+		body["error"] = errMsg
+	}
+
+	_, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/%s/tool-result", chatID), body)
+	return err
 }
 
 // ExecuteToolRequest is the request body for POST /api/chat/tools/execute.
@@ -842,4 +873,126 @@ func (c *Client) ChatMessageStream(chatID string, request ChatMessageRequest) (c
 	}()
 
 	return ch, nil
+}
+
+// SubscribeSSEOptions are optional parameters for SubscribeSSE.
+type SubscribeSSEOptions struct {
+	FilterField string
+	FilterValue string
+}
+
+// SSESubscription holds the channels returned by SubscribeSSE.
+type SSESubscription struct {
+	// Events receives mutation notifications. Closed when the stream ends.
+	Events <-chan MutationNotification
+	// Err receives at most one error if the stream terminates abnormally
+	// (scanner failure, context cancellation). Nil on clean EOF. Closed after send.
+	Err <-chan error
+}
+
+// SubscribeSSE subscribes to collection mutations via SSE (Server-Sent Events).
+//
+// Returns an SSESubscription whose Events channel yields MutationNotification
+// events and whose Err channel surfaces any stream-level error.
+// Both channels are closed when the stream ends or the context is cancelled.
+//
+// Cancel the context to stop the subscription and release resources.
+//
+// Use this when WebSocket connections aren't available (e.g. behind reverse
+// proxies that block WS upgrades).
+func (c *Client) SubscribeSSE(ctx context.Context, collection string, opts *SubscribeSSEOptions) (*SSESubscription, error) {
+	sseURL := c.baseURL + "/api/subscribe/" + url.PathEscape(collection)
+	if opts != nil {
+		params := url.Values{}
+		if opts.FilterField != "" {
+			params.Set("filter_field", opts.FilterField)
+		}
+		if opts.FilterValue != "" {
+			params.Set("filter_value", opts.FilterValue)
+		}
+		if len(params) > 0 {
+			sseURL += "?" + params.Encode()
+		}
+	}
+
+	token := c.getToken()
+	if token == "" {
+		if err := c.refreshToken(); err != nil {
+			return nil, fmt.Errorf("failed to get auth token: %w", err)
+		}
+		token = c.getToken()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", sseURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SSE request: %w", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.streamClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("SSE connection failed: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("SSE subscribe failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	ch := make(chan MutationNotification, 256)
+	errCh := make(chan error, 1)
+
+	go func() {
+		defer resp.Body.Close()
+		defer close(ch)
+		defer close(errCh)
+
+		scanner := bufio.NewScanner(resp.Body)
+		// Allow SSE data lines up to 1MB (default 64K may truncate large payloads)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		var eventType string
+		var dataLines []string
+
+		for scanner.Scan() {
+			line := scanner.Text()
+
+			if line == "" {
+				// Empty line = end of event block
+				if eventType == "mutation" && len(dataLines) > 0 {
+					eventData := strings.Join(dataLines, "\n")
+					var notification MutationNotification
+					if err := json.Unmarshal([]byte(eventData), &notification); err == nil {
+						ch <- notification
+					}
+				}
+				eventType = ""
+				dataLines = nil
+				continue
+			}
+
+			// SSE spec: field name is followed by ":" with optional space
+			if strings.HasPrefix(line, "event:") {
+				eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			} else if strings.HasPrefix(line, "data:") {
+				dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+			}
+		}
+
+		// Flush any pending event if stream ended without a trailing blank line
+		if eventType == "mutation" && len(dataLines) > 0 {
+			eventData := strings.Join(dataLines, "\n")
+			var notification MutationNotification
+			if err := json.Unmarshal([]byte(eventData), &notification); err == nil {
+				ch <- notification
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			errCh <- fmt.Errorf("SSE stream error: %w", err)
+		}
+	}()
+
+	return &SSESubscription{Events: ch, Err: errCh}, nil
 }

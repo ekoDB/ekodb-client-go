@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-04-01
+
+### Added
+
+- **`agent_id` field on chat sessions** — `CreateChatSessionRequest` and
+  `ChatSession` structs now include an optional `AgentID` field to associate a
+  session with a named agent.
+
+- **Client tool fields on `ChatMessageRequest`** — Added `ClientTools`,
+  `ConfirmTools`, and `ExcludeTools` optional fields plus `ClientToolDef` struct
+  for HTTP/SSE chat message requests. Mirrors the WebSocket `ChatSendOptions`
+  fields.
+
+- **`SubmitChatToolResult()`** — New HTTP method to submit a client tool result
+  for an in-flight SSE chat stream, unblocking ekoDB's tool loop.
+
+- **`SubscribeSSE()`** — Subscribe to collection mutations via SSE (Server-Sent
+  Events). Accepts a `context.Context` for cancellation and returns an
+  `*SSESubscription` with `Events` and `Err` channels. Use when WebSocket
+  connections aren't available. Supports `FilterField`/`FilterValue` options.
+
 ## [0.15.2] - 2026-03-28
 
 ### Fixed
