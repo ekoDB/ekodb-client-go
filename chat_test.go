@@ -757,13 +757,13 @@ func TestSubscribeSSEParsesMutations(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	ch, err := client.SubscribeSSE(context.Background(), "orders", nil)
+	sub, err := client.SubscribeSSE(context.Background(), "orders", nil)
 	if err != nil {
 		t.Fatalf("SubscribeSSE failed: %v", err)
 	}
 
 	var events []MutationNotification
-	for n := range ch {
+	for n := range sub.Events {
 		events = append(events, n)
 	}
 
@@ -775,6 +775,10 @@ func TestSubscribeSSEParsesMutations(t *testing.T) {
 	}
 	if events[1].Event != "update" || events[1].RecordIDs[0] != "r2" {
 		t.Errorf("Unexpected second event: %+v", events[1])
+	}
+	// Verify no stream errors
+	if streamErr := <-sub.Err; streamErr != nil {
+		t.Errorf("Unexpected stream error: %v", streamErr)
 	}
 }
 
@@ -796,7 +800,7 @@ func TestSubscribeSSEWithFilter(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	ch, err := client.SubscribeSSE(context.Background(), "orders", &SubscribeSSEOptions{
+	sub, err := client.SubscribeSSE(context.Background(), "orders", &SubscribeSSEOptions{
 		FilterField: "status",
 		FilterValue: "active",
 	})
@@ -805,7 +809,7 @@ func TestSubscribeSSEWithFilter(t *testing.T) {
 	}
 
 	var events []MutationNotification
-	for n := range ch {
+	for n := range sub.Events {
 		events = append(events, n)
 	}
 	if len(events) != 1 {

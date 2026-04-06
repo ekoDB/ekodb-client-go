@@ -23,7 +23,8 @@ and this project adheres to
   for an in-flight SSE chat stream, unblocking ekoDB's tool loop.
 
 - **`SubscribeSSE()`** — Subscribe to collection mutations via SSE (Server-Sent
-  Events). Returns a `<-chan MutationNotification`. Use when WebSocket
+  Events). Accepts a `context.Context` for cancellation and returns an
+  `*SSESubscription` with `Events` and `Err` channels. Use when WebSocket
   connections aren't available. Supports `FilterField`/`FilterValue` options.
 
 ## [0.15.2] - 2026-03-28

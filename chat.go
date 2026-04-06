@@ -881,16 +881,26 @@ type SubscribeSSEOptions struct {
 	FilterValue string
 }
 
+// SSESubscription holds the channels returned by SubscribeSSE.
+type SSESubscription struct {
+	// Events receives mutation notifications. Closed when the stream ends.
+	Events <-chan MutationNotification
+	// Err receives at most one error if the stream terminates abnormally
+	// (scanner failure, context cancellation). Nil on clean EOF. Closed after send.
+	Err <-chan error
+}
+
 // SubscribeSSE subscribes to collection mutations via SSE (Server-Sent Events).
 //
-// Returns a channel that yields MutationNotification events. The channel is
-// closed when the SSE stream ends, an error occurs, or the context is cancelled.
+// Returns an SSESubscription whose Events channel yields MutationNotification
+// events and whose Err channel surfaces any stream-level error.
+// Both channels are closed when the stream ends or the context is cancelled.
 //
 // Cancel the context to stop the subscription and release resources.
 //
 // Use this when WebSocket connections aren't available (e.g. behind reverse
 // proxies that block WS upgrades).
-func (c *Client) SubscribeSSE(ctx context.Context, collection string, opts *SubscribeSSEOptions) (<-chan MutationNotification, error) {
+func (c *Client) SubscribeSSE(ctx context.Context, collection string, opts *SubscribeSSEOptions) (*SSESubscription, error) {
 	sseURL := c.baseURL + "/api/subscribe/" + url.PathEscape(collection)
 	if opts != nil {
 		params := url.Values{}
@@ -932,10 +942,12 @@ func (c *Client) SubscribeSSE(ctx context.Context, collection string, opts *Subs
 	}
 
 	ch := make(chan MutationNotification, 256)
+	errCh := make(chan error, 1)
 
 	go func() {
 		defer resp.Body.Close()
 		defer close(ch)
+		defer close(errCh)
 
 		scanner := bufio.NewScanner(resp.Body)
 		// Allow SSE data lines up to 1MB (default 64K may truncate large payloads)
@@ -976,7 +988,11 @@ func (c *Client) SubscribeSSE(ctx context.Context, collection string, opts *Subs
 				ch <- notification
 			}
 		}
+
+		if err := scanner.Err(); err != nil {
+			errCh <- fmt.Errorf("SSE stream error: %w", err)
+		}
 	}()
 
-	return ch, nil
+	return &SSESubscription{Events: ch, Err: errCh}, nil
 }
