@@ -46,6 +46,36 @@ func (f FunctionStageConfig) MarshalJSON() ([]byte, error) {
 	return json.Marshal(m)
 }
 
+// Parameter returns the structural placeholder
+// `{"type": "Parameter", "name": name}` that ekoDB's `resolve_json_parameters`
+// recognizes inside Insert.record, Update.updates, UpdateById.updates,
+// FindOneAndUpdate.updates, BatchInsert.records, and any QueryExpression
+// filter value.
+//
+// At function-call time, ekoDB replaces the placeholder with the actual
+// parameter value, preserving the native FieldType (Binary, DateTime, UUID,
+// Decimal, Duration, Number, Set, Vector) via the `{type,value}` wrapped
+// form. Safe to use for any type — scalars and containers alike.
+//
+// This is the structural alternative to the text-level `"{{name}}"`
+// placeholder; both are accepted by the server. Prefer structural when the
+// parameter is a whole-object record or a value whose type would be lost
+// on a raw-JSON round-trip.
+//
+// Example — items_create function:
+//
+//	StageInsert("items", Parameter("record"), false, nil)
+//
+// Example — items_update function:
+//
+//	StageUpdateById("items", "{{id}}", Parameter("updates"), false, nil)
+func Parameter(name string) map[string]interface{} {
+	return map[string]interface{}{
+		"type": "Parameter",
+		"name": name,
+	}
+}
+
 // Stage builders
 func StageFindAll(collection string) FunctionStageConfig {
 	return FunctionStageConfig{
@@ -667,6 +697,69 @@ func StageSWR(
 	}
 	return FunctionStageConfig{
 		Stage: "SWR",
+		Data:  data,
+	}
+}
+
+// StageBcryptHash bcrypt-hashes a plaintext value and writes the result into
+// every record in the working data as outputField. Use in a compound
+// users_register function between input validation and Insert.
+//
+// The plain argument is typically a text-level placeholder like
+// "{{password}}" — the substituter replaces it with the call-time param
+// before this stage runs. The cost argument is the bcrypt work factor
+// (4..=31); pass nil for the ekoDB default (12).
+//
+// Requires ekoDB >= 0.41.0.
+func StageBcryptHash(plain, outputField string, cost *int) FunctionStageConfig {
+	data := map[string]interface{}{
+		"plain":        plain,
+		"output_field": outputField,
+	}
+	if cost != nil {
+		data["cost"] = *cost
+	}
+	return FunctionStageConfig{
+		Stage: "BcryptHash",
+		Data:  data,
+	}
+}
+
+// StageBcryptVerify verifies a plaintext against a bcrypt hash stored on
+// the first record in the working data and writes a boolean result into
+// outputField. Pair with StageIf to branch on success / failure.
+//
+// plain is typically "{{password}}"; hashField is the name of the field
+// on the current record holding the stored hash (e.g. "password_hash").
+//
+// Requires ekoDB >= 0.41.0.
+func StageBcryptVerify(plain, hashField, outputField string) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "BcryptVerify",
+		Data: map[string]interface{}{
+			"plain":        plain,
+			"hash_field":   hashField,
+			"output_field": outputField,
+		},
+	}
+}
+
+// StageRandomToken generates a cryptographically-random token and adds it
+// to every record in the working data. bytes must be in 1..=1024.
+// encoding is one of "hex" (default), "base64", or "base64url"; pass an
+// empty string to use the server default.
+//
+// Requires ekoDB >= 0.41.0.
+func StageRandomToken(bytes int, encoding, outputField string) FunctionStageConfig {
+	data := map[string]interface{}{
+		"bytes":        bytes,
+		"output_field": outputField,
+	}
+	if encoding != "" {
+		data["encoding"] = encoding
+	}
+	return FunctionStageConfig{
+		Stage: "RandomToken",
 		Data:  data,
 	}
 }
