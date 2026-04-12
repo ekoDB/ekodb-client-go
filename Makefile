@@ -362,3 +362,17 @@ info:
 	@echo ""
 	@echo "📏 $(CYAN)Lines of Code:$(RESET)"
 	@find . -name "*.go" -not -path "./vendor/*" -exec wc -l {} + | tail -1 | awk '{print "  " $$1 " lines"}'
+
+# Count lines of code
+count:
+	@echo "🔢 $(CYAN)Counting lines of code...$(RESET)"
+	@find . -name '*.go' -not -path "./vendor/*" -not -path "./.git/*" | xargs wc -l
+
+count-detailed:
+	@echo "📊 $(CYAN)Detailed code statistics with tokei...$(RESET)"
+	@if command -v tokei > /dev/null; then \
+		tokei . --exclude vendor; \
+	else \
+		echo "$(RED)tokei is not installed. Please install tokei for detailed statistics.$(RESET)"; \
+		echo "$(YELLOW)Run 'cargo install tokei' to install tokei.$(RESET)"; \
+	fi
