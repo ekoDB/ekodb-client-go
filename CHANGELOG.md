@@ -6,9 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.17.0] - 2026-04-12
 
 ### Added
+
+- **Five new function stage builders: `StageTryCatch`, `StageParallel`,
+  `StageSleep`, `StageReturn`, `StageValidate`** — Feature-parity bindings for
+  ekoDB's error-handling, control-flow, response-formatting, and validation
+  stages. Previously only the server supported these; any stored function using
+  them would fail to round-trip through the Go client.
+  - `StageTryCatch(tryFunctions, catchFunctions, outputErrorField)` — try/catch
+    for graceful failure recovery.
+  - `StageParallel(functions, waitForAll)` — concurrent execution of multiple
+    stages.
+  - `StageSleep(durationMs)` — delay execution (accepts int or placeholder
+    string).
+  - `StageReturn(fields, statusCode)` — shape the final response object.
+  - `StageValidate(schema, dataField, onError)` — JSON schema validation before
+    processing.
 
 - **Three new crypto-primitive stage builders: `StageBcryptHash`,
   `StageBcryptVerify`, and `StageRandomToken`** — Feature-parity bindings for
