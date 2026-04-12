@@ -4,9 +4,8 @@ package ekodb
 //
 // These cover the pure-data construction side of the library — the shape
 // of the JSON that eventually lands on the server. Server-side behavior
-// for structural parameter placeholders is covered by the Rust
-// integration tests in
-// `ekodb/ekodb_server/tests/function_parameters_tests.rs`.
+// for structural parameter placeholders is covered by integration tests
+// in the Rust server repository.
 
 import (
 	"encoding/json"
