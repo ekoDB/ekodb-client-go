@@ -49,8 +49,8 @@ func (f FunctionStageConfig) MarshalJSON() ([]byte, error) {
 // Parameter returns the structural placeholder
 // `{"type": "Parameter", "name": name}` that ekoDB's `resolve_json_parameters`
 // recognizes inside Insert.record, Update.updates, UpdateById.updates,
-// FindOneAndUpdate.updates, BatchInsert.records, and any QueryExpression
-// filter value.
+// FindOneAndUpdate.updates, BatchInsert.records, and any query filter
+// expression value.
 //
 // At function-call time, ekoDB replaces the placeholder with the actual
 // parameter value, preserving the native FieldType (Binary, DateTime, UUID,
