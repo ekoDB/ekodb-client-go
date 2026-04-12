@@ -6,6 +6,67 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-04-12
+
+### Added
+
+- **Five new function stage builders: `StageTryCatch`, `StageParallel`,
+  `StageSleep`, `StageReturn`, `StageValidate`** — Feature-parity bindings for
+  ekoDB's error-handling, control-flow, response-formatting, and validation
+  stages. Previously only the server supported these; any stored function using
+  them would fail to round-trip through the Go client.
+  - `StageTryCatch(tryFunctions, catchFunctions, outputErrorField)` — try/catch
+    for graceful failure recovery.
+  - `StageParallel(functions, waitForAll)` — concurrent execution of multiple
+    stages.
+  - `StageSleep(durationMs)` — delay execution (accepts int or placeholder
+    string).
+  - `StageReturn(fields, statusCode)` — shape the final response object.
+  - `StageValidate(schema, dataField, onError)` — JSON schema validation before
+    processing.
+
+- **Three new crypto-primitive stage builders: `StageBcryptHash`,
+  `StageBcryptVerify`, and `StageRandomToken`** — Feature-parity bindings for
+  ekoDB 0.41.0's new stored-function crypto stages. Lets Go apps build a pure
+  stored-function auth flow (`users_register = Validate + BcryptHash + Insert`,
+  `users_login = FindOne + BcryptVerify + If`) without hosting a bcrypt or
+  CSPRNG dependency at the app layer.
+  - `StageBcryptHash(plain, outputField string, cost *int)` — hashes a plaintext
+    (typically `"{{password}}"`) with bcrypt; `cost` defaults to 12 when nil.
+  - `StageBcryptVerify(plain, hashField, outputField string)` — reads the stored
+    hash from `working_data[0][hashField]`, verifies, and writes a boolean into
+    `outputField`. Pair with `StageIf` for login.
+  - `StageRandomToken(bytes int, encoding, outputField string)` — draws `bytes`
+    bytes (1..=1024) from the OS CSPRNG and encodes as `"hex"` (default),
+    `"base64"`, or `"base64url"`. Pass `""` for the server default.
+
+  Sensitive call-time inputs (the password the user just typed) flow through the
+  normal text-level `"{{password}}"` placeholder. Operator secrets (peppers,
+  data keys) continue to use `"{{env.NAME}}"` sourced from the ekoDB config's
+  `environment_vars` whitelist.
+
+  Requires ekoDB >= 0.41.0. 6 new tests in `functions_test.go`
+  (`TestStageBcryptHash_withExplicitCost`,
+  `TestStageBcryptHash_omitsCostWhenNil`,
+  `TestStageBcryptVerify_wiresAllFields`,
+  `TestStageRandomToken_withExplicitEncoding`,
+  `TestStageRandomToken_omitsEncodingWhenEmpty`,
+  `TestCryptoStages_jsonRoundTrip`) — full Go suite: 327/327 passing.
+
+- **`Parameter(name)` helper for structural placeholder construction** — New
+  top-level function in `functions.go` that returns the
+  `map[string]interface{}{"type": "Parameter", "name": name}` shape ekoDB's
+  `resolve_json_parameters` recognizes inside `StageInsert`'s `record`,
+  `StageUpdate` / `StageUpdateById` / `StageFindOneAndUpdate` `updates`,
+  `StageBatchInsert`'s per-record entries, and any `QueryExpression` filter
+  value. This is the structural alternative to text-level `"{{name}}"`
+  placeholders — use it when the parameter is a whole-object record or a value
+  whose type would otherwise be lost on a raw-JSON round-trip (Binary, DateTime,
+  UUID, Decimal, Duration, Number, Set, Vector). Requires ekoDB >= 0.41.0 for
+  the mutation-stage parameter-resolution consistency fix. New tests in
+  `functions_test.go` cover Insert, UpdateById, Update (filter-based), and
+  BatchInsert including JSON round-trip verification.
+
 ## [0.16.0] - 2026-04-01
 
 ### Added

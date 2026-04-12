@@ -46,6 +46,36 @@ func (f FunctionStageConfig) MarshalJSON() ([]byte, error) {
 	return json.Marshal(m)
 }
 
+// Parameter returns the structural placeholder
+// `{"type": "Parameter", "name": name}` that ekoDB's `resolve_json_parameters`
+// recognizes inside Insert.record, Update.updates, UpdateById.updates,
+// FindOneAndUpdate.updates, BatchInsert.records, and any query filter
+// expression value.
+//
+// At function-call time, ekoDB replaces the placeholder with the actual
+// parameter value, preserving the native FieldType (Binary, DateTime, UUID,
+// Decimal, Duration, Number, Set, Vector) via the `{type,value}` wrapped
+// form. Safe to use for any type — scalars and containers alike.
+//
+// This is the structural alternative to the text-level `"{{name}}"`
+// placeholder; both are accepted by the server. Prefer structural when the
+// parameter is a whole-object record or a value whose type would be lost
+// on a raw-JSON round-trip.
+//
+// Example — items_create function:
+//
+//	StageInsert("items", Parameter("record"), false, nil)
+//
+// Example — items_update function:
+//
+//	StageUpdateById("items", "{{id}}", Parameter("updates"), false, nil)
+func Parameter(name string) map[string]interface{} {
+	return map[string]interface{}{
+		"type": "Parameter",
+		"name": name,
+	}
+}
+
 // Stage builders
 func StageFindAll(collection string) FunctionStageConfig {
 	return FunctionStageConfig{
@@ -667,6 +697,148 @@ func StageSWR(
 	}
 	return FunctionStageConfig{
 		Stage: "SWR",
+		Data:  data,
+	}
+}
+
+// StageBcryptHash bcrypt-hashes a plaintext value and writes the result into
+// every record in the working data as outputField. Use in a compound
+// users_register function between input validation and Insert.
+//
+// The plain argument is typically a text-level placeholder like
+// "{{password}}" — the substituter replaces it with the call-time param
+// before this stage runs. The cost argument is the bcrypt work factor.
+// ekoDB accepts values in the range 4..=31; pass nil for the ekoDB default
+// (12). This builder does not validate the range client-side, so invalid
+// values will error when the stage is executed by ekoDB.
+//
+// Requires ekoDB >= 0.41.0.
+func StageBcryptHash(plain, outputField string, cost *int) FunctionStageConfig {
+	data := map[string]interface{}{
+		"plain":        plain,
+		"output_field": outputField,
+	}
+	if cost != nil {
+		data["cost"] = *cost
+	}
+	return FunctionStageConfig{
+		Stage: "BcryptHash",
+		Data:  data,
+	}
+}
+
+// StageBcryptVerify verifies a plaintext against a bcrypt hash stored on
+// the first record in the working data and writes a boolean result into
+// outputField. Pair with StageIf to branch on success / failure.
+//
+// plain is typically "{{password}}"; hashField is the name of the field
+// on the current record holding the stored hash (e.g. "password_hash").
+//
+// Requires ekoDB >= 0.41.0.
+func StageBcryptVerify(plain, hashField, outputField string) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "BcryptVerify",
+		Data: map[string]interface{}{
+			"plain":        plain,
+			"hash_field":   hashField,
+			"output_field": outputField,
+		},
+	}
+}
+
+// StageRandomToken generates a cryptographically-random token and adds it
+// to every record in the working data. encoding is one of "hex" (default),
+// "base64", or "base64url"; pass an empty string to use the server default.
+// The bytes argument controls the token length; ekoDB enforces a server-side
+// limit of 1..=1024 — this builder does not validate the range client-side,
+// so out-of-range values will error when the stage is executed by ekoDB.
+//
+// Requires ekoDB >= 0.41.0.
+func StageRandomToken(bytes int, encoding, outputField string) FunctionStageConfig {
+	data := map[string]interface{}{
+		"bytes":        bytes,
+		"output_field": outputField,
+	}
+	if encoding != "" {
+		data["encoding"] = encoding
+	}
+	return FunctionStageConfig{
+		Stage: "RandomToken",
+		Data:  data,
+	}
+}
+
+// StageTryCatch creates a try/catch error handling stage for graceful failure recovery.
+// Executes tryFunctions, and if any fail, executes catchFunctions.
+// outputErrorField (optional) is the field name to store error details (default: "error").
+func StageTryCatch(tryFunctions, catchFunctions []FunctionStageConfig, outputErrorField string) FunctionStageConfig {
+	data := map[string]interface{}{
+		"try_functions":   tryFunctions,
+		"catch_functions": catchFunctions,
+	}
+	if outputErrorField != "" {
+		data["output_error_field"] = outputErrorField
+	}
+	return FunctionStageConfig{
+		Stage: "TryCatch",
+		Data:  data,
+	}
+}
+
+// StageParallel executes multiple functions in parallel (concurrently).
+// All functions run simultaneously, results are merged.
+// If waitForAll is true, waits for all to complete; if false, returns on first completion.
+func StageParallel(functions []FunctionStageConfig, waitForAll bool) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "Parallel",
+		Data: map[string]interface{}{
+			"functions":    functions,
+			"wait_for_all": waitForAll,
+		},
+	}
+}
+
+// StageSleep creates a sleep/delay stage for rate limiting or timing control.
+// durationMs is the duration in milliseconds — pass an int or a string like "{{delay_param}}".
+func StageSleep(durationMs interface{}) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "Sleep",
+		Data: map[string]interface{}{
+			"duration_ms": durationMs,
+		},
+	}
+}
+
+// StageReturn creates a Return stage that shapes the final response.
+// fields are the fields to include in the response (supports {{param}} substitution).
+// statusCode is the HTTP status code (pass 0 to omit; default on server: 200).
+func StageReturn(fields map[string]interface{}, statusCode int) FunctionStageConfig {
+	data := map[string]interface{}{
+		"fields": fields,
+	}
+	if statusCode > 0 {
+		data["status_code"] = statusCode
+	}
+	return FunctionStageConfig{
+		Stage: "Return",
+		Data:  data,
+	}
+}
+
+// StageValidate validates data against a JSON schema before processing.
+// schema is the JSON Schema to validate against.
+// dataField is the field containing data to validate.
+// onError (optional) are functions to execute on validation failure; pass nil to omit.
+func StageValidate(schema map[string]interface{}, dataField string, onError []FunctionStageConfig) FunctionStageConfig {
+	data := map[string]interface{}{
+		"schema":     schema,
+		"data_field": dataField,
+	}
+	if onError != nil {
+		data["on_error"] = onError
+	}
+	return FunctionStageConfig{
+		Stage: "Validate",
 		Data:  data,
 	}
 }
