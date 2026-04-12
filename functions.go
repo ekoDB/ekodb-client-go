@@ -707,8 +707,10 @@ func StageSWR(
 //
 // The plain argument is typically a text-level placeholder like
 // "{{password}}" — the substituter replaces it with the call-time param
-// before this stage runs. The cost argument is the bcrypt work factor
-// (4..=31); pass nil for the ekoDB default (12).
+// before this stage runs. The cost argument is the bcrypt work factor.
+// ekoDB accepts values in the range 4..=31; pass nil for the ekoDB default
+// (12). This builder does not validate the range client-side, so invalid
+// values will error when the stage is executed by ekoDB.
 //
 // Requires ekoDB >= 0.41.0.
 func StageBcryptHash(plain, outputField string, cost *int) FunctionStageConfig {
