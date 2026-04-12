@@ -768,6 +768,81 @@ func StageRandomToken(bytes int, encoding, outputField string) FunctionStageConf
 	}
 }
 
+// StageTryCatch creates a try/catch error handling stage for graceful failure recovery.
+// Executes tryFunctions, and if any fail, executes catchFunctions.
+// outputErrorField (optional) is the field name to store error details (default: "error").
+func StageTryCatch(tryFunctions, catchFunctions []FunctionStageConfig, outputErrorField string) FunctionStageConfig {
+	data := map[string]interface{}{
+		"try_functions":   tryFunctions,
+		"catch_functions": catchFunctions,
+	}
+	if outputErrorField != "" {
+		data["output_error_field"] = outputErrorField
+	}
+	return FunctionStageConfig{
+		Stage: "TryCatch",
+		Data:  data,
+	}
+}
+
+// StageParallel executes multiple functions in parallel (concurrently).
+// All functions run simultaneously, results are merged.
+// If waitForAll is true, waits for all to complete; if false, returns on first completion.
+func StageParallel(functions []FunctionStageConfig, waitForAll bool) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "Parallel",
+		Data: map[string]interface{}{
+			"functions":    functions,
+			"wait_for_all": waitForAll,
+		},
+	}
+}
+
+// StageSleep creates a sleep/delay stage for rate limiting or timing control.
+// durationMs is the duration in milliseconds — pass an int or a string like "{{delay_param}}".
+func StageSleep(durationMs interface{}) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "Sleep",
+		Data: map[string]interface{}{
+			"duration_ms": durationMs,
+		},
+	}
+}
+
+// StageReturn creates a Return stage that shapes the final response.
+// fields are the fields to include in the response (supports {{param}} substitution).
+// statusCode is the HTTP status code (pass 0 to omit; default on server: 200).
+func StageReturn(fields map[string]interface{}, statusCode int) FunctionStageConfig {
+	data := map[string]interface{}{
+		"fields": fields,
+	}
+	if statusCode > 0 {
+		data["status_code"] = statusCode
+	}
+	return FunctionStageConfig{
+		Stage: "Return",
+		Data:  data,
+	}
+}
+
+// StageValidate validates data against a JSON schema before processing.
+// schema is the JSON Schema to validate against.
+// dataField is the field containing data to validate.
+// onError (optional) are functions to execute on validation failure; pass nil to omit.
+func StageValidate(schema map[string]interface{}, dataField string, onError []FunctionStageConfig) FunctionStageConfig {
+	data := map[string]interface{}{
+		"schema":     schema,
+		"data_field": dataField,
+	}
+	if onError != nil {
+		data["on_error"] = onError
+	}
+	return FunctionStageConfig{
+		Stage: "Validate",
+		Data:  data,
+	}
+}
+
 // ChatMessage for AI operations
 type ChatMessage struct {
 	Role    string `json:"role"`

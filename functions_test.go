@@ -301,3 +301,154 @@ func TestCryptoStages_jsonRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestStageTryCatch(t *testing.T) {
+	stage := StageTryCatch(
+		[]FunctionStageConfig{StageFindAll("users")},
+		[]FunctionStageConfig{StageInsert("errors", map[string]interface{}{"msg": "failed"}, false, nil)},
+		"api_error",
+	)
+	if stage.Stage != "TryCatch" {
+		t.Fatalf("stage = %v, want TryCatch", stage.Stage)
+	}
+	tryFns := stage.Data["try_functions"].([]FunctionStageConfig)
+	catchFns := stage.Data["catch_functions"].([]FunctionStageConfig)
+	if len(tryFns) != 1 {
+		t.Fatalf("try_functions len = %d, want 1", len(tryFns))
+	}
+	if len(catchFns) != 1 {
+		t.Fatalf("catch_functions len = %d, want 1", len(catchFns))
+	}
+	if stage.Data["output_error_field"] != "api_error" {
+		t.Fatalf("output_error_field = %v, want api_error", stage.Data["output_error_field"])
+	}
+}
+
+func TestStageTryCatchOmitsOutputErrorField(t *testing.T) {
+	stage := StageTryCatch(
+		[]FunctionStageConfig{StageFindAll("users")},
+		[]FunctionStageConfig{StageFindAll("fallback")},
+		"",
+	)
+	if _, ok := stage.Data["output_error_field"]; ok {
+		t.Fatal("output_error_field should be omitted when empty")
+	}
+}
+
+func TestStageParallel(t *testing.T) {
+	stage := StageParallel(
+		[]FunctionStageConfig{StageFindAll("a"), StageFindAll("b")},
+		true,
+	)
+	if stage.Stage != "Parallel" {
+		t.Fatalf("stage = %v, want Parallel", stage.Stage)
+	}
+	fns := stage.Data["functions"].([]FunctionStageConfig)
+	if len(fns) != 2 {
+		t.Fatalf("functions len = %d, want 2", len(fns))
+	}
+	if stage.Data["wait_for_all"] != true {
+		t.Fatalf("wait_for_all = %v, want true", stage.Data["wait_for_all"])
+	}
+}
+
+func TestStageParallelRaceMode(t *testing.T) {
+	stage := StageParallel(
+		[]FunctionStageConfig{StageFindAll("a")},
+		false,
+	)
+	if stage.Data["wait_for_all"] != false {
+		t.Fatalf("wait_for_all = %v, want false", stage.Data["wait_for_all"])
+	}
+}
+
+func TestStageSleep(t *testing.T) {
+	stage := StageSleep(1000)
+	if stage.Stage != "Sleep" {
+		t.Fatalf("stage = %v, want Sleep", stage.Stage)
+	}
+	if stage.Data["duration_ms"] != 1000 {
+		t.Fatalf("duration_ms = %v, want 1000", stage.Data["duration_ms"])
+	}
+}
+
+func TestStageSleepPlaceholder(t *testing.T) {
+	stage := StageSleep("{{delay}}")
+	if stage.Data["duration_ms"] != "{{delay}}" {
+		t.Fatalf("duration_ms = %v, want {{delay}}", stage.Data["duration_ms"])
+	}
+}
+
+func TestStageReturn(t *testing.T) {
+	stage := StageReturn(
+		map[string]interface{}{"message": "ok", "user_id": "{{id}}"},
+		201,
+	)
+	if stage.Stage != "Return" {
+		t.Fatalf("stage = %v, want Return", stage.Stage)
+	}
+	fields := stage.Data["fields"].(map[string]interface{})
+	if fields["message"] != "ok" {
+		t.Fatalf("fields.message = %v, want ok", fields["message"])
+	}
+	if stage.Data["status_code"] != 201 {
+		t.Fatalf("status_code = %v, want 201", stage.Data["status_code"])
+	}
+}
+
+func TestStageReturnOmitsStatusCode(t *testing.T) {
+	stage := StageReturn(map[string]interface{}{"ok": true}, 0)
+	if _, ok := stage.Data["status_code"]; ok {
+		t.Fatal("status_code should be omitted when 0")
+	}
+}
+
+func TestStageValidate(t *testing.T) {
+	schema := map[string]interface{}{"type": "object", "required": []string{"name"}}
+	stage := StageValidate(schema, "{{input}}", []FunctionStageConfig{StageFindAll("errors")})
+	if stage.Stage != "Validate" {
+		t.Fatalf("stage = %v, want Validate", stage.Stage)
+	}
+	if stage.Data["data_field"] != "{{input}}" {
+		t.Fatalf("data_field = %v, want {{input}}", stage.Data["data_field"])
+	}
+	onErr := stage.Data["on_error"].([]FunctionStageConfig)
+	if len(onErr) != 1 {
+		t.Fatalf("on_error len = %d, want 1", len(onErr))
+	}
+}
+
+func TestStageValidateOmitsOnError(t *testing.T) {
+	stage := StageValidate(map[string]interface{}{"type": "object"}, "data", nil)
+	if _, ok := stage.Data["on_error"]; ok {
+		t.Fatal("on_error should be omitted when nil")
+	}
+}
+
+func TestNewStagesJSONRoundTrip(t *testing.T) {
+	cases := []FunctionStageConfig{
+		StageTryCatch(
+			[]FunctionStageConfig{StageFindAll("a")},
+			[]FunctionStageConfig{StageFindAll("b")},
+			"err",
+		),
+		StageParallel([]FunctionStageConfig{StageFindAll("a")}, true),
+		StageSleep(500),
+		StageReturn(map[string]interface{}{"ok": true}, 200),
+		StageValidate(map[string]interface{}{"type": "object"}, "data", nil),
+	}
+
+	for _, stage := range cases {
+		bytes, err := json.Marshal(stage)
+		if err != nil {
+			t.Fatalf("marshal %s failed: %v", stage.Stage, err)
+		}
+		var got map[string]interface{}
+		if err := json.Unmarshal(bytes, &got); err != nil {
+			t.Fatalf("unmarshal %s failed: %v", stage.Stage, err)
+		}
+		if got["type"] != stage.Stage {
+			t.Fatalf("%s: type = %v, want %v", stage.Stage, got["type"], stage.Stage)
+		}
+	}
+}
