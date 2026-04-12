@@ -749,9 +749,9 @@ func StageBcryptVerify(plain, hashField, outputField string) FunctionStageConfig
 // StageRandomToken generates a cryptographically-random token and adds it
 // to every record in the working data. encoding is one of "hex" (default),
 // "base64", or "base64url"; pass an empty string to use the server default.
-// ekoDB accepts bytes values in the range 1..=1024. This builder does not
-// validate the range client-side, so invalid values will error when the
-// stage is executed by ekoDB.
+// The bytes argument controls the token length; ekoDB enforces a server-side
+// limit of 1..=1024 — this builder does not validate the range client-side,
+// so out-of-range values will error when the stage is executed by ekoDB.
 //
 // Requires ekoDB >= 0.41.0.
 func StageRandomToken(bytes int, encoding, outputField string) FunctionStageConfig {
