@@ -16,6 +16,8 @@ type UserFunction struct {
 	Parameters  map[string]ParameterDefinition `json:"parameters"`
 	Functions   []FunctionStageConfig          `json:"functions"`
 	Tags        []string                       `json:"tags,omitempty"`
+	HTTPMethod  *string                        `json:"http_method,omitempty"`
+	HTTPPath    *string                        `json:"http_path,omitempty"`
 	ID          *string                        `json:"id,omitempty"`
 	CreatedAt   *time.Time                     `json:"created_at,omitempty"`
 	UpdatedAt   *time.Time                     `json:"updated_at,omitempty"`
@@ -765,6 +767,370 @@ func StageRandomToken(bytes int, encoding, outputField string) FunctionStageConf
 	return FunctionStageConfig{
 		Stage: "RandomToken",
 		Data:  data,
+	}
+}
+
+// StageJwtSign signs a JWT and writes the resulting token to every working
+// record. Pair with StageBcryptVerify to issue a session token after login.
+// Use "{{env.JWT_SECRET}}" for secret so the LLM never sees the
+// operator-owned signing key. iat and exp are auto-stamped when
+// expiresInSecs is non-nil.
+//
+// algorithm is one of "HS256", "HS384", "HS512"; pass an empty string to
+// use the server default (HS256 in current ekoDB releases).
+//
+// Requires ekoDB >= 0.42.0.
+func StageJwtSign(claims map[string]interface{}, secret, outputField string, expiresInSecs *int64, algorithm string) FunctionStageConfig {
+	data := map[string]interface{}{
+		"claims":       claims,
+		"secret":       secret,
+		"output_field": outputField,
+	}
+	if algorithm != "" {
+		data["algorithm"] = algorithm
+	}
+	if expiresInSecs != nil {
+		data["expires_in_secs"] = *expiresInSecs
+	}
+	return FunctionStageConfig{
+		Stage: "JwtSign",
+		Data:  data,
+	}
+}
+
+// StageJwtVerify verifies a JWT held in tokenField on the first working
+// record. On success writes the decoded claims object into outputField; on
+// failure writes JSON null. To reject in the pipeline, branch with StageIf
+// checking that the value at outputField on the working record is nil/null
+// (e.g. working_data[0][outputField] == nil), not the outputField string
+// argument itself.
+//
+// algorithm is one of "HS256", "HS384", "HS512"; pass an empty string to
+// use the server default (HS256 in current ekoDB releases).
+//
+// Requires ekoDB >= 0.42.0.
+func StageJwtVerify(tokenField, secret, outputField, algorithm string) FunctionStageConfig {
+	data := map[string]interface{}{
+		"token_field":  tokenField,
+		"secret":       secret,
+		"output_field": outputField,
+	}
+	if algorithm != "" {
+		data["algorithm"] = algorithm
+	}
+	return FunctionStageConfig{
+		Stage: "JwtVerify",
+		Data:  data,
+	}
+}
+
+// EmailSendOptions carries the optional fields for StageEmailSend so the
+// builder doesn't grow an unwieldy positional argument list. All fields
+// are individually optional — leave a string empty or a *bool nil to
+// omit it from the on-wire payload.
+type EmailSendOptions struct {
+	ReplyTo     string
+	Provider    string
+	HTML        *bool
+	OutputField string
+}
+
+// StageEmailSend sends a transactional email through a provider's REST
+// API. Today only provider = "sendgrid" is supported. Use
+// "{{env.SENDGRID_API_KEY}}" for apiKey so the LLM never sees the
+// operator-owned secret. The result envelope ({provider_status,
+// provider_message, provider}) is written to outputField (default
+// "email_send"). Pass nil opts (or a zero-value EmailSendOptions) for
+// the minimal call.
+//
+// Requires ekoDB >= 0.42.0.
+func StageEmailSend(to, subject, body, from, apiKey string, opts *EmailSendOptions) FunctionStageConfig {
+	data := map[string]interface{}{
+		"to":      to,
+		"subject": subject,
+		"body":    body,
+		"from":    from,
+		"api_key": apiKey,
+	}
+	if opts != nil {
+		if opts.ReplyTo != "" {
+			data["reply_to"] = opts.ReplyTo
+		}
+		if opts.Provider != "" {
+			data["provider"] = opts.Provider
+		}
+		if opts.HTML != nil {
+			data["html"] = *opts.HTML
+		}
+		if opts.OutputField != "" {
+			data["output_field"] = opts.OutputField
+		}
+	}
+	return FunctionStageConfig{
+		Stage: "EmailSend",
+		Data:  data,
+	}
+}
+
+// StageHmacSign signs an input with HMAC-SHA256/384/512 and writes the
+// resulting digest (hex or base64) to outputField on every working record.
+// Pass "" for algorithm to default to "sha256", and "" for encoding to
+// default to "hex". Use "{{env.SIGNING_KEY}}" for secret so the LLM
+// never sees the operator-owned key.
+//
+// Requires ekoDB >= 0.42.0.
+func StageHmacSign(input, secret, outputField, algorithm, encoding string) FunctionStageConfig {
+	data := map[string]interface{}{
+		"input":        input,
+		"secret":       secret,
+		"output_field": outputField,
+	}
+	if algorithm != "" {
+		data["algorithm"] = algorithm
+	}
+	if encoding != "" {
+		data["encoding"] = encoding
+	}
+	return FunctionStageConfig{Stage: "HmacSign", Data: data}
+}
+
+// StageHmacVerify verifies an HMAC against providedMac in constant time
+// and writes a boolean to outputField. Pass "" for algorithm and encoding
+// to default to "sha256" + "hex".
+func StageHmacVerify(input, providedMac, secret, outputField, algorithm, encoding string) FunctionStageConfig {
+	data := map[string]interface{}{
+		"input":        input,
+		"provided_mac": providedMac,
+		"secret":       secret,
+		"output_field": outputField,
+	}
+	if algorithm != "" {
+		data["algorithm"] = algorithm
+	}
+	if encoding != "" {
+		data["encoding"] = encoding
+	}
+	return FunctionStageConfig{Stage: "HmacVerify", Data: data}
+}
+
+// StageAesEncrypt encrypts plaintext with AES-256-GCM and writes the
+// {ciphertext, nonce} envelope (both base64) to outputField. Pass "" for
+// keyEncoding to default to "hex"; "base64" and "base64url" are also
+// supported. Use "{{env.DATA_KEY}}" for key.
+func StageAesEncrypt(plaintext, key, outputField, keyEncoding string) FunctionStageConfig {
+	data := map[string]interface{}{
+		"plaintext":    plaintext,
+		"key":          key,
+		"output_field": outputField,
+	}
+	if keyEncoding != "" {
+		data["key_encoding"] = keyEncoding
+	}
+	return FunctionStageConfig{Stage: "AesEncrypt", Data: data}
+}
+
+// StageAesDecrypt reads the {ciphertext, nonce} envelope from
+// ciphertextField on the first working record, decrypts with key, and
+// writes the recovered plaintext (or null on tag mismatch) to
+// outputField.
+func StageAesDecrypt(ciphertextField, key, outputField, keyEncoding string) FunctionStageConfig {
+	data := map[string]interface{}{
+		"ciphertext_field": ciphertextField,
+		"key":              key,
+		"output_field":     outputField,
+	}
+	if keyEncoding != "" {
+		data["key_encoding"] = keyEncoding
+	}
+	return FunctionStageConfig{Stage: "AesDecrypt", Data: data}
+}
+
+// StageUuidGenerate writes a fresh v4 UUID to outputField on every
+// working record.
+func StageUuidGenerate(outputField string) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "UuidGenerate",
+		Data:  map[string]interface{}{"output_field": outputField},
+	}
+}
+
+// TotpOptions carries the optional fields for TOTP stages.
+type TotpOptions struct {
+	Digits    *int    // 6 or 8; nil = server default (6)
+	Period    *uint64 // seconds; nil = server default (30)
+	Algorithm string  // "sha1" (default), "sha256", "sha512"; "" = default
+	Skew      *uint8  // ± steps for verify; nil = server default (1)
+}
+
+// StageTotpGenerate generates the current TOTP code (RFC 6238) for
+// secret (base32-encoded; typically "{{env.TOTP_SECRET}}") and writes
+// it to outputField. Pass nil opts for all server defaults.
+func StageTotpGenerate(secret, outputField string, opts *TotpOptions) FunctionStageConfig {
+	data := map[string]interface{}{
+		"secret":       secret,
+		"output_field": outputField,
+	}
+	if opts != nil {
+		if opts.Digits != nil {
+			data["digits"] = *opts.Digits
+		}
+		if opts.Period != nil {
+			data["period"] = *opts.Period
+		}
+		if opts.Algorithm != "" {
+			data["algorithm"] = opts.Algorithm
+		}
+	}
+	return FunctionStageConfig{Stage: "TotpGenerate", Data: data}
+}
+
+// StageTotpVerify verifies a user-submitted TOTP code against secret
+// and writes a boolean to outputField. Pass nil opts for all server
+// defaults.
+func StageTotpVerify(code, secret, outputField string, opts *TotpOptions) FunctionStageConfig {
+	data := map[string]interface{}{
+		"code":         code,
+		"secret":       secret,
+		"output_field": outputField,
+	}
+	if opts != nil {
+		if opts.Digits != nil {
+			data["digits"] = *opts.Digits
+		}
+		if opts.Period != nil {
+			data["period"] = *opts.Period
+		}
+		if opts.Algorithm != "" {
+			data["algorithm"] = opts.Algorithm
+		}
+		if opts.Skew != nil {
+			data["skew"] = *opts.Skew
+		}
+	}
+	return FunctionStageConfig{Stage: "TotpVerify", Data: data}
+}
+
+// StageBase64Encode base64-encodes input and writes to outputField.
+// Pass urlSafe = true for URL-safe / no-pad alphabet.
+func StageBase64Encode(input, outputField string, urlSafe *bool) FunctionStageConfig {
+	data := map[string]interface{}{
+		"input":        input,
+		"output_field": outputField,
+	}
+	if urlSafe != nil {
+		data["url_safe"] = *urlSafe
+	}
+	return FunctionStageConfig{Stage: "Base64Encode", Data: data}
+}
+
+// StageBase64Decode decodes input as base64 and writes the recovered
+// UTF-8 string (or null on bad input) to outputField. Fail-closed.
+func StageBase64Decode(input, outputField string, urlSafe *bool) FunctionStageConfig {
+	data := map[string]interface{}{
+		"input":        input,
+		"output_field": outputField,
+	}
+	if urlSafe != nil {
+		data["url_safe"] = *urlSafe
+	}
+	return FunctionStageConfig{Stage: "Base64Decode", Data: data}
+}
+
+// StageHexEncode hex-encodes (lowercase) input and writes to outputField.
+func StageHexEncode(input, outputField string) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "HexEncode",
+		Data: map[string]interface{}{
+			"input":        input,
+			"output_field": outputField,
+		},
+	}
+}
+
+// StageHexDecode decodes input as hex and writes the UTF-8 string (or
+// null on bad input) to outputField. Fail-closed.
+func StageHexDecode(input, outputField string) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "HexDecode",
+		Data: map[string]interface{}{
+			"input":        input,
+			"output_field": outputField,
+		},
+	}
+}
+
+// StageSlugify converts input to a URL-friendly slug (ASCII-folded,
+// lowercased, non-alphanumerics replaced with "-") and writes to
+// outputField.
+func StageSlugify(input, outputField string) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "Slugify",
+		Data: map[string]interface{}{
+			"input":        input,
+			"output_field": outputField,
+		},
+	}
+}
+
+// StageIdempotencyClaim atomically claims an idempotency key (KV SETNX
+// with TTL). On first call writes {claimed: true, key} to outputField;
+// on replay within ttlSecs writes {claimed: false, key, response} so
+// the caller can short-circuit. Requires ekoDB >= 0.42.0.
+func StageIdempotencyClaim(key string, ttlSecs uint64, outputField string) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "IdempotencyClaim",
+		Data: map[string]interface{}{
+			"key":          key,
+			"ttl_secs":     ttlSecs,
+			"output_field": outputField,
+		},
+	}
+}
+
+// StageRateLimit gates a pipeline behind a fixed-window counter.
+// Atomically increments rate:<key>:<window-floor>; if the new count
+// exceeds limit, behavior depends on onExceed: "fail" (default — stage
+// errors and stops the pipeline) or "skip" (writes {allowed: false,
+// count, limit} and lets downstream stages branch). Pass "" for
+// onExceed to use the default.
+func StageRateLimit(key string, limit, windowSecs uint64, outputField, onExceed string) FunctionStageConfig {
+	data := map[string]interface{}{
+		"key":          key,
+		"limit":        limit,
+		"window_secs":  windowSecs,
+		"output_field": outputField,
+	}
+	if onExceed != "" {
+		data["on_exceed"] = onExceed
+	}
+	return FunctionStageConfig{Stage: "RateLimit", Data: data}
+}
+
+// StageLockAcquire tries to claim a distributed lock under key for
+// ttlSecs. On success writes {acquired: true, token} to outputField;
+// pass that token back to StageLockRelease.
+func StageLockAcquire(key string, ttlSecs uint64, outputField string) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "LockAcquire",
+		Data: map[string]interface{}{
+			"key":          key,
+			"ttl_secs":     ttlSecs,
+			"output_field": outputField,
+		},
+	}
+}
+
+// StageLockRelease releases the distributed lock at key only when the
+// stored token matches the supplied token (prevents foreign release
+// after a lease expired and the lock was reclaimed).
+func StageLockRelease(key, token, outputField string) FunctionStageConfig {
+	return FunctionStageConfig{
+		Stage: "LockRelease",
+		Data: map[string]interface{}{
+			"key":          key,
+			"token":        token,
+			"output_field": outputField,
+		},
 	}
 }
 

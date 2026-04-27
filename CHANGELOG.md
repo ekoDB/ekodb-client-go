@@ -6,6 +6,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-04-18
+
+### Added (2026-04-26 — crypto + concurrency stage builders)
+
+- **11 new crypto stage builders** matching ekoDB 0.42.0's new stored-function
+  stages:
+  - `StageHmacSign(input, secret, outputField, algorithm, encoding)` and
+    `StageHmacVerify(...)` (HMAC-SHA256/384/512). Pass `""` for `algorithm` /
+    `encoding` to use the server defaults.
+  - `StageAesEncrypt(plaintext, key, outputField, keyEncoding)` and
+    `StageAesDecrypt(...)` (AES-256-GCM, fail-closed decrypt).
+  - `StageUuidGenerate(outputField)` (RFC 4122 v4).
+  - `StageTotpGenerate(secret, outputField, *opts)` and
+    `StageTotpVerify(code, secret, outputField, *opts)` (RFC 6238). New
+    `TotpOptions` struct carries the optional digits / period / algorithm / skew
+    fields.
+  - `StageBase64Encode(input, outputField, *urlSafe)` and
+    `StageBase64Decode(...)`.
+  - `StageHexEncode(input, outputField)` and `StageHexDecode(...)`.
+  - `StageSlugify(input, outputField)`.
+- **4 new concurrency stage builders** wrapping ekoDB's atomic KV primitives:
+  - `StageIdempotencyClaim(key, ttlSecs, outputField)`.
+  - `StageRateLimit(key, limit, windowSecs, outputField, onExceed)` — pass `""`
+    for `onExceed` to use the default `"fail"` mode.
+  - `StageLockAcquire(key, ttlSecs, outputField)` and
+    `StageLockRelease(key, token, outputField)`.
+- **Tests** — 7 new test functions covering shape + optional-field omission for
+  HMAC, AES+UUID, TOTP, Base64+Hex+Slugify, the four concurrency stages, and
+  JSON round-trip for all 11 new types.
+
+**Requires ekoDB >= 0.42.0** for these stages to execute on the server.
+
+### Added (2026-04-26 — JWT + EmailSend + path-routed function fields)
+
+- **`StageJwtSign(claims, secret, outputField, *expiresInSecs, algorithm)` and
+  `StageJwtVerify(tokenField, secret, outputField, algorithm)`** — Go bindings
+  for ekoDB's HMAC JWT stages (HS256 / HS384 / HS512). Claims marshal to JSON;
+  pass `""` for `algorithm` to default to HS256.
+- **`StageEmailSend(to, subject, body, from, apiKey, *opts)` +
+  `EmailSendOptions` struct** — Go binding for the SendGrid v3 `mail/send`
+  integration stage. Optional `ReplyTo`, `Provider`, `HTML`, and `OutputField`
+  fields on `EmailSendOptions` for the full surface.
+- **`HTTPMethod` + `HTTPPath` on `UserFunction`** (both `*string`, `omitempty`).
+  Lets a stored function answer to `GET /api/route/users/:id` via the ekoDB
+  server's path-routed dispatcher.
+- **Tests** — 4 JWT builder-shape / JSON round-trip cases and 3 EmailSend shape
+  cases. Server-side reject paths (wrong secret, expired token, unsupported
+  algorithm) are covered by the Rust integration tests in
+  `ekodb/ekodb_server/tests/function_parameters_tests.rs`. Two new
+  `TestUserFunction_jsonIncludesHTTPFieldsWhenSet` /
+  `_jsonOmitsHTTPFieldsWhenNil` tests guard the `http_method` / `http_path` JSON
+  tags + omitempty behavior for the path-routed dispatcher.
+
 ## [0.17.0] - 2026-04-12
 
 ### Added
