@@ -302,6 +302,172 @@ func TestCryptoStages_jsonRoundTrip(t *testing.T) {
 	}
 }
 
+// --------------------------------------------------------------------------
+// JWT primitives: JwtSign, JwtVerify (ekoDB >= 0.42.0)
+// --------------------------------------------------------------------------
+
+func TestStageJwtSign_withClaimsExpiryAndAlgorithm(t *testing.T) {
+	exp := int64(3600)
+	claims := map[string]interface{}{"sub": "{{user_id}}", "role": "admin"}
+	stage := StageJwtSign(claims, "{{env.JWT_SECRET}}", "token", &exp, "HS256")
+
+	if stage.Stage != "JwtSign" {
+		t.Fatalf("stage = %q, want JwtSign", stage.Stage)
+	}
+	if stage.Data["secret"] != "{{env.JWT_SECRET}}" {
+		t.Fatalf("secret = %v", stage.Data["secret"])
+	}
+	if stage.Data["expires_in_secs"] != int64(3600) {
+		t.Fatalf("expires_in_secs = %v", stage.Data["expires_in_secs"])
+	}
+	if stage.Data["algorithm"] != "HS256" {
+		t.Fatalf("algorithm = %v", stage.Data["algorithm"])
+	}
+	if stage.Data["output_field"] != "token" {
+		t.Fatalf("output_field = %v", stage.Data["output_field"])
+	}
+}
+
+func TestStageJwtSign_omitsOptionalFieldsWhenEmpty(t *testing.T) {
+	stage := StageJwtSign(
+		map[string]interface{}{"sub": "u"},
+		"{{env.JWT_SECRET}}",
+		"t",
+		nil,
+		"",
+	)
+	if _, ok := stage.Data["algorithm"]; ok {
+		t.Fatalf("algorithm must be omitted when empty, got %v", stage.Data["algorithm"])
+	}
+	if _, ok := stage.Data["expires_in_secs"]; ok {
+		t.Fatalf("expires_in_secs must be omitted when nil, got %v", stage.Data["expires_in_secs"])
+	}
+}
+
+func TestStageJwtVerify_wiresAllFields(t *testing.T) {
+	stage := StageJwtVerify("auth_token", "{{env.JWT_SECRET}}", "claims", "HS512")
+	if stage.Stage != "JwtVerify" {
+		t.Fatalf("stage = %q", stage.Stage)
+	}
+	if stage.Data["token_field"] != "auth_token" {
+		t.Fatalf("token_field = %v", stage.Data["token_field"])
+	}
+	if stage.Data["secret"] != "{{env.JWT_SECRET}}" {
+		t.Fatalf("secret = %v", stage.Data["secret"])
+	}
+	if stage.Data["algorithm"] != "HS512" {
+		t.Fatalf("algorithm = %v", stage.Data["algorithm"])
+	}
+	if stage.Data["output_field"] != "claims" {
+		t.Fatalf("output_field = %v", stage.Data["output_field"])
+	}
+}
+
+func TestJwtStages_jsonRoundTrip(t *testing.T) {
+	exp := int64(900)
+	cases := []FunctionStageConfig{
+		StageJwtSign(
+			map[string]interface{}{"sub": "u-1"},
+			"{{env.JWT_SECRET}}",
+			"token",
+			&exp,
+			"HS256",
+		),
+		StageJwtVerify("token", "{{env.JWT_SECRET}}", "claims", ""),
+	}
+
+	for _, stage := range cases {
+		bytes, err := json.Marshal(stage)
+		if err != nil {
+			t.Fatalf("marshal %s failed: %v", stage.Stage, err)
+		}
+		var got map[string]interface{}
+		if err := json.Unmarshal(bytes, &got); err != nil {
+			t.Fatalf("unmarshal %s failed: %v", stage.Stage, err)
+		}
+		if got["type"] != stage.Stage {
+			t.Fatalf("%s: type = %v, want %v", stage.Stage, got["type"], stage.Stage)
+		}
+	}
+}
+
+// --------------------------------------------------------------------------
+// EmailSend (ekoDB >= 0.42.0)
+// --------------------------------------------------------------------------
+
+func TestStageEmailSend_withFullPayload(t *testing.T) {
+	htmlOn := true
+	stage := StageEmailSend(
+		"alice@example.com",
+		"Welcome",
+		"<p>Hi Alice</p>",
+		"bot@example.com",
+		"{{env.SENDGRID_API_KEY}}",
+		&EmailSendOptions{
+			ReplyTo:     "support@example.com",
+			Provider:    "sendgrid",
+			HTML:        &htmlOn,
+			OutputField: "send_result",
+		},
+	)
+	if stage.Stage != "EmailSend" {
+		t.Fatalf("stage = %q, want EmailSend", stage.Stage)
+	}
+	if stage.Data["to"] != "alice@example.com" {
+		t.Fatalf("to = %v", stage.Data["to"])
+	}
+	if stage.Data["from"] != "bot@example.com" {
+		t.Fatalf("from = %v", stage.Data["from"])
+	}
+	if stage.Data["reply_to"] != "support@example.com" {
+		t.Fatalf("reply_to = %v", stage.Data["reply_to"])
+	}
+	if stage.Data["api_key"] != "{{env.SENDGRID_API_KEY}}" {
+		t.Fatalf("api_key = %v", stage.Data["api_key"])
+	}
+	if stage.Data["provider"] != "sendgrid" {
+		t.Fatalf("provider = %v", stage.Data["provider"])
+	}
+	if stage.Data["html"] != true {
+		t.Fatalf("html = %v", stage.Data["html"])
+	}
+	if stage.Data["output_field"] != "send_result" {
+		t.Fatalf("output_field = %v", stage.Data["output_field"])
+	}
+}
+
+func TestStageEmailSend_omitsOptionalFieldsWhenEmpty(t *testing.T) {
+	stage := StageEmailSend("x@example.com", "s", "b", "f@example.com", "k", nil)
+	for _, k := range []string{"reply_to", "provider", "html", "output_field"} {
+		if _, ok := stage.Data[k]; ok {
+			t.Fatalf("%s must be omitted when nil opts, got %v", k, stage.Data[k])
+		}
+	}
+}
+
+func TestStageEmailSend_jsonRoundTrip(t *testing.T) {
+	htmlOn := true
+	stage := StageEmailSend(
+		"u@example.com",
+		"Hi",
+		"<p>Hi</p>",
+		"f@example.com",
+		"{{env.SENDGRID_API_KEY}}",
+		&EmailSendOptions{Provider: "sendgrid", HTML: &htmlOn},
+	)
+	bytes, err := json.Marshal(stage)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(bytes, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["type"] != "EmailSend" {
+		t.Fatalf("type = %v", got["type"])
+	}
+}
+
 func TestStageTryCatch(t *testing.T) {
 	stage := StageTryCatch(
 		[]FunctionStageConfig{StageFindAll("users")},
@@ -450,5 +616,218 @@ func TestNewStagesJSONRoundTrip(t *testing.T) {
 		if got["type"] != stage.Stage {
 			t.Fatalf("%s: type = %v, want %v", stage.Stage, got["type"], stage.Stage)
 		}
+	}
+}
+
+// ===== Crypto + concurrency stages =====
+
+func TestStageHmacSign_withAlgorithmAndEncoding(t *testing.T) {
+	s := StageHmacSign("{{p}}", "{{env.K}}", "mac", "sha256", "hex")
+	if s.Stage != "HmacSign" {
+		t.Fatalf("Stage = %v, want HmacSign", s.Stage)
+	}
+	if s.Data["algorithm"] != "sha256" || s.Data["encoding"] != "hex" {
+		t.Fatalf("Data missing algorithm/encoding: %v", s.Data)
+	}
+}
+
+func TestStageHmacVerify_omitsOptionalFields(t *testing.T) {
+	s := StageHmacVerify("{{p}}", "{{m}}", "{{env.K}}", "ok", "", "")
+	if _, ok := s.Data["algorithm"]; ok {
+		t.Fatalf("algorithm should be omitted when empty: %v", s.Data)
+	}
+	if _, ok := s.Data["encoding"]; ok {
+		t.Fatalf("encoding should be omitted when empty: %v", s.Data)
+	}
+}
+
+func TestStageAesAndUuidStages(t *testing.T) {
+	enc := StageAesEncrypt("p", "k", "e", "hex")
+	if enc.Stage != "AesEncrypt" || enc.Data["key_encoding"] != "hex" {
+		t.Fatalf("AesEncrypt malformed: %v", enc)
+	}
+	dec := StageAesDecrypt("e", "k", "p", "")
+	if dec.Stage != "AesDecrypt" {
+		t.Fatalf("AesDecrypt stage wrong: %v", dec)
+	}
+	if _, ok := dec.Data["key_encoding"]; ok {
+		t.Fatalf("key_encoding should be omitted when empty")
+	}
+	uid := StageUuidGenerate("id")
+	if uid.Stage != "UuidGenerate" || uid.Data["output_field"] != "id" {
+		t.Fatalf("UuidGenerate malformed: %v", uid)
+	}
+}
+
+func TestStageTotpStages(t *testing.T) {
+	digits := 6
+	period := uint64(30)
+	gen := StageTotpGenerate("{{env.T}}", "code", &TotpOptions{
+		Digits:    &digits,
+		Period:    &period,
+		Algorithm: "sha1",
+	})
+	if gen.Stage != "TotpGenerate" {
+		t.Fatalf("TotpGenerate wrong stage: %v", gen)
+	}
+	if gen.Data["digits"].(int) != 6 || gen.Data["period"].(uint64) != 30 {
+		t.Fatalf("TotpGenerate options not wired: %v", gen.Data)
+	}
+	skew := uint8(1)
+	ver := StageTotpVerify("{{user_code}}", "{{env.T}}", "ok", &TotpOptions{Skew: &skew})
+	if ver.Stage != "TotpVerify" || ver.Data["skew"].(uint8) != 1 {
+		t.Fatalf("TotpVerify options not wired: %v", ver.Data)
+	}
+	bare := StageTotpGenerate("s", "c", nil)
+	if _, ok := bare.Data["digits"]; ok {
+		t.Fatalf("nil opts should leave digits absent: %v", bare.Data)
+	}
+}
+
+func TestStageBase64HexSlugifyStages(t *testing.T) {
+	urlSafe := true
+	b := StageBase64Encode("{{x}}", "b", &urlSafe)
+	if b.Data["url_safe"].(bool) != true {
+		t.Fatalf("Base64Encode url_safe not wired: %v", b.Data)
+	}
+	bd := StageBase64Decode("{{b}}", "x", nil)
+	if _, ok := bd.Data["url_safe"]; ok {
+		t.Fatalf("Base64Decode url_safe should be absent when nil: %v", bd.Data)
+	}
+	h := StageHexEncode("{{x}}", "h")
+	if h.Stage != "HexEncode" || h.Data["input"] != "{{x}}" {
+		t.Fatalf("HexEncode malformed: %v", h)
+	}
+	hd := StageHexDecode("{{h}}", "x")
+	if hd.Stage != "HexDecode" {
+		t.Fatalf("HexDecode wrong stage: %v", hd)
+	}
+	s := StageSlugify("{{title}}", "slug")
+	if s.Stage != "Slugify" || s.Data["output_field"] != "slug" {
+		t.Fatalf("Slugify malformed: %v", s)
+	}
+}
+
+func TestConcurrencyStages(t *testing.T) {
+	idem := StageIdempotencyClaim("{{ikey}}", 60, "claim")
+	if idem.Data["ttl_secs"].(uint64) != 60 {
+		t.Fatalf("IdempotencyClaim ttl_secs wrong: %v", idem.Data)
+	}
+	rl := StageRateLimit("{{u}}", 100, 60, "rl", "skip")
+	if rl.Data["on_exceed"] != "skip" {
+		t.Fatalf("RateLimit on_exceed not wired: %v", rl.Data)
+	}
+	rlBare := StageRateLimit("{{u}}", 100, 60, "rl", "")
+	if _, ok := rlBare.Data["on_exceed"]; ok {
+		t.Fatalf("on_exceed should be absent when empty: %v", rlBare.Data)
+	}
+	la := StageLockAcquire("{{r}}", 30, "lock")
+	if la.Stage != "LockAcquire" || la.Data["ttl_secs"].(uint64) != 30 {
+		t.Fatalf("LockAcquire malformed: %v", la)
+	}
+	lr := StageLockRelease("{{r}}", "tok", "rel")
+	if lr.Data["token"] != "tok" {
+		t.Fatalf("LockRelease token not wired: %v", lr.Data)
+	}
+}
+
+func TestCryptoConcurrencyStages_jsonRoundTrip(t *testing.T) {
+	cases := []FunctionStageConfig{
+		StageHmacSign("a", "k", "m", "sha256", "hex"),
+		StageAesEncrypt("p", "k", "e", "hex"),
+		StageUuidGenerate("id"),
+		StageTotpGenerate("s", "c", nil),
+		StageBase64Encode("x", "b", nil),
+		StageHexEncode("x", "h"),
+		StageSlugify("t", "s"),
+		StageIdempotencyClaim("k", 60, "c"),
+		StageRateLimit("k", 5, 60, "r", ""),
+		StageLockAcquire("r", 60, "l"),
+		StageLockRelease("r", "tok", "rel"),
+	}
+	for _, stage := range cases {
+		bytes, err := json.Marshal(stage)
+		if err != nil {
+			t.Fatalf("marshal %s failed: %v", stage.Stage, err)
+		}
+		var got map[string]interface{}
+		if err := json.Unmarshal(bytes, &got); err != nil {
+			t.Fatalf("unmarshal %s failed: %v", stage.Stage, err)
+		}
+		if got["type"] != stage.Stage {
+			t.Fatalf("%s: type = %v, want %v", stage.Stage, got["type"], stage.Stage)
+		}
+	}
+}
+
+// ===== UserFunction HTTPMethod / HTTPPath (path-routed dispatcher) =====
+
+// TestUserFunction_jsonIncludesHTTPFieldsWhenSet guards the wire shape that
+// ekoDB's path-routed dispatcher (`/api/route/{path}`) reads. The fields
+// MUST serialize as `http_method` / `http_path`. Renaming or breaking the
+// JSON tag on either pointer would silently disable path routing for any
+// function defined in this client.
+func TestUserFunction_jsonIncludesHTTPFieldsWhenSet(t *testing.T) {
+	method := "POST"
+	path := "/users/:id"
+	fn := UserFunction{
+		Label:      "users_create",
+		Name:       "users_create",
+		Functions:  []FunctionStageConfig{StageReturn(map[string]interface{}{"ok": true}, 200)},
+		HTTPMethod: &method,
+		HTTPPath:   &path,
+	}
+	bytes, err := json.Marshal(fn)
+	if err != nil {
+		t.Fatalf("marshal UserFunction failed: %v", err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(bytes, &got); err != nil {
+		t.Fatalf("unmarshal UserFunction failed: %v", err)
+	}
+	if got["http_method"] != method {
+		t.Fatalf("http_method = %v, want %q", got["http_method"], method)
+	}
+	if got["http_path"] != path {
+		t.Fatalf("http_path = %v, want %q", got["http_path"], path)
+	}
+	// Round-trip back into the typed struct: pointers must come back
+	// non-nil with the original strings, not lost or re-bound.
+	var roundTrip UserFunction
+	if err := json.Unmarshal(bytes, &roundTrip); err != nil {
+		t.Fatalf("round-trip unmarshal failed: %v", err)
+	}
+	if roundTrip.HTTPMethod == nil || *roundTrip.HTTPMethod != method {
+		t.Fatalf("roundTrip.HTTPMethod = %v, want %q", roundTrip.HTTPMethod, method)
+	}
+	if roundTrip.HTTPPath == nil || *roundTrip.HTTPPath != path {
+		t.Fatalf("roundTrip.HTTPPath = %v, want %q", roundTrip.HTTPPath, path)
+	}
+}
+
+// TestUserFunction_jsonOmitsHTTPFieldsWhenNil guards the `omitempty` JSON
+// tags. A function without routing fields must not emit `http_method` /
+// `http_path` keys at all (not even as null) — the server's deserializer
+// for older function rows that pre-date the routing schema relies on
+// these keys being absent, not null, to skip the routing pathway.
+func TestUserFunction_jsonOmitsHTTPFieldsWhenNil(t *testing.T) {
+	fn := UserFunction{
+		Label:     "no_route",
+		Name:      "no_route",
+		Functions: []FunctionStageConfig{StageReturn(map[string]interface{}{"ok": true}, 200)},
+	}
+	bytes, err := json.Marshal(fn)
+	if err != nil {
+		t.Fatalf("marshal UserFunction failed: %v", err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(bytes, &got); err != nil {
+		t.Fatalf("unmarshal UserFunction failed: %v", err)
+	}
+	if _, ok := got["http_method"]; ok {
+		t.Fatalf("http_method must be absent when nil (omitempty), got %v", got["http_method"])
+	}
+	if _, ok := got["http_path"]; ok {
+		t.Fatalf("http_path must be absent when nil (omitempty), got %v", got["http_path"])
 	}
 }
