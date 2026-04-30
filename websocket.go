@@ -733,6 +733,28 @@ func (ws *WebSocketClient) RegisterClientTools(chatID string, tools []ClientTool
 	return err
 }
 
+// CancelChat aborts an in-flight chat stream by chat_id. The server
+// fires the matching CancellationToken, drops the LLM HTTP call, and
+// skips persisting the assistant message. Pre-fix on the Rust client
+// side, dropping the stream channel only halted local chunk delivery —
+// the LLM kept generating server-side and the "cancelled" turn still
+// landed in /history. The Go client never had that bug because there
+// was no cancel API at all; this method closes the gap.
+//
+// Connection: requires an active WS (caller must have already called
+// ChatSend or another method that establishes the connection). The
+// cancel itself is idempotent on the server — sending it for a
+// chat_id with no in-flight stream is a no-op and does not error.
+func (ws *WebSocketClient) CancelChat(chatID string) error {
+	request := map[string]interface{}{
+		"type": "CancelChat",
+		"payload": map[string]interface{}{
+			"chat_id": chatID,
+		},
+	}
+	return ws.writeJSON(request)
+}
+
 // SendToolResult sends a tool result back to the server during a chat stream.
 func (ws *WebSocketClient) SendToolResult(chatID, callID string, success bool, result interface{}, errMsg string) error {
 	payload := map[string]interface{}{

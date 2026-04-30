@@ -475,6 +475,49 @@ func TestWebSocketSendToolResult(t *testing.T) {
 	}
 }
 
+func TestWebSocketCancelChat(t *testing.T) {
+	// Wire-format guard for the server-side cancel path. The ekoDB
+	// server matches on the literal type tag "CancelChat" and the
+	// nested payload.chat_id field — any rename here silently
+	// breaks cancellation across the version boundary, so pin the
+	// JSON shape in a test rather than relying on map[string]
+	// ordering staying stable.
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	if err := ws.CancelChat("chat-xyz"); err != nil {
+		t.Fatalf("CancelChat returned error: %v", err)
+	}
+
+	msg := readMessage(t, serverConn)
+	if msg["type"] != "CancelChat" {
+		t.Fatalf("expected type CancelChat, got %v", msg["type"])
+	}
+	payload, ok := msg["payload"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected payload to be an object, got %T", msg["payload"])
+	}
+	if payload["chat_id"] != "chat-xyz" {
+		t.Fatalf("expected payload.chat_id chat-xyz, got %v", payload["chat_id"])
+	}
+	// Payload should carry exactly chat_id and nothing else —
+	// extra fields would force a wire-compat shim on older
+	// servers.
+	if len(payload) != 1 {
+		t.Fatalf("expected payload to have exactly 1 field, got %d: %v", len(payload), payload)
+	}
+}
+
 func TestWebSocketChatSendWithOptions(t *testing.T) {
 	wsURL, connCh, server := setupTestWSServer(t)
 	defer server.Close()
