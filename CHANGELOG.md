@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-04-29
+
+### Added — Server-side chat cancel (WebSocket)
+
+- **`WebSocketClient.CancelChat(chatID string) error`** — new method that sends
+  a `CancelChat` WS message with
+  `{ "type": "CancelChat", "payload": { "chat_id": "<id>" } }`. The ekoDB server
+  fires the matching `CancellationToken`, drops the in-flight LLM HTTP call, and
+  skips persisting the assistant message. Brings the Go client to parity with
+  the Rust client's `WebSocketClient::cancel_chat` (ekodb_client 0.18.1).
+- **No-op semantics**: cancelling a `chat_id` with no in-flight stream is safe
+  server-side and does not error — callers can fire it speculatively.
+- **Wire-format test** — `TestWebSocketCancelChat` pins the `type: "CancelChat"`
+  tag and `payload.chat_id` field name (both load-bearing on the server) and
+  asserts the payload carries exactly `chat_id` and no extra fields. Catches
+  accidental rename / shape drift across version boundaries.
+
 ## [0.18.0] - 2026-04-18
 
 ### Added (2026-04-26 — crypto + concurrency stage builders)
