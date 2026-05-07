@@ -75,7 +75,15 @@ type ChatRequest struct {
 	SystemPrompt *string            `json:"system_prompt,omitempty"`
 }
 
-// CreateChatSessionRequest represents a request to create a new chat session
+// CreateChatSessionRequest represents a request to create a new chat session.
+//
+// UserID is a trusted-upstream "on behalf of" user identity (e.g. an
+// Auth0 sub). Set it from your own validated identity context before
+// forwarding the request to ekoDB; ekoDB stores it on the session and
+// uses it to enforce the cross-tenant call_agent owner-scope guard.
+// Leave nil for direct api-key callers without an upstream user
+// identity — the guard treats either-side empty as "allow" for
+// back-compat.
 type CreateChatSessionRequest struct {
 	Collections        []CollectionConfig `json:"collections"`
 	LLMProvider        string             `json:"llm_provider"`
@@ -89,6 +97,7 @@ type CreateChatSessionRequest struct {
 	MaxTokens          *int32             `json:"max_tokens,omitempty"`
 	Temperature        *float32           `json:"temperature,omitempty"`
 	ToolConfig         *ToolConfig        `json:"tool_config,omitempty"`
+	UserID             *string            `json:"user_id,omitempty"`
 }
 
 // ClientToolDef defines a client-side tool the LLM can call (HTTP path).
