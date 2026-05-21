@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-05-20
+
+### Changed
+
+- **Bumped Go toolchain pin from 1.24.0 to 1.25.0** in `go.mod` and dropped the
+  separate `toolchain go1.24.2` directive. Aligns with wavescd and currentcs,
+  which both already require Go 1.25. No code changes — 355 unit tests still
+  pass.
+
 ## [0.18.1] - 2026-04-29
 
 ### Added — Server-side chat cancel (WebSocket)
