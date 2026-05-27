@@ -553,6 +553,17 @@ go run client_simple_crud.go
 - **[Examples Repository](https://github.com/ekoDB/ekodb-client/tree/main/examples)** -
   129 examples across all 6 languages (89 client library + 40 direct API)
 
+## 🗺️ Roadmap
+
+This client mirrors the multi-language transport-parity plan tracked in the
+parent monorepo at
+[ekodb-client/PARITY_MATRIX.md](https://github.com/ekoDB/ekodb-client/blob/main/PARITY_MATRIX.md)
+and [ekodb-client/TODO.md](https://github.com/ekoDB/ekodb-client/blob/main/TODO.md).
+Open Go-specific work is tracked as discrete issues in this repo
+([open issues](https://github.com/ekoDB/ekodb-client-go/issues)); the
+cross-language umbrella for Go WS batch parity lives at
+[ekodb-client#115](https://github.com/ekoDB/ekodb-client/issues/115).
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
