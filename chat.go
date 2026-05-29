@@ -207,6 +207,23 @@ type MergeSessionsRequest struct {
 	BypassRipple  *bool         `json:"bypass_ripple,omitempty"`
 }
 
+// CompactChatRequest is the request body for POST /api/chat/{chat_id}/compact.
+// Both fields are optional; they are omitted from the JSON body when nil.
+type CompactChatRequest struct {
+	KeepRecent   *int  `json:"keep_recent,omitempty"`
+	BypassRipple *bool `json:"bypass_ripple,omitempty"`
+}
+
+// CompactChatResponse is the response from POST /api/chat/{chat_id}/compact.
+// SummaryMessageID is nullable (null when nothing was folded).
+type CompactChatResponse struct {
+	Folded           int     `json:"folded"`
+	KeptRecent       int     `json:"kept_recent"`
+	SummaryChars     int     `json:"summary_chars"`
+	SummaryMessageID *string `json:"summary_message_id"`
+	AlreadyCompact   bool    `json:"already_compact"`
+}
+
 // ChatModels contains available models for each provider
 type ChatModels struct {
 	OpenAI     []string `json:"openai"`
@@ -747,6 +764,27 @@ func (c *Client) MergeChatSessions(request MergeSessionsRequest) (*ChatSessionRe
 	}
 
 	var result ChatSessionResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+// CompactChat compacts a chat session's history on demand, folding older
+// messages into a summary while keeping the most recent ones intact.
+// Calls POST /api/chat/{chatId}/compact.
+//
+// keepRecent optionally overrides how many recent messages to keep verbatim;
+// pass nil to use the server default.
+func (c *Client) CompactChat(chatID string, keepRecent *int) (*CompactChatResponse, error) {
+	request := CompactChatRequest{KeepRecent: keepRecent}
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/%s/compact", chatID), request)
+	if err != nil {
+		return nil, err
+	}
+
+	var result CompactChatResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, err
 	}

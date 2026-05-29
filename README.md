@@ -558,7 +558,8 @@ go run client_simple_crud.go
 This client mirrors the multi-language transport-parity plan tracked in the
 parent monorepo at
 [ekodb-client/PARITY_MATRIX.md](https://github.com/ekoDB/ekodb-client/blob/main/PARITY_MATRIX.md)
-and [ekodb-client/TODO.md](https://github.com/ekoDB/ekodb-client/blob/main/TODO.md).
+and
+[ekodb-client/TODO.md](https://github.com/ekoDB/ekodb-client/blob/main/TODO.md).
 Open Go-specific work is tracked as discrete issues in this repo
 ([open issues](https://github.com/ekoDB/ekodb-client-go/issues)); the
 cross-language umbrella for Go WS batch parity lives at

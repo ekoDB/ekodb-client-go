@@ -739,6 +739,89 @@ func TestSubmitChatToolResultError(t *testing.T) {
 }
 
 // ============================================================================
+// CompactChat Tests
+// ============================================================================
+
+func TestCompactChat(t *testing.T) {
+	summaryID := "msg-summary-1"
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/chat-123/compact": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("Failed to decode request body: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if body["keep_recent"] != float64(5) {
+				t.Errorf("Expected keep_recent=5, got %v", body["keep_recent"])
+			}
+			if _, ok := body["bypass_ripple"]; ok {
+				t.Errorf("Expected bypass_ripple to be omitted, got %v", body["bypass_ripple"])
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"folded":10,"kept_recent":5,"summary_chars":420,"summary_message_id":"msg-summary-1","already_compact":false}`))
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	keepRecent := 5
+	resp, err := client.CompactChat("chat-123", &keepRecent)
+	if err != nil {
+		t.Fatalf("CompactChat failed: %v", err)
+	}
+	if resp.Folded != 10 {
+		t.Errorf("Expected folded=10, got %d", resp.Folded)
+	}
+	if resp.KeptRecent != 5 {
+		t.Errorf("Expected kept_recent=5, got %d", resp.KeptRecent)
+	}
+	if resp.SummaryChars != 420 {
+		t.Errorf("Expected summary_chars=420, got %d", resp.SummaryChars)
+	}
+	if resp.SummaryMessageID == nil || *resp.SummaryMessageID != summaryID {
+		t.Errorf("Expected summary_message_id=%q, got %v", summaryID, resp.SummaryMessageID)
+	}
+	if resp.AlreadyCompact {
+		t.Errorf("Expected already_compact=false, got true")
+	}
+}
+
+func TestCompactChatAlreadyCompact(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/chat-456/compact": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("Failed to decode request body: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if _, ok := body["keep_recent"]; ok {
+				t.Errorf("Expected keep_recent to be omitted, got %v", body["keep_recent"])
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"folded":0,"kept_recent":3,"summary_chars":0,"summary_message_id":null,"already_compact":true}`))
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	resp, err := client.CompactChat("chat-456", nil)
+	if err != nil {
+		t.Fatalf("CompactChat failed: %v", err)
+	}
+	if !resp.AlreadyCompact {
+		t.Errorf("Expected already_compact=true, got false")
+	}
+	if resp.SummaryMessageID != nil {
+		t.Errorf("Expected summary_message_id=nil, got %v", *resp.SummaryMessageID)
+	}
+	if resp.Folded != 0 {
+		t.Errorf("Expected folded=0, got %d", resp.Folded)
+	}
+}
+
+// ============================================================================
 // SubscribeSSE Tests
 // ============================================================================
 
