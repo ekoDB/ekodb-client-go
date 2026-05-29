@@ -755,9 +755,6 @@ func TestCompactChat(t *testing.T) {
 			if body["keep_recent"] != float64(5) {
 				t.Errorf("Expected keep_recent=5, got %v", body["keep_recent"])
 			}
-			if _, ok := body["bypass_ripple"]; ok {
-				t.Errorf("Expected bypass_ripple to be omitted, got %v", body["bypass_ripple"])
-			}
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"folded":10,"kept_recent":5,"summary_chars":420,"summary_message_id":"msg-summary-1","already_compact":false}`))
 		},

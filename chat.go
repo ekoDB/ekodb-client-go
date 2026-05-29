@@ -208,10 +208,11 @@ type MergeSessionsRequest struct {
 }
 
 // CompactChatRequest is the request body for POST /api/chat/{chat_id}/compact.
-// Both fields are optional; they are omitted from the JSON body when nil.
+// KeepRecent is optional; it is omitted from the JSON body when nil. There is
+// no bypass_ripple: compaction writes chat-message records, which the server
+// does not ripple (same convention as all chat-message writes).
 type CompactChatRequest struct {
-	KeepRecent   *int  `json:"keep_recent,omitempty"`
-	BypassRipple *bool `json:"bypass_ripple,omitempty"`
+	KeepRecent *int `json:"keep_recent,omitempty"`
 }
 
 // CompactChatResponse is the response from POST /api/chat/{chat_id}/compact.
@@ -773,7 +774,7 @@ func (c *Client) MergeChatSessions(request MergeSessionsRequest) (*ChatSessionRe
 
 // CompactChat compacts a chat session's history on demand, folding older
 // messages into a summary while keeping the most recent ones intact.
-// Calls POST /api/chat/{chatId}/compact.
+// Calls POST /api/chat/{chat_id}/compact.
 //
 // keepRecent optionally overrides how many recent messages to keep verbatim;
 // pass nil to use the server default.
