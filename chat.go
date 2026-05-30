@@ -438,7 +438,7 @@ func (c *Client) RawCompletionStreamWithProgress(request RawCompletionRequest, o
 
 // SubmitChatToolResult submits a client tool result for an in-flight SSE chat stream.
 // This unblocks ekoDB's tool loop so it can feed the result to the LLM.
-func (c *Client) SubmitChatToolResult(chatID, callID string, success bool, result interface{}, errMsg string) error {
+func (c *Client) SubmitChatToolResult(sessionID, callID string, success bool, result interface{}, errMsg string) error {
 	body := map[string]interface{}{
 		"call_id": callID,
 		"success": success,
@@ -450,7 +450,7 @@ func (c *Client) SubmitChatToolResult(chatID, callID string, success bool, resul
 		body["error"] = errMsg
 	}
 
-	_, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/%s/tool-result", chatID), body)
+	_, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/%s/tool-result", sessionID), body)
 	return err
 }
 
@@ -477,14 +477,14 @@ type ExecuteToolResult struct {
 //
 // Returns the tool result if executed, nil if the server doesn't
 // support the endpoint (older ekoDB versions), or an error.
-func (c *Client) ExecuteTool(toolName string, params map[string]interface{}, chatID string) (map[string]interface{}, error) {
+func (c *Client) ExecuteTool(toolName string, params map[string]interface{}, sessionID string) (map[string]interface{}, error) {
 	if params == nil {
 		params = map[string]interface{}{}
 	}
 	request := ExecuteToolRequest{
 		Tool:   toolName,
 		Params: params,
-		ChatID: chatID,
+		ChatID: sessionID,
 	}
 
 	respBody, err := c.makeRequest("POST", "/api/chat/tools/execute", request)
@@ -778,9 +778,9 @@ func (c *Client) MergeChatSessions(request MergeSessionsRequest) (*ChatSessionRe
 //
 // keepRecent optionally overrides how many recent messages to keep verbatim;
 // pass nil to use the server default.
-func (c *Client) CompactChat(chatID string, keepRecent *int) (*CompactChatResponse, error) {
+func (c *Client) CompactChat(sessionID string, keepRecent *int) (*CompactChatResponse, error) {
 	request := CompactChatRequest{KeepRecent: keepRecent}
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/%s/compact", chatID), request)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/%s/compact", sessionID), request)
 	if err != nil {
 		return nil, err
 	}
@@ -819,13 +819,13 @@ func (c *Client) CompactChat(chatID string, keepRecent *int) (*CompactChatRespon
 //	        fmt.Println("Error:", event.Error)
 //	    }
 //	}
-func (c *Client) ChatMessageStream(chatID string, request ChatMessageRequest) (chan ChatStreamEvent, error) {
+func (c *Client) ChatMessageStream(sessionID string, request ChatMessageRequest) (chan ChatStreamEvent, error) {
 	bodyBytes, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", c.baseURL+fmt.Sprintf("/api/chat/%s/messages/stream", chatID), bytes.NewReader(bodyBytes))
+	req, err := http.NewRequest("POST", c.baseURL+fmt.Sprintf("/api/chat/%s/messages/stream", sessionID), bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
