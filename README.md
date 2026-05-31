@@ -268,7 +268,7 @@ results, err := client.Find("users", query)
 ### CRUD Methods
 
 - `Insert(collection string, record Record, opts ...InsertOptions) (Record, error)`
-- `Find(collection string, query Query) ([]Record, error)`
+- `Find(collection string, query interface{}, opts ...FindOptions) ([]Record, error)`
 - `FindByID(collection, id string) (Record, error)`
 - `Update(collection, id string, record Record, opts ...UpdateOptions) (Record, error)`
 - `Delete(collection, id string, opts ...DeleteOptions) error`
