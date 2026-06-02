@@ -6,7 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - 2026-05-20
+## [0.19.0] - 2026-06-02
+
+### Added
+
+- **`CompactChat(chatID string, keepRecent *int)` for on-demand chat history
+  compaction** (ekodb #43). Calls the new `POST /api/chat/{id}/compact`
+  endpoint, which folds older messages into a summary and marks the originals
+  forgotten to reclaim context-window budget. Returns a `CompactChatResponse`
+  (`Folded`, `KeptRecent`, `SummaryChars`, `SummaryMessageID *string`,
+  `AlreadyCompact`). `keepRecent` is a pointer so it's omitted when nil (server
+  defaults to the session's `max_context_messages`). Mirrors the existing chat
+  methods; covered by `TestCompactChat` / `TestCompactChatAlreadyCompact`.
 
 ### Changed
 

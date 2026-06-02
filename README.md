@@ -136,6 +136,11 @@ func main() {
   scoring
 - ✅ **Schema Management** - Define and enforce data schemas with validation
 - ✅ **Join Operations** - Single and multi-collection joins with queries
+- ✅ **Transactions** - `BeginTransaction` / `CommitTransaction` /
+  `RollbackTransaction`
+- ✅ **KV document linking** - `KVLink` / `KVGetLinks` / `KVUnlink`
+- ✅ **Schedule management** - create/list/get/update/delete/pause/resume
+  scheduled functions
 - ✅ **Rate limiting with automatic retry** (429, 503, network errors)
 - ✅ **Rate limit tracking** (`X-RateLimit-*` headers)
 - ✅ **Configurable retry behavior**
@@ -262,14 +267,14 @@ results, err := client.Find("users", query)
 
 ### CRUD Methods
 
-- `Insert(collection string, record Record, ttl ...string) (Record, error)`
-- `Find(collection string, query Query) ([]Record, error)`
+- `Insert(collection string, record Record, opts ...InsertOptions) (Record, error)`
+- `Find(collection string, query interface{}, opts ...FindOptions) ([]Record, error)`
 - `FindByID(collection, id string) (Record, error)`
-- `Update(collection, id string, record Record) (Record, error)`
-- `Delete(collection, id string) error`
-- `BatchInsert(collection string, records []Record) ([]Record, error)`
-- `BatchUpdate(collection string, updates map[string]Record) ([]Record, error)`
-- `BatchDelete(collection string, ids []string) (int, error)`
+- `Update(collection, id string, record Record, opts ...UpdateOptions) (Record, error)`
+- `Delete(collection, id string, opts ...DeleteOptions) error`
+- `BatchInsert(collection string, records []Record, opts ...BatchInsertOptions) ([]Record, error)`
+- `BatchUpdate(collection string, updates map[string]Record, opts ...BatchUpdateOptions) ([]Record, error)`
+- `BatchDelete(collection string, ids []string, opts ...BatchDeleteOptions) (int, error)`
 
 ### Query Builder Methods
 
@@ -305,9 +310,9 @@ results, err := client.Find("users", query)
 
 ### Join Methods
 
-- `NewSingleJoin(collection, localField, foreignField, as string) *JoinConfig` -
+- `NewSingleJoin(collection, localField, foreignField, asField string) JoinConfig` -
   Single collection join
-- `NewJoinConfig(collections []string, localField, foreignField, as string) *JoinConfig` -
+- `NewJoinConfig(collections []string, localField, foreignField, asField string) JoinConfig` -
   Multi-collection join
 
 ### Key-Value Methods
@@ -476,8 +481,8 @@ for event := range eventCh {
 For complete, runnable examples, visit the
 [ekoDB Examples Repository](https://github.com/ekoDB/ekodb-client/tree/main/examples/go).
 
-The repository contains **25 working Go examples** (15 client library + 10
-direct API):
+The repository contains **59 working Go examples** (45 client library + 13
+direct API + 1 RAG):
 
 ### Basic Operations
 
@@ -551,14 +556,15 @@ go run client_simple_crud.go
 - **[API Reference](https://pkg.go.dev/github.com/ekoDB/ekodb-client-go)** - Go
   package documentation
 - **[Examples Repository](https://github.com/ekoDB/ekodb-client/tree/main/examples)** -
-  129 examples across all 6 languages (89 client library + 40 direct API)
+  308 examples across all 6 languages (257 client library + 51 direct API)
 
 ## 🗺️ Roadmap
 
 This client mirrors the multi-language transport-parity plan tracked in the
 parent monorepo at
 [ekodb-client/PARITY_MATRIX.md](https://github.com/ekoDB/ekodb-client/blob/main/PARITY_MATRIX.md)
-and [ekodb-client/TODO.md](https://github.com/ekoDB/ekodb-client/blob/main/TODO.md).
+and
+[ekodb-client/TODO.md](https://github.com/ekoDB/ekodb-client/blob/main/TODO.md).
 Open Go-specific work is tracked as discrete issues in this repo
 ([open issues](https://github.com/ekoDB/ekodb-client-go/issues)); the
 cross-language umbrella for Go WS batch parity lives at
