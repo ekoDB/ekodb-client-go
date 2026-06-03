@@ -290,7 +290,6 @@ results, err := client.Find("users", query)
 - `Contains(field, value)` - String contains
 - `StartsWith(field, value)` - String starts with
 - `EndsWith(field, value)` - String ends with
-- `Regex(field, pattern)` - Regex match
 - `SortAscending(field)` / `SortDescending(field)` - Sorting
 - `Limit(n)` / `Skip(n)` - Pagination
 - `Build()` - Build the query

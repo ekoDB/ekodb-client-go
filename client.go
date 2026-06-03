@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -103,6 +104,7 @@ type Client struct {
 	maxRetries    int
 	format        SerializationFormat
 	rateLimitInfo *RateLimitInfo
+	rateLimitMu   sync.RWMutex // Guards rateLimitInfo (written per response, read by callers)
 	schemaCache   *SchemaCache // Optional schema cache for primary_key_alias resolution
 }
 
@@ -144,7 +146,7 @@ func NewClientWithConfig(config ClientConfig) (*Client, error) {
 		apiKey:      config.APIKey,
 		shouldRetry: config.ShouldRetry,
 		maxRetries:  config.MaxRetries,
-		format:      config.Format, // Default is JSON (0 value)
+		format:      config.Format, // Default is MessagePack (0 value = MessagePack)
 		httpClient: &http.Client{
 			Timeout: config.Timeout,
 		},
@@ -169,11 +171,15 @@ func NewClientWithConfig(config ClientConfig) (*Client, error) {
 
 // GetRateLimitInfo returns the current rate limit information
 func (c *Client) GetRateLimitInfo() *RateLimitInfo {
+	c.rateLimitMu.RLock()
+	defer c.rateLimitMu.RUnlock()
 	return c.rateLimitInfo
 }
 
 // IsNearRateLimit checks if approaching rate limit
 func (c *Client) IsNearRateLimit() bool {
+	c.rateLimitMu.RLock()
+	defer c.rateLimitMu.RUnlock()
 	if c.rateLimitInfo == nil {
 		return false
 	}
@@ -307,6 +313,33 @@ func (c *Client) ClearTokenCache() {
 	c.tokenExpiry = 0
 }
 
+// retryBackoffBase returns the deterministic, capped exponential backoff for a
+// (0-indexed) retry attempt: 200ms, 400ms, 800ms, ... clamped to 5s. It never
+// overflows regardless of attempt count.
+func retryBackoffBase(attempt int) time.Duration {
+	const base = 200 * time.Millisecond
+	const maxDelay = 5 * time.Second
+	if attempt < 0 {
+		attempt = 0
+	}
+	d := base
+	for i := 0; i < attempt; i++ {
+		d *= 2
+		if d >= maxDelay {
+			return maxDelay
+		}
+	}
+	return d
+}
+
+// retryBackoff applies full jitter to the capped exponential base, returning a
+// delay in [base/2, base] so concurrent clients don't retry in lockstep.
+func retryBackoff(attempt int) time.Duration {
+	d := retryBackoffBase(attempt)
+	half := d / 2
+	return half + time.Duration(rand.Int64N(int64(half)+1))
+}
+
 // extractRateLimitInfo extracts rate limit information from response headers
 func (c *Client) extractRateLimitInfo(resp *http.Response) {
 	limitStr := resp.Header.Get("X-RateLimit-Limit")
@@ -318,16 +351,20 @@ func (c *Client) extractRateLimitInfo(resp *http.Response) {
 		remaining, _ := strconv.Atoi(remainingStr)
 		reset, _ := strconv.ParseInt(resetStr, 10, 64)
 
-		c.rateLimitInfo = &RateLimitInfo{
+		info := &RateLimitInfo{
 			Limit:     limit,
 			Remaining: remaining,
 			Reset:     reset,
 		}
 
+		c.rateLimitMu.Lock()
+		c.rateLimitInfo = info
+		c.rateLimitMu.Unlock()
+
 		// Log warning if approaching rate limit
-		if c.rateLimitInfo.IsNearLimit() {
+		if info.IsNearLimit() {
 			log.Printf("Warning: Approaching rate limit: %d/%d remaining (%.1f%%)",
-				c.rateLimitInfo.Remaining, c.rateLimitInfo.Limit, c.rateLimitInfo.RemainingPercentage())
+				info.Remaining, info.Limit, info.RemainingPercentage())
 		}
 	}
 }
@@ -383,9 +420,11 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		// Handle network errors with retry
+		// Handle network errors with retry, using exponential backoff with full
+		// jitter (instead of a fixed delay) so concurrent clients don't retry in
+		// lockstep and a flapping server isn't hammered.
 		if c.shouldRetry && attempt < c.maxRetries {
-			retryDelay := 3 * time.Second
+			retryDelay := retryBackoff(attempt)
 			log.Printf("Network error, retrying after %v...", retryDelay)
 			time.Sleep(retryDelay)
 			return c.makeRequestWithRetry(method, path, data, attempt+1)

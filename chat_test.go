@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ============================================================================
@@ -193,7 +194,7 @@ func TestChatMessageStream(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	ch, err := client.ChatMessageStream("session_1", ChatMessageRequest{Message: "Hi"})
+	ch, err := client.ChatMessageStream(context.Background(), "session_1", ChatMessageRequest{Message: "Hi"})
 	if err != nil {
 		t.Fatalf("ChatMessageStream failed: %v", err)
 	}
@@ -243,7 +244,7 @@ func TestChatMessageStreamError(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	ch, err := client.ChatMessageStream("session_1", ChatMessageRequest{Message: "Hi"})
+	ch, err := client.ChatMessageStream(context.Background(), "session_1", ChatMessageRequest{Message: "Hi"})
 	if err != nil {
 		t.Fatalf("ChatMessageStream failed: %v", err)
 	}
@@ -272,10 +273,78 @@ func TestChatMessageStreamHTTPError(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	_, err := client.ChatMessageStream("session_1", ChatMessageRequest{Message: "Hi"})
+	_, err := client.ChatMessageStream(context.Background(), "session_1", ChatMessageRequest{Message: "Hi"})
 	if err == nil {
 		t.Fatal("Expected error for HTTP 500")
 	}
+}
+
+// TestChatMessageStreamCancellation is the regression for #34: cancelling the
+// context must release the streaming goroutine and connection even when the
+// consumer stops draining the channel (so it can never leak).
+func TestChatMessageStreamCancellation(t *testing.T) {
+	released := make(chan struct{})
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/session_1/messages/stream": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher, ok := w.(http.Flusher)
+			if !ok {
+				t.Fatal("ResponseWriter does not support Flusher")
+			}
+			// Stream forever until the client disconnects (ctx cancel).
+			defer close(released)
+			for {
+				select {
+				case <-r.Context().Done():
+					return
+				default:
+				}
+				if _, err := fmt.Fprintf(w, "data:{\"token\":\"x\"}\n\n"); err != nil {
+					return
+				}
+				flusher.Flush()
+			}
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := client.ChatMessageStream(ctx, "session_1", ChatMessageRequest{Message: "Hi"})
+	if err != nil {
+		t.Fatalf("ChatMessageStream failed: %v", err)
+	}
+
+	// Read one event, then stop draining and cancel.
+	<-ch
+	cancel()
+
+	// The channel must close (goroutine exits) promptly.
+	select {
+	case _, open := <-drainUntilClosed(ch):
+		_ = open
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream goroutine did not exit after context cancellation (leak)")
+	}
+
+	// And the server handler must observe the disconnect.
+	select {
+	case <-released:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not observe client disconnect after cancellation")
+	}
+}
+
+// drainUntilClosed reads from ch until it is closed, then signals on the returned
+// channel. Used to detect goroutine exit without blocking the test forever.
+func drainUntilClosed(ch chan ChatStreamEvent) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		for range ch {
+		}
+		close(done)
+	}()
+	return done
 }
 
 // ============================================================================

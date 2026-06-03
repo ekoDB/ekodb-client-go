@@ -807,7 +807,9 @@ func (c *Client) CompactChat(sessionID string, keepRecent *int) (*CompactChatRes
 //
 // Example:
 //
-//	ch, err := client.ChatMessageStream("chat-id", ChatMessageRequest{Message: "Hello"})
+//	ctx, cancel := context.WithCancel(context.Background())
+//	defer cancel()
+//	ch, err := client.ChatMessageStream(ctx, "chat-id", ChatMessageRequest{Message: "Hello"})
 //	if err != nil { log.Fatal(err) }
 //	for event := range ch {
 //	    switch event.Type {
@@ -819,13 +821,13 @@ func (c *Client) CompactChat(sessionID string, keepRecent *int) (*CompactChatRes
 //	        fmt.Println("Error:", event.Error)
 //	    }
 //	}
-func (c *Client) ChatMessageStream(sessionID string, request ChatMessageRequest) (chan ChatStreamEvent, error) {
+func (c *Client) ChatMessageStream(ctx context.Context, sessionID string, request ChatMessageRequest) (chan ChatStreamEvent, error) {
 	bodyBytes, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", c.baseURL+fmt.Sprintf("/api/chat/%s/messages/stream", sessionID), bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+fmt.Sprintf("/api/chat/%s/messages/stream", sessionID), bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -857,6 +859,18 @@ func (c *Client) ChatMessageStream(sessionID string, request ChatMessageRequest)
 		defer resp.Body.Close()
 		defer close(ch)
 
+		// send delivers an event but never blocks forever: if the consumer stops
+		// draining (or cancels ctx), the select unblocks via ctx.Done() so this
+		// goroutine and the underlying connection are released instead of leaking.
+		send := func(ev ChatStreamEvent) bool {
+			select {
+			case ch <- ev:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
+
 		scanner := bufio.NewScanner(resp.Body)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -874,7 +888,9 @@ func (c *Client) ChatMessageStream(sessionID string, request ChatMessageRequest)
 
 			// Token chunk
 			if tok, ok := eventData["token"].(string); ok {
-				ch <- ChatStreamEvent{Type: "chunk", Content: tok}
+				if !send(ChatStreamEvent{Type: "chunk", Content: tok}) {
+					return
+				}
 			}
 
 			// Done event (has "content" field)
@@ -899,13 +915,13 @@ func (c *Client) ChatMessageStream(sessionID string, request ChatMessageRequest)
 				if cw, ok := eventData["context_window"].(float64); ok {
 					event.ContextWindow = uint32(cw)
 				}
-				ch <- event
+				send(event)
 				return
 			}
 
 			// Error event
 			if errMsg, ok := eventData["error"].(string); ok {
-				ch <- ChatStreamEvent{Type: "error", Error: errMsg}
+				send(ChatStreamEvent{Type: "error", Error: errMsg})
 				return
 			}
 		}

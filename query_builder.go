@@ -177,18 +177,8 @@ func (qb *QueryBuilder) EndsWith(field string, suffix string) *QueryBuilder {
 	return qb
 }
 
-// Regex adds a regex pattern match filter
-func (qb *QueryBuilder) Regex(field string, pattern string) *QueryBuilder {
-	qb.filters = append(qb.filters, map[string]interface{}{
-		"type": "Condition",
-		"content": map[string]interface{}{
-			"field":    field,
-			"operator": "Regex",
-			"value":    pattern,
-		},
-	})
-	return qb
-}
+// Note: regex filtering is pending server-side support. The server has no
+// Regex filter operator; use Contains/StartsWith/EndsWith instead.
 
 // And combines filters with AND logic
 func (qb *QueryBuilder) And(conditions []map[string]interface{}) *QueryBuilder {
@@ -256,9 +246,15 @@ func (qb *QueryBuilder) Skip(skip int) *QueryBuilder {
 	return qb
 }
 
-// Page sets page number and page size (convenience method)
+// Page sets the page number and page size (convenience method).
+//
+// Page numbers are 1-indexed: page 1 is the first page. This matches
+// Client.Paginate. Values below 1 are treated as page 1.
 func (qb *QueryBuilder) Page(page, pageSize int) *QueryBuilder {
-	skip := page * pageSize
+	if page < 1 {
+		page = 1
+	}
+	skip := (page - 1) * pageSize
 	qb.skip = &skip
 	qb.limit = &pageSize
 	return qb

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/url"
 	"strings"
 	"sync"
@@ -63,19 +64,31 @@ type SubscribeOptions struct {
 // WebSocketClient represents a WebSocket connection to ekoDB with full dispatcher.
 type WebSocketClient struct {
 	wsURL string
-	token string
 	conn  *websocket.Conn
 
+	// tokenProvider returns a fresh auth token on every (re)connect. It is
+	// read on each dial so a since-expired JWT can be refreshed transparently.
+	tokenProvider func() string
+
 	writeMu         sync.Mutex // serializes all writes to ws.conn
-	mu              sync.Mutex // protects maps
+	mu              sync.Mutex // protects maps + closing/reconnecting flags
 	pendingRequests map[string]chan wsResponse
 	subscriptions   map[string]chan MutationNotification
-	chatStreams     map[string]chan ChatStreamEvent
-	dispatcherDone  chan struct{}
-	ctx             context.Context
-	cancel          context.CancelFunc
-	messageCounter  atomic.Int64
-	schemaCache     *SchemaCache // optional, for auto-invalidation on SchemaChanged
+	// subParams records the parameters used for each active subscription so
+	// the subscribe request can be replayed after an automatic reconnect.
+	subParams      map[string]SubscribeOptions
+	chatStreams    map[string]chan ChatStreamEvent
+	dispatcherDone chan struct{}
+	ctx            context.Context
+	cancel         context.CancelFunc
+	messageCounter atomic.Int64
+	schemaCache    *SchemaCache // optional, for auto-invalidation on SchemaChanged
+
+	// closing is set by Close() so the reconnect loop exits cleanly and an
+	// intentional shutdown is never mistaken for a transient drop.
+	closing bool
+	// reconnecting guards against spawning more than one reconnect loop.
+	reconnecting bool
 }
 
 type wsResponse struct {
@@ -88,9 +101,10 @@ func (c *Client) WebSocket(wsURL string) (*WebSocketClient, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ws := &WebSocketClient{
 		wsURL:           wsURL,
-		token:           c.getToken(),
+		tokenProvider:   c.getToken,
 		pendingRequests: make(map[string]chan wsResponse),
 		subscriptions:   make(map[string]chan MutationNotification),
+		subParams:       make(map[string]SubscribeOptions),
 		chatStreams:     make(map[string]chan ChatStreamEvent),
 		ctx:             ctx,
 		cancel:          cancel,
@@ -160,7 +174,9 @@ func (c *Client) ExtractRecordID(collection string, record map[string]interface{
 	return ""
 }
 
-// connect establishes a WebSocket connection.
+// connect establishes a WebSocket connection. A FRESH token is fetched from
+// tokenProvider on every call so a since-expired JWT is refreshed (via the
+// parent client's proactive-refresh mechanism) before each (re)connect.
 func (ws *WebSocketClient) connect() error {
 	u, err := url.Parse(ws.wsURL)
 	if err != nil {
@@ -173,20 +189,136 @@ func (ws *WebSocketClient) connect() error {
 		u.Path = strings.TrimRight(u.Path, "/") + "/api/ws"
 	}
 
+	var token string
+	if ws.tokenProvider != nil {
+		token = ws.tokenProvider()
+	}
+
 	q := u.Query()
-	q.Set("token", ws.token)
+	q.Set("token", token)
 	u.RawQuery = q.Encode()
 
 	header := make(map[string][]string)
-	header["Authorization"] = []string{"Bearer " + ws.token}
+	header["Authorization"] = []string{"Bearer " + token}
 
 	conn, _, err := websocket.DefaultDialer.Dial(u.String(), header)
 	if err != nil {
 		return fmt.Errorf("websocket connection failed: %w", err)
 	}
 
+	ws.writeMu.Lock()
 	ws.conn = conn
+	ws.writeMu.Unlock()
 	return nil
+}
+
+// Reconnect backoff bounds for the automatic reconnect loop.
+const (
+	reconnectBaseDelay = 200 * time.Millisecond
+	reconnectMaxDelay  = 5 * time.Second
+)
+
+// reconnect runs the automatic reconnect loop after an unexpected disconnect.
+// It dials again with a FRESH token using capped exponential backoff + jitter,
+// re-sends the subscribe request for every tracked subscription, then resumes
+// the dispatcher. It exits cleanly if Close() is called while it is running.
+func (ws *WebSocketClient) reconnect() {
+	defer func() {
+		ws.mu.Lock()
+		ws.reconnecting = false
+		ws.mu.Unlock()
+	}()
+
+	delay := reconnectBaseDelay
+	for {
+		// Bail out if the caller intentionally closed (or context cancelled).
+		ws.mu.Lock()
+		closing := ws.closing
+		ws.mu.Unlock()
+		if closing {
+			return
+		}
+		select {
+		case <-ws.ctx.Done():
+			return
+		default:
+		}
+
+		// Sleep the backoff window with jitter, but wake immediately on close.
+		jitter := time.Duration(rand.Int63n(int64(delay)/2 + 1))
+		wait := delay + jitter
+		select {
+		case <-ws.ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+
+		ws.mu.Lock()
+		closing = ws.closing
+		ws.mu.Unlock()
+		if closing {
+			return
+		}
+
+		if err := ws.connect(); err != nil {
+			// Dial failed — grow the backoff (capped) and retry.
+			delay *= 2
+			if delay > reconnectMaxDelay {
+				delay = reconnectMaxDelay
+			}
+			continue
+		}
+
+		// Connected. Re-send every tracked subscription so the server resumes
+		// pushing notifications onto the still-open caller channels.
+		ws.resubscribeAll()
+
+		// Install a fresh dispatcherDone for the new readLoop and resume.
+		ws.mu.Lock()
+		if ws.closing {
+			ws.mu.Unlock()
+			return
+		}
+		ws.dispatcherDone = make(chan struct{})
+		conn := ws.conn
+		ws.mu.Unlock()
+
+		go ws.readLoop(conn)
+		return
+	}
+}
+
+// resubscribeAll replays the subscribe request for every tracked subscription
+// after a reconnect. It reads the tracked params under the lock, then sends
+// each request with the lock released (writeJSON does its own locking).
+func (ws *WebSocketClient) resubscribeAll() {
+	ws.mu.Lock()
+	params := make(map[string]SubscribeOptions, len(ws.subParams))
+	for collection, opts := range ws.subParams {
+		params[collection] = opts
+	}
+	ws.mu.Unlock()
+
+	for collection, opts := range params {
+		payload := map[string]interface{}{
+			"collection": collection,
+		}
+		if opts.FilterField != "" {
+			payload["filter_field"] = opts.FilterField
+		}
+		if opts.FilterValue != "" {
+			payload["filter_value"] = opts.FilterValue
+		}
+		request := map[string]interface{}{
+			"type":      "Subscribe",
+			"messageId": ws.genMessageID(),
+			"payload":   payload,
+		}
+		// Fire-and-forget: the subscribe ack is not awaited here. A write
+		// failure means the connection dropped again; the next readLoop error
+		// will retrigger the reconnect loop.
+		_ = ws.writeJSON(request)
+	}
 }
 
 func (ws *WebSocketClient) genMessageID() string {
@@ -207,12 +339,21 @@ func (ws *WebSocketClient) writeJSON(v interface{}) error {
 // readLoop is the dispatcher goroutine that routes incoming messages.
 // conn is passed as a parameter to avoid a data race with Close() which nils ws.conn.
 func (ws *WebSocketClient) readLoop(conn *websocket.Conn) {
-	defer close(ws.dispatcherDone)
+	// done is captured at loop start; reconnect() installs a fresh
+	// dispatcherDone before spawning each new readLoop, so closing the
+	// captured channel always signals the right Close() waiter.
+	ws.mu.Lock()
+	done := ws.dispatcherDone
+	ws.mu.Unlock()
 
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
-			// Collect channels to notify, then release the lock before sending
+			// Connection dropped. Fail in-flight request/chat callers so they
+			// don't hang, but KEEP subscription channels alive — a transient
+			// drop must not permanently kill subscriptions. If this was an
+			// intentional Close(), tear down for good; otherwise hand off to
+			// the reconnect loop.
 			ws.mu.Lock()
 			pendingChans := make(map[string]chan wsResponse)
 			for id, ch := range ws.pendingRequests {
@@ -224,10 +365,18 @@ func (ws *WebSocketClient) readLoop(conn *websocket.Conn) {
 				chatChans[id] = ch
 				delete(ws.chatStreams, id)
 			}
-			subChans := make(map[string]chan MutationNotification)
-			for id, ch := range ws.subscriptions {
-				subChans[id] = ch
-				delete(ws.subscriptions, id)
+			closing := ws.closing
+			// Collect subscription channels only if we are shutting down for
+			// good; on an unexpected drop we leave them untouched for replay.
+			var subChans map[string]chan MutationNotification
+			if closing {
+				subChans = make(map[string]chan MutationNotification)
+				for id, ch := range ws.subscriptions {
+					subChans[id] = ch
+					delete(ws.subscriptions, id)
+				}
+			} else {
+				ws.reconnecting = true
 			}
 			ws.mu.Unlock()
 
@@ -253,7 +402,18 @@ func (ws *WebSocketClient) readLoop(conn *websocket.Conn) {
 			ws.writeMu.Lock()
 			ws.conn = nil
 			ws.writeMu.Unlock()
-			ws.cancel()
+
+			if closing {
+				ws.cancel()
+				close(done)
+				return
+			}
+
+			// Unexpected drop: spawn the reconnect loop and end this dispatcher.
+			// reconnect() re-arms a fresh readLoop (and a fresh dispatcherDone)
+			// on success. Signal this dispatcher's waiter, then hand off.
+			close(done)
+			go ws.reconnect()
 			return
 		}
 
@@ -645,6 +805,12 @@ func (ws *WebSocketClient) Subscribe(collection string, opts ...SubscribeOptions
 		"payload":   payload,
 	}
 
+	// Capture the params for replay after an automatic reconnect.
+	var subOpts SubscribeOptions
+	if len(opts) > 0 {
+		subOpts = opts[0]
+	}
+
 	// Register subscription channel before sending
 	ch := make(chan MutationNotification, 64)
 	ws.mu.Lock()
@@ -653,17 +819,33 @@ func (ws *WebSocketClient) Subscribe(collection string, opts ...SubscribeOptions
 		return nil, fmt.Errorf("already subscribed to collection %q", collection)
 	}
 	ws.subscriptions[collection] = ch
+	ws.subParams[collection] = subOpts
 	ws.mu.Unlock()
 
 	_, err := ws.sendRequest(request, messageID)
 	if err != nil {
 		ws.mu.Lock()
 		delete(ws.subscriptions, collection)
+		delete(ws.subParams, collection)
 		ws.mu.Unlock()
 		return nil, err
 	}
 
 	return ch, nil
+}
+
+// Unsubscribe removes a subscription so it is no longer replayed on reconnect
+// and closes its notification channel. It is safe to call for a collection
+// that is not currently subscribed (no-op).
+func (ws *WebSocketClient) Unsubscribe(collection string) {
+	ws.mu.Lock()
+	ch, ok := ws.subscriptions[collection]
+	delete(ws.subscriptions, collection)
+	delete(ws.subParams, collection)
+	ws.mu.Unlock()
+	if ok {
+		close(ch)
+	}
 }
 
 // ChatSend sends a chat message and returns a channel of streaming events.
@@ -1115,8 +1297,29 @@ func (ws *WebSocketClient) DeleteCollection(name string) error {
 	return err
 }
 
-// Close closes the WebSocket connection and cleans up resources.
+// Close closes the WebSocket connection and cleans up resources. It marks the
+// client as closing FIRST so any in-flight reconnect loop exits cleanly and the
+// dispatcher does not treat the resulting read error as a transient drop.
 func (ws *WebSocketClient) Close() error {
+	ws.mu.Lock()
+	if ws.closing {
+		// Already closing/closed — idempotent.
+		ws.mu.Unlock()
+		return nil
+	}
+	ws.closing = true
+	reconnecting := ws.reconnecting
+	done := ws.dispatcherDone
+	// Close subscription channels so callers ranging over them unblock. The
+	// reconnect loop is gated on ws.closing, so it will not replay these.
+	for collection, ch := range ws.subscriptions {
+		delete(ws.subscriptions, collection)
+		delete(ws.subParams, collection)
+		close(ch)
+	}
+	ws.mu.Unlock()
+
+	// Cancel context first so the reconnect loop's sleep/dial wakes and exits.
 	ws.cancel()
 
 	ws.writeMu.Lock()
@@ -1124,12 +1327,16 @@ func (ws *WebSocketClient) Close() error {
 	ws.conn = nil
 	ws.writeMu.Unlock()
 
+	var err error
 	if conn != nil {
-		err := conn.Close()
-		if ws.dispatcherDone != nil {
-			<-ws.dispatcherDone
-		}
-		return err
+		err = conn.Close()
 	}
-	return nil
+
+	// Only wait on the dispatcher if a readLoop is actually running. When a
+	// reconnect loop is mid-backoff there is no live dispatcher to drain (its
+	// previous done was already closed), so waiting would block forever.
+	if conn != nil && !reconnecting && done != nil {
+		<-done
+	}
+	return err
 }

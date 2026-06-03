@@ -1411,3 +1411,268 @@ func TestWebSocketRawCompletionError(t *testing.T) {
 		t.Fatal("timeout")
 	}
 }
+
+// =========================================================================
+// Auto-reconnect tests (#37)
+// =========================================================================
+
+// reconnectTestServer is a mock WS server that accepts multiple upgrades and
+// records each incoming connection plus the Authorization/token seen on its
+// upgrade request. Used to verify auto-reconnect behaviour.
+type reconnectTestServer struct {
+	server  *httptest.Server
+	wsURL   string
+	connCh  chan *websocket.Conn
+	authCh  chan string // Authorization header per upgrade
+	tokenCh chan string // ?token= query param per upgrade
+}
+
+func setupReconnectTestServer(t *testing.T) *reconnectTestServer {
+	t.Helper()
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool { return true },
+	}
+	rts := &reconnectTestServer{
+		connCh:  make(chan *websocket.Conn, 8),
+		authCh:  make(chan string, 8),
+		tokenCh: make(chan string, 8),
+	}
+	rts.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Record auth context before the upgrade hijacks the request.
+		select {
+		case rts.authCh <- r.Header.Get("Authorization"):
+		default:
+		}
+		select {
+		case rts.tokenCh <- r.URL.Query().Get("token"):
+		default:
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade failed: %v", err)
+			return
+		}
+		rts.connCh <- conn
+	}))
+	rts.wsURL = "ws" + strings.TrimPrefix(rts.server.URL, "http") + "/api/ws"
+	return rts
+}
+
+// TestWebSocketReconnectResumesSubscription verifies that a subscription
+// survives a mid-stream server disconnect: the client reconnects, re-sends the
+// Subscribe request, and the SAME channel delivers a post-reconnect mutation.
+func TestWebSocketReconnectResumesSubscription(t *testing.T) {
+	rts := setupReconnectTestServer(t)
+	defer rts.server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(rts.wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	conn1 := <-rts.connCh
+
+	// Subscribe (in a goroutine — it blocks on the server ack).
+	subCh := make(chan (<-chan MutationNotification), 1)
+	subErr := make(chan error, 1)
+	go func() {
+		ch, err := ws.Subscribe("orders")
+		if err != nil {
+			subErr <- err
+			return
+		}
+		subCh <- ch
+	}()
+
+	msg := readMessage(t, conn1)
+	if msg["type"] != "Subscribe" {
+		t.Fatalf("expected Subscribe, got %v", msg["type"])
+	}
+	mustWriteJSON(t, conn1, map[string]interface{}{
+		"type":    "Success",
+		"payload": map[string]interface{}{"message_id": msg["messageId"]},
+	})
+
+	var notifCh <-chan MutationNotification
+	select {
+	case notifCh = <-subCh:
+	case err := <-subErr:
+		t.Fatalf("subscribe failed: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for subscribe")
+	}
+
+	// Deliver one mutation, then drop the connection.
+	mustWriteJSON(t, conn1, map[string]interface{}{
+		"type": "MutationNotification",
+		"payload": map[string]interface{}{
+			"collection": "orders",
+			"event":      "insert",
+			"record_ids": []string{"order-1"},
+			"timestamp":  "2026-03-13T00:00:00Z",
+		},
+	})
+	select {
+	case n := <-notifCh:
+		if n.Event != "insert" || len(n.RecordIDs) != 1 || n.RecordIDs[0] != "order-1" {
+			t.Fatalf("unexpected pre-drop notification: %+v", n)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for pre-drop notification")
+	}
+
+	// Server drops the connection unexpectedly.
+	conn1.Close()
+
+	// Client should reconnect and re-send the Subscribe request.
+	var conn2 *websocket.Conn
+	select {
+	case conn2 = <-rts.connCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("client did not reconnect after drop")
+	}
+	defer conn2.Close()
+
+	resubMsg := readMessage(t, conn2)
+	if resubMsg["type"] != "Subscribe" {
+		t.Fatalf("expected re-sent Subscribe after reconnect, got %v", resubMsg["type"])
+	}
+	rpayload := resubMsg["payload"].(map[string]interface{})
+	if rpayload["collection"] != "orders" {
+		t.Fatalf("expected re-subscribe to orders, got %v", rpayload["collection"])
+	}
+	// Ack the resubscribe (server normally would).
+	mustWriteJSON(t, conn2, map[string]interface{}{
+		"type":    "Success",
+		"payload": map[string]interface{}{"message_id": resubMsg["messageId"]},
+	})
+
+	// A post-reconnect mutation must arrive on the SAME channel.
+	mustWriteJSON(t, conn2, map[string]interface{}{
+		"type": "MutationNotification",
+		"payload": map[string]interface{}{
+			"collection": "orders",
+			"event":      "update",
+			"record_ids": []string{"order-2"},
+			"timestamp":  "2026-03-13T00:01:00Z",
+		},
+	})
+	select {
+	case n := <-notifCh:
+		if n.Event != "update" || len(n.RecordIDs) != 1 || n.RecordIDs[0] != "order-2" {
+			t.Fatalf("unexpected post-reconnect notification: %+v", n)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for post-reconnect notification on same channel")
+	}
+}
+
+// TestWebSocketReconnectDialsWithToken verifies that a reconnect dial carries a
+// token (both the Authorization header and the ?token= query param).
+func TestWebSocketReconnectDialsWithToken(t *testing.T) {
+	rts := setupReconnectTestServer(t)
+	defer rts.server.Close()
+
+	client := &Client{token: "secret-jwt"}
+	ws, err := client.WebSocket(rts.wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	conn1 := <-rts.connCh
+
+	// Drain the first connection's auth context.
+	<-rts.authCh
+	<-rts.tokenCh
+
+	// Establish a subscription so reconnect has something to resume.
+	subErr := make(chan error, 1)
+	go func() {
+		_, err := ws.Subscribe("orders")
+		subErr <- err
+	}()
+	msg := readMessage(t, conn1)
+	mustWriteJSON(t, conn1, map[string]interface{}{
+		"type":    "Success",
+		"payload": map[string]interface{}{"message_id": msg["messageId"]},
+	})
+	if err := <-subErr; err != nil {
+		t.Fatalf("subscribe failed: %v", err)
+	}
+
+	// Drop to force a reconnect.
+	conn1.Close()
+
+	select {
+	case <-rts.connCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("client did not reconnect")
+	}
+
+	// The reconnect dial must have carried the token.
+	select {
+	case auth := <-rts.authCh:
+		if auth != "Bearer secret-jwt" {
+			t.Fatalf("expected reconnect Authorization 'Bearer secret-jwt', got %q", auth)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no Authorization header captured for reconnect dial")
+	}
+	select {
+	case tok := <-rts.tokenCh:
+		if tok != "secret-jwt" {
+			t.Fatalf("expected reconnect token query 'secret-jwt', got %q", tok)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no token query param captured for reconnect dial")
+	}
+}
+
+// TestWebSocketCloseStopsReconnection verifies that Close() halts reconnection:
+// after Close, the server sees no further dial attempts even though a
+// subscription was active when the connection dropped.
+func TestWebSocketCloseStopsReconnection(t *testing.T) {
+	rts := setupReconnectTestServer(t)
+	defer rts.server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(rts.wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+
+	conn1 := <-rts.connCh
+
+	// Establish a subscription.
+	subErr := make(chan error, 1)
+	go func() {
+		_, err := ws.Subscribe("orders")
+		subErr <- err
+	}()
+	msg := readMessage(t, conn1)
+	mustWriteJSON(t, conn1, map[string]interface{}{
+		"type":    "Success",
+		"payload": map[string]interface{}{"message_id": msg["messageId"]},
+	})
+	if err := <-subErr; err != nil {
+		t.Fatalf("subscribe failed: %v", err)
+	}
+
+	// Intentional close — must not trigger a reconnect.
+	if err := ws.Close(); err != nil {
+		t.Fatalf("close returned error: %v", err)
+	}
+	conn1.Close()
+
+	// No new connection should arrive after an intentional Close.
+	select {
+	case c := <-rts.connCh:
+		c.Close()
+		t.Fatal("client attempted to reconnect after Close()")
+	case <-time.After(2 * time.Second):
+		// Expected: no reconnect.
+	}
+}
