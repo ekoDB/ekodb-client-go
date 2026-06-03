@@ -1676,3 +1676,80 @@ func TestWebSocketCloseStopsReconnection(t *testing.T) {
 		// Expected: no reconnect.
 	}
 }
+
+// TestWebSocketUnsubscribeRaceWithDelivery exercises the deliver-vs-close race:
+// the server streams mutation notifications while the client Unsubscribes (which
+// closes the subscription channel). Before the fix, the dispatcher sent on the
+// channel outside the lock and could panic with "send on closed channel". Run
+// under `-race` (and `-count`) this is a regression guard for #37 (#5/#6).
+func TestWebSocketUnsubscribeRaceWithDelivery(t *testing.T) {
+	rts := setupReconnectTestServer(t)
+	defer rts.server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(rts.wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	conn := <-rts.connCh
+
+	subCh := make(chan (<-chan MutationNotification), 1)
+	go func() {
+		ch, err := ws.Subscribe("orders")
+		if err == nil {
+			subCh <- ch
+		}
+	}()
+	msg := readMessage(t, conn)
+	mustWriteJSON(t, conn, map[string]interface{}{
+		"type":    "Success",
+		"payload": map[string]interface{}{"message_id": msg["messageId"]},
+	})
+
+	var notifCh <-chan MutationNotification
+	select {
+	case notifCh = <-subCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for subscribe ack")
+	}
+
+	// Server streams notifications continuously until told to stop.
+	stop := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		payload := map[string]interface{}{
+			"type": "MutationNotification",
+			"payload": map[string]interface{}{
+				"collection": "orders", "event": "insert",
+				"record_ids": []string{"x"}, "timestamp": "2026-03-13T00:00:00Z",
+			},
+		}
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if err := conn.WriteJSON(payload); err != nil {
+				return
+			}
+		}
+	}()
+
+	// A consumer drains so most deliveries take the send branch (maximizing the
+	// window the old code raced on), then we Unsubscribe mid-stream.
+	go func() {
+		for range notifCh {
+		}
+	}()
+	time.Sleep(30 * time.Millisecond)
+	ws.Unsubscribe("orders")
+	time.Sleep(30 * time.Millisecond)
+
+	close(stop)
+	<-writerDone
+	// Reaching here without a panic means deliver-vs-close is safe.
+}

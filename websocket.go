@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net/url"
 	"strings"
 	"sync"
@@ -245,7 +245,7 @@ func (ws *WebSocketClient) reconnect() {
 		}
 
 		// Sleep the backoff window with jitter, but wake immediately on close.
-		jitter := time.Duration(rand.Int63n(int64(delay)/2 + 1))
+		jitter := time.Duration(rand.Int64N(int64(delay)/2 + 1))
 		wait := delay + jitter
 		select {
 		case <-ws.ctx.Done():
@@ -280,8 +280,18 @@ func (ws *WebSocketClient) reconnect() {
 			return
 		}
 		ws.dispatcherDone = make(chan struct{})
-		conn := ws.conn
 		ws.mu.Unlock()
+
+		// ws.conn is written by connect(), cleared by Close(), and read by
+		// writeJSON() all under writeMu — read it under the same lock here. A
+		// concurrent Close() may have nil'd it, in which case there is nothing
+		// to resume.
+		ws.writeMu.Lock()
+		conn := ws.conn
+		ws.writeMu.Unlock()
+		if conn == nil {
+			return
+		}
 
 		go ws.readLoop(conn)
 		return
@@ -539,17 +549,20 @@ func (ws *WebSocketClient) routeMutationNotification(msg map[string]json.RawMess
 		return
 	}
 
+	// Hold ws.mu across the lookup AND the send. The send is non-blocking
+	// (select/default), so holding the lock cannot deadlock. Close() and
+	// Unsubscribe() remove the channel from the map (and Close() closes it)
+	// under this same lock, so a delivery here can never race a close() and
+	// panic with "send on closed channel".
 	ws.mu.Lock()
-	ch, ok := ws.subscriptions[notification.Collection]
-	ws.mu.Unlock()
-
-	if ok {
+	if ch, ok := ws.subscriptions[notification.Collection]; ok {
 		select {
 		case ch <- notification:
 		default:
-			// Drop if channel full
+			// Drop if the consumer is not keeping up.
 		}
 	}
+	ws.mu.Unlock()
 }
 
 func (ws *WebSocketClient) extractChatID(msg map[string]json.RawMessage) string {
