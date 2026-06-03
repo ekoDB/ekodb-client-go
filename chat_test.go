@@ -347,6 +347,43 @@ func drainUntilClosed(ch chan ChatStreamEvent) <-chan struct{} {
 	return done
 }
 
+// TestChatMessageStreamNilContext verifies a nil context is treated as
+// Background() instead of panicking in NewRequestWithContext / ctx.Done().
+func TestChatMessageStreamNilContext(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/session_1/messages/stream": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher, ok := w.(http.Flusher)
+			if !ok {
+				t.Fatal("ResponseWriter does not support Flusher")
+			}
+			fmt.Fprintf(w, "data:{\"token\":\"Hi\"}\n\n")
+			flusher.Flush()
+			fmt.Fprintf(w, "data:{\"content\":\"Hi\",\"message_id\":\"m1\"}\n\n")
+			flusher.Flush()
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+
+	var nilCtx context.Context // nil — must not panic
+	ch, err := client.ChatMessageStream(nilCtx, "session_1", ChatMessageRequest{Message: "Hi"})
+	if err != nil {
+		t.Fatalf("ChatMessageStream with nil context returned error: %v", err)
+	}
+
+	got := false
+	for ev := range ch {
+		if ev.Type == "chunk" || ev.Type == "end" {
+			got = true
+		}
+	}
+	if !got {
+		t.Fatal("expected events from stream invoked with a nil context")
+	}
+}
+
 // ============================================================================
 // Raw Completion Stream With Progress Tests
 // ============================================================================

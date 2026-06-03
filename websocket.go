@@ -87,7 +87,10 @@ type WebSocketClient struct {
 	// closing is set by Close() so the reconnect loop exits cleanly and an
 	// intentional shutdown is never mistaken for a transient drop.
 	closing bool
-	// reconnecting guards against spawning more than one reconnect loop.
+	// reconnecting indicates a reconnect loop is currently running (set when a
+	// drop is handed off to reconnect(), cleared once a new dispatcher is up).
+	// Close() reads it to skip waiting on dispatcherDone when no dispatcher
+	// goroutine is active (e.g. the reconnect loop is mid-backoff).
 	reconnecting bool
 }
 

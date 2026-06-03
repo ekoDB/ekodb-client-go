@@ -822,6 +822,12 @@ func (c *Client) CompactChat(sessionID string, keepRecent *int) (*CompactChatRes
 //	    }
 //	}
 func (c *Client) ChatMessageStream(ctx context.Context, sessionID string, request ChatMessageRequest) (chan ChatStreamEvent, error) {
+	// Guard against a nil context: NewRequestWithContext and the send helper's
+	// ctx.Done() would both panic on nil. Treat it as Background().
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	bodyBytes, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
