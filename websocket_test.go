@@ -1753,3 +1753,30 @@ func TestWebSocketUnsubscribeRaceWithDelivery(t *testing.T) {
 	<-writerDone
 	// Reaching here without a panic means deliver-vs-close is safe.
 }
+
+// TestWebSocketNoReconnectWithoutSubscriptions guards that an unexpected drop
+// with no active subscriptions is terminal — the client must NOT spin a
+// background reconnect loop (which would add latency to one-shot/chat WS flows).
+func TestWebSocketNoReconnectWithoutSubscriptions(t *testing.T) {
+	rts := setupReconnectTestServer(t)
+	defer rts.server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(rts.wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	conn := <-rts.connCh
+	// No Subscribe — drop the connection unexpectedly.
+	conn.Close()
+
+	select {
+	case c := <-rts.connCh:
+		c.Close()
+		t.Fatal("client reconnected despite having no active subscriptions")
+	case <-time.After(2 * time.Second):
+		// Expected: no reconnect.
+	}
+}

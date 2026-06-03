@@ -376,17 +376,22 @@ func (ws *WebSocketClient) readLoop(conn *websocket.Conn) {
 				delete(ws.chatStreams, id)
 			}
 			closing := ws.closing
-			// Collect subscription channels only if we are shutting down for
-			// good; on an unexpected drop we leave them untouched for replay.
+			// Reconnect exists solely to keep ACTIVE subscriptions alive across a
+			// transient drop. With nothing to replay (a one-shot request or a
+			// finished chat stream), an unexpected drop is terminal — tear down
+			// instead of spinning a background reconnect loop.
+			reconnect := !closing && len(ws.subscriptions) > 0
+			// Collect subscription channels to close unless we're reconnecting
+			// (in which case they stay open and get re-subscribed).
 			var subChans map[string]chan MutationNotification
-			if closing {
+			if reconnect {
+				ws.reconnecting = true
+			} else {
 				subChans = make(map[string]chan MutationNotification)
 				for id, ch := range ws.subscriptions {
 					subChans[id] = ch
 					delete(ws.subscriptions, id)
 				}
-			} else {
-				ws.reconnecting = true
 			}
 			ws.mu.Unlock()
 
@@ -413,15 +418,21 @@ func (ws *WebSocketClient) readLoop(conn *websocket.Conn) {
 			ws.conn = nil
 			ws.writeMu.Unlock()
 
-			if closing {
-				ws.cancel()
+			if !reconnect {
+				// Terminal: either an intentional Close() or an unexpected drop
+				// with no subscriptions to replay. End the dispatcher. Only an
+				// intentional Close() cancels the context (so a still-usable
+				// client isn't invalidated by a transient drop).
+				if closing {
+					ws.cancel()
+				}
 				close(done)
 				return
 			}
 
-			// Unexpected drop: spawn the reconnect loop and end this dispatcher.
-			// reconnect() re-arms a fresh readLoop (and a fresh dispatcherDone)
-			// on success. Signal this dispatcher's waiter, then hand off.
+			// Unexpected drop WITH active subscriptions: spawn the reconnect loop
+			// and end this dispatcher. reconnect() re-arms a fresh readLoop (and a
+			// fresh dispatcherDone) on success. Signal this waiter, then hand off.
 			close(done)
 			go ws.reconnect()
 			return
