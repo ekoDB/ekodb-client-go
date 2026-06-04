@@ -192,17 +192,6 @@ func TestQueryBuilderEndsWith(t *testing.T) {
 	}
 }
 
-func TestQueryBuilderRegex(t *testing.T) {
-	qb := NewQueryBuilder().Regex("phone", "^\\+1")
-	query := qb.Build()
-
-	filter := query["filter"].(map[string]interface{})
-	content := filter["content"].(map[string]interface{})
-	if content["operator"] != "Regex" {
-		t.Errorf("Expected operator Regex, got %v", content["operator"])
-	}
-}
-
 // ============================================================================
 // Logical Operators Tests
 // ============================================================================
@@ -390,25 +379,26 @@ func TestQueryBuilderSkip(t *testing.T) {
 }
 
 func TestQueryBuilderPage(t *testing.T) {
-	// Page 2 with 20 items per page = skip 40
+	// 1-indexed: page 2 with 20 items per page = skip 20
 	qb := NewQueryBuilder().Page(2, 20)
 	query := qb.Build()
 
 	if query["limit"] != 20 {
 		t.Errorf("Expected limit 20, got %v", query["limit"])
 	}
-	if query["skip"] != 40 {
-		t.Errorf("Expected skip 40, got %v", query["skip"])
+	if query["skip"] != 20 {
+		t.Errorf("Expected skip 20, got %v", query["skip"])
 	}
 }
 
-func TestQueryBuilderPageZero(t *testing.T) {
-	// Page 0 with 10 items = skip 0
-	qb := NewQueryBuilder().Page(0, 10)
-	query := qb.Build()
-
-	if query["skip"] != 0 {
-		t.Errorf("Expected skip 0, got %v", query["skip"])
+func TestQueryBuilderPageFirst(t *testing.T) {
+	// 1-indexed: page 1 (the first page) = skip 0
+	if got := NewQueryBuilder().Page(1, 10).Build()["skip"]; got != 0 {
+		t.Errorf("Expected skip 0 for page 1, got %v", got)
+	}
+	// Out-of-range page numbers clamp to the first page.
+	if got := NewQueryBuilder().Page(0, 10).Build()["skip"]; got != 0 {
+		t.Errorf("Expected skip 0 for clamped page 0, got %v", got)
 	}
 }
 

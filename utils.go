@@ -195,10 +195,15 @@ func GetValue(field interface{}) interface{} {
 		return nil
 	}
 
-	// Try to cast to map[string]interface{} (JSON object)
+	// Try to cast to map[string]interface{} (JSON object). Only unwrap a genuine
+	// typed wrapper — one that carries BOTH a "type" discriminator and a "value".
+	// A user object that merely has a "value" key (e.g. {"value":1,"currency":"USD"})
+	// must pass through untouched.
 	if fieldMap, ok := field.(map[string]interface{}); ok {
-		if value, exists := fieldMap["value"]; exists {
-			return value
+		if _, hasType := fieldMap["type"]; hasType {
+			if value, exists := fieldMap["value"]; exists {
+				return value
+			}
 		}
 	}
 

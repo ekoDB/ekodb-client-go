@@ -6,6 +6,77 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-06-04
+
+### Removed
+
+- **Removed the query-builder `regex()` filter** from all clients — the server
+  has no regex filter operator, so it 400'd (or, in Rust, silently fell back to
+  substring `Contains`). Removed until server-side regex filtering is available
+  (tracked internally). Breaking: callers using `regex()` should switch to
+  `contains` / `startsWith` / `endsWith`.
+
+### Changed
+
+- **BREAKING: `QueryBuilder.Page` is now 1-indexed** (#38). `Page(1, n)` is the
+  first page (skip 0), matching `Client.Paginate`; previously `Page` was
+  0-indexed (`page * pageSize`), so the two pagination APIs disagreed. Page
+  numbers below 1 clamp to the first page. Callers using the old 0-indexed
+  `Page` must add 1 to their page numbers.
+- **BREAKING: `ChatMessageStream` now takes a `context.Context`** (#34). The
+  signature is now `ChatMessageStream(ctx, sessionID, request)`, matching the
+  ctx-first convention already used by `SubscribeSSE`. The streaming goroutine
+  select-sends on `ctx.Done()`, so cancelling the context releases the goroutine
+  and the underlying connection even when the consumer stops draining the
+  channel — previously it could block forever on a full buffer and leak.
+  Regression test `TestChatMessageStreamCancellation`. Callers must pass a
+  context (e.g. `context.Background()`).
+
+### Fixed
+
+- **WebSocket `connect()` no longer leaks a socket on a close/dial race** (#41).
+  `Dial` takes no context, so a `Close()` that ran while a dial was in flight
+  could tear down the previous connection and then have the completed dial
+  overwrite `ws.conn` with a freshly-opened socket that was never closed.
+  `connect()` now re-checks `closing` (atomically against `Close()`, which sets
+  it under `ws.mu` before nil'ing `ws.conn`) after dialing: if the client is
+  closing it closes the new connection and returns an error instead of storing
+  it. Regression test added.
+- **WebSocket subscriptions now auto-reconnect** (#37). On an unexpected
+  disconnect the client no longer closes every subscription channel and gives
+  up. It now reconnects with capped exponential backoff + jitter (200ms → ~5s),
+  re-sends the `Subscribe` request for every tracked subscription, and resumes
+  delivery on the SAME caller-held channels. Each (re)connect reads a FRESH
+  token from the parent client, so a since-expired JWT is refreshed
+  transparently instead of permanently locking the connection out. In-flight
+  request and chat-stream callers are failed with an error on the drop (instead
+  of hanging), and an intentional `Close()` cleanly stops the reconnect loop.
+  Previously a transient drop permanently closed all subscriptions and a stale
+  token could never recover. Covered by
+  `TestWebSocketReconnectResumesSubscription`,
+  `TestWebSocketReconnectDialsWithToken`, and
+  `TestWebSocketCloseStopsReconnection`.
+- **Network-error retries use exponential backoff with full jitter** (#36).
+  Replaced the fixed 3s delay with a capped exponential schedule (200ms → 5s)
+  plus full jitter, so concurrent clients don't retry in lockstep. Covered by
+  `TestRetryBackoffBase` / `TestRetryBackoffJitterBounds`. (Making the retry
+  sleep itself context-cancellable requires threading a `context.Context`
+  through the request path and is tracked as follow-up work.)
+- **Data race on `rateLimitInfo`** (#33). `extractRateLimitInfo` wrote the field
+  on every response while `GetRateLimitInfo` / `IsNearRateLimit` read it without
+  synchronization. Added a dedicated `sync.RWMutex` guarding all access; the
+  write now publishes a fully-built value under the lock. Regression test
+  `TestExtractRateLimitInfoNoDataRace` runs clean under `-race`.
+- **`GetValue` no longer corrupts user objects** (#35). It previously unwrapped
+  any object containing a `value` key, so a legitimate object like
+  `{"value": 1, "currency": "USD"}` lost its sibling fields on read. It now only
+  unwraps a genuine typed wrapper (both `type` and `value` present) and passes
+  every other object through untouched. Covered by
+  `TestGetValuePassesThroughUserObjectWithValueKey`.
+- **Corrected the serialization-default docstring** (#38). The
+  `NewClientWithConfig` comment claimed "Default is JSON" although the zero
+  value selects MessagePack.
+
 ## [0.19.0] - 2026-06-02
 
 ### Added
@@ -90,8 +161,7 @@ and this project adheres to
   server's path-routed dispatcher.
 - **Tests** — 4 JWT builder-shape / JSON round-trip cases and 3 EmailSend shape
   cases. Server-side reject paths (wrong secret, expired token, unsupported
-  algorithm) are covered by the Rust integration tests in
-  `ekodb/ekodb_server/tests/function_parameters_tests.rs`. Two new
+  algorithm) are covered by server-side integration tests. Two new
   `TestUserFunction_jsonIncludesHTTPFieldsWhenSet` /
   `_jsonOmitsHTTPFieldsWhenNil` tests guard the `http_method` / `http_path` JSON
   tags + omitempty behavior for the path-routed dispatcher.
