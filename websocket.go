@@ -204,16 +204,19 @@ func (ws *WebSocketClient) connect() error {
 	header := make(map[string][]string)
 	header["Authorization"] = []string{"Bearer " + token}
 
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), header)
+	// DialContext(ws.ctx) so Close()/cancel() can abort an in-flight dial
+	// (DefaultDialer.HandshakeTimeout still bounds a hung handshake). This keeps
+	// a reconnect-loop dial from blocking a clean shutdown.
+	conn, _, err := websocket.DefaultDialer.DialContext(ws.ctx, u.String(), header)
 	if err != nil {
 		return fmt.Errorf("websocket connection failed: %w", err)
 	}
 
-	// If Close() ran while the (context-less) Dial was in flight, don't store
-	// the freshly-dialed connection. Close() has already torn down the previous
-	// conn and will never see this one, so storing it would leak an open socket.
-	// Holding ws.mu across the closing check and the store keeps it atomic vs
-	// Close(), which sets ws.closing under ws.mu before nil'ing ws.conn.
+	// A dial that completes in the instant before Close() runs still needs this
+	// guard: don't store a connection Close() has already moved past, or it
+	// leaks an open socket. Holding ws.mu across the closing check and the store
+	// keeps it atomic vs Close(), which sets ws.closing under ws.mu before
+	// nil'ing ws.conn.
 	ws.mu.Lock()
 	if ws.closing {
 		ws.mu.Unlock()
@@ -270,8 +273,15 @@ func (ws *WebSocketClient) reconnect() {
 
 		ws.mu.Lock()
 		closing = ws.closing
+		hasSubs := len(ws.subscriptions) > 0
 		ws.mu.Unlock()
-		if closing {
+		// Bail if closed, or if every subscription was removed while we were
+		// backing off (e.g. an in-flight Subscribe failed and deleted its sub
+		// after the drop had already spawned this loop). Reviving a connection
+		// with nothing to replay would leak a zombie socket + readLoop. After
+		// this exit a later Subscribe won't auto-redial, which is already true
+		// today since Subscribe never calls connect().
+		if closing || !hasSubs {
 			return
 		}
 
@@ -873,23 +883,32 @@ func (ws *WebSocketClient) Subscribe(collection string, opts ...SubscribeOptions
 	return ch, nil
 }
 
-// Unsubscribe stops local delivery for a collection: it removes the subscription
-// so it is no longer replayed on reconnect and closes its notification channel.
+// Unsubscribe stops delivery for a collection: it sends a best-effort
+// Unsubscribe frame to the server (so the server stops streaming mutations for
+// this collection on this connection), removes the local subscription so it is
+// no longer replayed on reconnect, and closes its notification channel.
 // It is safe to call for a collection that is not currently subscribed (no-op).
 //
-// Note: this only affects the local client. It does not currently send an
-// Unsubscribe message to the server, so the server keeps streaming mutations for
-// this connection until it disconnects. Sending a server-side Unsubscribe is
-// tracked as a cross-client enhancement.
+// The server frame is best-effort: if the socket is already gone the local
+// teardown is sufficient, since the server drops all subscriptions when the
+// connection closes. A unique messageId is attached so the server's Success ack
+// is matched-and-dropped by the dispatcher rather than misrouted.
 func (ws *WebSocketClient) Unsubscribe(collection string) {
 	ws.mu.Lock()
 	ch, ok := ws.subscriptions[collection]
 	delete(ws.subscriptions, collection)
 	delete(ws.subParams, collection)
 	ws.mu.Unlock()
-	if ok {
-		close(ch)
+	if !ok {
+		return
 	}
+	close(ch)
+
+	_ = ws.writeJSON(map[string]interface{}{
+		"type":      "Unsubscribe",
+		"messageId": ws.genMessageID(),
+		"payload":   map[string]interface{}{"collection": collection},
+	})
 }
 
 // ChatSend sends a chat message and returns a channel of streaming events.

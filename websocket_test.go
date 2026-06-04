@@ -1,6 +1,7 @@
 package ekodb
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -59,9 +60,13 @@ func TestWebSocketConnectDoesNotLeakWhenClosing(t *testing.T) {
 	wsURL, connCh, server := setupTestWSServer(t)
 	defer server.Close()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	ws := &WebSocketClient{
 		wsURL:         wsURL,
 		tokenProvider: func() string { return "test-token" },
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 	// Simulate Close() having already set `closing` before connect() finishes dialing.
 	ws.closing = true
@@ -1812,5 +1817,104 @@ func TestWebSocketNoReconnectWithoutSubscriptions(t *testing.T) {
 		t.Fatal("client reconnected despite having no active subscriptions")
 	case <-time.After(2 * time.Second):
 		// Expected: no reconnect.
+	}
+}
+
+// TestWebSocketUnsubscribeSendsServerFrame verifies that Unsubscribe sends a
+// best-effort Unsubscribe frame to the server (so the server stops streaming),
+// not just a local teardown.
+func TestWebSocketUnsubscribeSendsServerFrame(t *testing.T) {
+	rts := setupReconnectTestServer(t)
+	defer rts.server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(rts.wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	conn := <-rts.connCh
+
+	subErr := make(chan error, 1)
+	go func() {
+		_, e := ws.Subscribe("orders")
+		subErr <- e
+	}()
+	msg := readMessage(t, conn)
+	if msg["type"] != "Subscribe" {
+		t.Fatalf("expected Subscribe, got %v", msg["type"])
+	}
+	mustWriteJSON(t, conn, map[string]interface{}{
+		"type":    "Success",
+		"payload": map[string]interface{}{"message_id": msg["messageId"]},
+	})
+	if e := <-subErr; e != nil {
+		t.Fatalf("subscribe failed: %v", e)
+	}
+
+	ws.Unsubscribe("orders")
+
+	msg = readMessage(t, conn)
+	if msg["type"] != "Unsubscribe" {
+		t.Fatalf("expected Unsubscribe frame, got %v", msg["type"])
+	}
+	payload, ok := msg["payload"].(map[string]interface{})
+	if !ok || payload["collection"] != "orders" {
+		t.Fatalf("expected Unsubscribe payload collection=orders, got %v", msg["payload"])
+	}
+}
+
+// TestWebSocketReconnectExitsWhenSubscriptionsRemovedDuringBackoff covers the
+// case where a drop hands off to reconnect() WITH an active subscription, but
+// that subscription is removed (e.g. an in-flight Subscribe failed and deleted
+// it) before reconnect dials. reconnect() must exit instead of reviving a
+// zombie connection with nothing to replay.
+func TestWebSocketReconnectExitsWhenSubscriptionsRemovedDuringBackoff(t *testing.T) {
+	rts := setupReconnectTestServer(t)
+	defer rts.server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(rts.wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	conn1 := <-rts.connCh
+
+	subErr := make(chan error, 1)
+	go func() {
+		_, e := ws.Subscribe("orders")
+		subErr <- e
+	}()
+	msg := readMessage(t, conn1)
+	if msg["type"] != "Subscribe" {
+		t.Fatalf("expected Subscribe, got %v", msg["type"])
+	}
+	mustWriteJSON(t, conn1, map[string]interface{}{
+		"type":    "Success",
+		"payload": map[string]interface{}{"message_id": msg["messageId"]},
+	})
+	if e := <-subErr; e != nil {
+		t.Fatalf("subscribe failed: %v", e)
+	}
+
+	// Drop from the server side; with an active subscription the client hands
+	// off to reconnect(), which starts a ~200ms backoff before its first dial.
+	_ = conn1.Close()
+
+	// Give readLoop time to observe the drop and spawn reconnect(), but stay
+	// inside the backoff window, then remove the only subscription. reconnect's
+	// pre-dial check must now see zero subscriptions and exit without dialing.
+	time.Sleep(60 * time.Millisecond)
+	ws.Unsubscribe("orders")
+
+	select {
+	case c := <-rts.connCh:
+		c.Close()
+		t.Fatal("reconnect dialed despite all subscriptions being removed during backoff")
+	case <-time.After(2 * time.Second):
+		// Expected: reconnect exited without dialing.
 	}
 }

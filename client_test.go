@@ -736,6 +736,22 @@ func TestKVDeleteSuccess(t *testing.T) {
 	}
 }
 
+func TestKVClearSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"DELETE /api/kv/clear": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "success"})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	if err := client.KVClear(); err != nil {
+		t.Errorf("KVClear failed: %v", err)
+	}
+}
+
 func TestKVExistsSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/kv/get/existing_key": func(w http.ResponseWriter, r *http.Request) {

@@ -1077,6 +1077,12 @@ func (c *Client) KVDelete(key string) error {
 	return err
 }
 
+// KVClear removes every key-value entry from the store (clears the KV namespace).
+func (c *Client) KVClear() error {
+	_, err := c.makeRequest("DELETE", "/api/kv/clear", nil)
+	return err
+}
+
 // KVBatchGet retrieves multiple keys in a single request
 func (c *Client) KVBatchGet(keys []string) ([]map[string]interface{}, error) {
 	data := map[string]interface{}{
