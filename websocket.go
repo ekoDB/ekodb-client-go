@@ -209,9 +209,21 @@ func (ws *WebSocketClient) connect() error {
 		return fmt.Errorf("websocket connection failed: %w", err)
 	}
 
+	// If Close() ran while the (context-less) Dial was in flight, don't store
+	// the freshly-dialed connection. Close() has already torn down the previous
+	// conn and will never see this one, so storing it would leak an open socket.
+	// Holding ws.mu across the closing check and the store keeps it atomic vs
+	// Close(), which sets ws.closing under ws.mu before nil'ing ws.conn.
+	ws.mu.Lock()
+	if ws.closing {
+		ws.mu.Unlock()
+		_ = conn.Close()
+		return fmt.Errorf("websocket client closed during connect")
+	}
 	ws.writeMu.Lock()
 	ws.conn = conn
 	ws.writeMu.Unlock()
+	ws.mu.Unlock()
 	return nil
 }
 
@@ -861,9 +873,14 @@ func (ws *WebSocketClient) Subscribe(collection string, opts ...SubscribeOptions
 	return ch, nil
 }
 
-// Unsubscribe removes a subscription so it is no longer replayed on reconnect
-// and closes its notification channel. It is safe to call for a collection
-// that is not currently subscribed (no-op).
+// Unsubscribe stops local delivery for a collection: it removes the subscription
+// so it is no longer replayed on reconnect and closes its notification channel.
+// It is safe to call for a collection that is not currently subscribed (no-op).
+//
+// Note: this only affects the local client. It does not currently send an
+// Unsubscribe message to the server, so the server keeps streaming mutations for
+// this connection until it disconnects. Sending a server-side Unsubscribe is
+// tracked as a cross-client enhancement.
 func (ws *WebSocketClient) Unsubscribe(collection string) {
 	ws.mu.Lock()
 	ch, ok := ws.subscriptions[collection]

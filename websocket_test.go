@@ -51,6 +51,40 @@ func readMessage(t *testing.T, conn *websocket.Conn) map[string]interface{} {
 	return msg
 }
 
+// Regression: connect() must not store (and thus leak) a freshly-dialed
+// connection if Close() already flipped `closing` while the context-less Dial
+// was in flight. Close() tears down the previous conn and never sees the new
+// one, so storing it would leave an open socket that is never closed.
+func TestWebSocketConnectDoesNotLeakWhenClosing(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	ws := &WebSocketClient{
+		wsURL:         wsURL,
+		tokenProvider: func() string { return "test-token" },
+	}
+	// Simulate Close() having already set `closing` before connect() finishes dialing.
+	ws.closing = true
+
+	if err := ws.connect(); err == nil {
+		t.Fatal("connect() must return an error when the client is already closing")
+	}
+
+	ws.writeMu.Lock()
+	conn := ws.conn
+	ws.writeMu.Unlock()
+	if conn != nil {
+		t.Fatal("connect() must not store a connection when closing (would leak an open socket)")
+	}
+
+	// If the dial reached the server, close that side so the test server shuts down cleanly.
+	select {
+	case sc := <-connCh:
+		sc.Close()
+	case <-time.After(time.Second):
+	}
+}
+
 func TestWebSocketFindAll(t *testing.T) {
 	wsURL, connCh, server := setupTestWSServer(t)
 	defer server.Close()
