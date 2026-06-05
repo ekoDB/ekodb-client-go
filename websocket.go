@@ -505,26 +505,29 @@ func (ws *WebSocketClient) routeMessage(msgType string, msg map[string]json.RawM
 func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]json.RawMessage) {
 	ws.mu.Lock()
 
-	// Try to extract messageId from top-level, then from payload.
-	// Only fall back to the "single pending request" path when no
-	// message-id field was present at all — not when parsing failed.
+	// Extract the messageId from the top level, then from the payload. The
+	// server echoes it top-level for Success/Error, but some message shapes
+	// carry it in the payload, so check both before giving up.
 	var messageID string
-	hasMessageIDField := false
-	if midRaw, ok := msg["messageId"]; ok {
-		hasMessageIDField = true
-		_ = json.Unmarshal(midRaw, &messageID)
-	} else if midRaw, ok := msg["message_id"]; ok {
-		hasMessageIDField = true
-		_ = json.Unmarshal(midRaw, &messageID)
+	for _, key := range []string{"messageId", "message_id"} {
+		if midRaw, ok := msg[key]; ok {
+			_ = json.Unmarshal(midRaw, &messageID)
+			if messageID != "" {
+				break
+			}
+		}
 	}
-	if messageID == "" && !hasMessageIDField {
+	if messageID == "" {
 		if payloadRaw, ok := msg["payload"]; ok {
 			var payload map[string]json.RawMessage
 			if json.Unmarshal(payloadRaw, &payload) == nil {
-				if midRaw, ok := payload["message_id"]; ok {
-					_ = json.Unmarshal(midRaw, &messageID)
-				} else if midRaw, ok := payload["messageId"]; ok {
-					_ = json.Unmarshal(midRaw, &messageID)
+				for _, key := range []string{"message_id", "messageId"} {
+					if midRaw, ok := payload[key]; ok {
+						_ = json.Unmarshal(midRaw, &messageID)
+						if messageID != "" {
+							break
+						}
+					}
 				}
 			}
 		}
@@ -539,11 +542,13 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 		}
 	}
 
-	// Server doesn't echo messageId — if there's exactly one pending
-	// request, deliver the response to it (sequential request/response).
-	// Only use this fallback when no message-id field was present at all;
-	// if a field existed but was malformed, don't risk misrouting.
-	if target == nil && !hasMessageIDField && len(ws.pendingRequests) == 1 {
+	// Fallback: the server didn't echo a messageId ANYWHERE — if exactly one
+	// request is pending, deliver to it (sequential request/response). Gate on
+	// `messageID == ""`, not "no top-level id field": a present-but-unmatched id
+	// (e.g. a best-effort Unsubscribe ack, or a late response for an
+	// already-settled request) must NOT be misrouted to an unrelated in-flight
+	// request. (Matches the TypeScript client's routing.)
+	if target == nil && messageID == "" && len(ws.pendingRequests) == 1 {
 		for id, ch := range ws.pendingRequests {
 			target = ch
 			delete(ws.pendingRequests, id)
