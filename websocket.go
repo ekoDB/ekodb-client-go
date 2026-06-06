@@ -508,28 +508,36 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 	// Extract the messageId from the top level, then from the payload. The
 	// server echoes it top-level for Success/Error, but some message shapes
 	// carry it in the payload, so check both before giving up.
+	//
+	// idFieldPresent tracks whether a message-id field was present ANYWHERE with
+	// a usable (non-null, non-empty) value, even if it failed to parse into a
+	// string (e.g. a malformed numeric/object id). This mirrors the TypeScript
+	// client's truthiness check (`msg.messageId || msg.payload?.message_id`):
+	// a present-but-unparseable id must still suppress the single-pending
+	// fallback so a stray ack can't be misrouted to an unrelated request.
 	var messageID string
-	for _, key := range []string{"messageId", "message_id"} {
-		if midRaw, ok := msg[key]; ok {
-			_ = json.Unmarshal(midRaw, &messageID)
-			if messageID != "" {
-				break
+	idFieldPresent := false
+	extractID := func(m map[string]json.RawMessage) {
+		for _, key := range []string{"messageId", "message_id"} {
+			midRaw, ok := m[key]
+			if !ok {
+				continue
+			}
+			// JSON null or "" is not a usable id (and is falsy in the TS client).
+			if trimmed := strings.TrimSpace(string(midRaw)); trimmed == "null" || trimmed == `""` {
+				continue
+			}
+			idFieldPresent = true
+			if messageID == "" {
+				_ = json.Unmarshal(midRaw, &messageID)
 			}
 		}
 	}
-	if messageID == "" {
-		if payloadRaw, ok := msg["payload"]; ok {
-			var payload map[string]json.RawMessage
-			if json.Unmarshal(payloadRaw, &payload) == nil {
-				for _, key := range []string{"message_id", "messageId"} {
-					if midRaw, ok := payload[key]; ok {
-						_ = json.Unmarshal(midRaw, &messageID)
-						if messageID != "" {
-							break
-						}
-					}
-				}
-			}
+	extractID(msg)
+	if payloadRaw, ok := msg["payload"]; ok {
+		var payload map[string]json.RawMessage
+		if json.Unmarshal(payloadRaw, &payload) == nil {
+			extractID(payload)
 		}
 	}
 
@@ -542,13 +550,14 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 		}
 	}
 
-	// Fallback: the server didn't echo a messageId ANYWHERE — if exactly one
-	// request is pending, deliver to it (sequential request/response). Gate on
-	// `messageID == ""`, not "no top-level id field": a present-but-unmatched id
-	// (e.g. a best-effort Unsubscribe ack, or a late response for an
-	// already-settled request) must NOT be misrouted to an unrelated in-flight
-	// request. (Matches the TypeScript client's routing.)
-	if target == nil && messageID == "" && len(ws.pendingRequests) == 1 {
+	// Fallback: the server didn't echo a usable messageId ANYWHERE — if exactly
+	// one request is pending, deliver to it (sequential request/response). Gate
+	// on `!idFieldPresent`, not "no top-level id field" nor just "messageID == ''":
+	// a present id (e.g. a best-effort Unsubscribe ack, a late response for an
+	// already-settled request, or even a malformed/unparseable id) must NOT be
+	// misrouted to an unrelated in-flight request. (Matches the TypeScript
+	// client's routing.)
+	if target == nil && !idFieldPresent && len(ws.pendingRequests) == 1 {
 		for id, ch := range ws.pendingRequests {
 			target = ch
 			delete(ws.pendingRequests, id)
@@ -896,8 +905,11 @@ func (ws *WebSocketClient) Subscribe(collection string, opts ...SubscribeOptions
 //
 // The server frame is best-effort: if the socket is already gone the local
 // teardown is sufficient, since the server drops all subscriptions when the
-// connection closes. A unique messageId is attached so the server's Success ack
-// is matched-and-dropped by the dispatcher rather than misrouted.
+// connection closes. A unique messageId is attached purely so the server can
+// echo it on its ack: Unsubscribe registers no pending request, so the
+// dispatcher finds no match and silently discards the ack. The id stops that
+// unmatched ack from falling through to the single-pending-request heuristic
+// and being misrouted to an unrelated in-flight request.
 func (ws *WebSocketClient) Unsubscribe(collection string) {
 	ws.mu.Lock()
 	ch, ok := ws.subscriptions[collection]

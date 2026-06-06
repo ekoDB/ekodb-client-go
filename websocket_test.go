@@ -1904,10 +1904,24 @@ func TestWebSocketReconnectExitsWhenSubscriptionsRemovedDuringBackoff(t *testing
 	// off to reconnect(), which starts a ~200ms backoff before its first dial.
 	_ = conn1.Close()
 
-	// Give readLoop time to observe the drop and spawn reconnect(), but stay
-	// inside the backoff window, then remove the only subscription. reconnect's
-	// pre-dial check must now see zero subscriptions and exit without dialing.
-	time.Sleep(60 * time.Millisecond)
+	// Deterministically wait until readLoop has observed the drop and flipped
+	// the reconnecting flag (set under ws.mu before reconnect() is spawned),
+	// rather than racing a fixed sleep. Once it's set, reconnect() is in its
+	// pre-dial backoff window; removing the only subscription now forces its
+	// pre-dial check to see zero subscriptions and exit without dialing.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		ws.mu.Lock()
+		reconnecting := ws.reconnecting
+		ws.mu.Unlock()
+		if reconnecting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for reconnect loop to start")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	ws.Unsubscribe("orders")
 
 	select {
@@ -1916,5 +1930,146 @@ func TestWebSocketReconnectExitsWhenSubscriptionsRemovedDuringBackoff(t *testing
 		t.Fatal("reconnect dialed despite all subscriptions being removed during backoff")
 	case <-time.After(2 * time.Second):
 		// Expected: reconnect exited without dialing.
+	}
+}
+
+// newRoutingTestClient builds a bare WebSocketClient with just the maps needed
+// to drive routeRequestResponse directly (no live socket).
+func newRoutingTestClient() *WebSocketClient {
+	return &WebSocketClient{
+		pendingRequests: make(map[string]chan wsResponse),
+		subscriptions:   make(map[string]chan MutationNotification),
+		subParams:       make(map[string]SubscribeOptions),
+		chatStreams:     make(map[string]chan ChatStreamEvent),
+	}
+}
+
+// rawMsg marshals a JSON object into the map[string]json.RawMessage shape that
+// routeRequestResponse consumes.
+func rawMsg(t *testing.T, obj map[string]interface{}) map[string]json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(obj)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return m
+}
+
+// TestRouteRequestResponseDoesNotMisrouteUnmatchedID verifies that when a
+// Success carries a message id that is PRESENT but does not match any pending
+// request, the single-pending-request fallback is suppressed — the stray ack
+// must not be delivered to an unrelated in-flight request. This covers the
+// Unsubscribe ack case (a present id that matches nothing) and a parseable but
+// unmatched id (a late ack for an already-settled request).
+func TestRouteRequestResponseDoesNotMisrouteUnmatchedID(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  map[string]interface{}
+	}{
+		{
+			name: "present unmatched id top-level",
+			msg: map[string]interface{}{
+				"type":      "Success",
+				"messageId": "unsub-999",
+				"payload":   map[string]interface{}{"ok": true},
+			},
+		},
+		{
+			name: "present unmatched id in payload",
+			msg: map[string]interface{}{
+				"type":    "Success",
+				"payload": map[string]interface{}{"message_id": "unsub-999"},
+			},
+		},
+		{
+			name: "present but malformed (numeric) id",
+			msg: map[string]interface{}{
+				"type":      "Success",
+				"messageId": 12345,
+				"payload":   map[string]interface{}{"ok": true},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := newRoutingTestClient()
+			pending := make(chan wsResponse, 1)
+			ws.pendingRequests["the-real-request"] = pending
+
+			ws.routeRequestResponse("Success", rawMsg(t, tc.msg))
+
+			select {
+			case <-pending:
+				t.Fatal("stray ack was misrouted to the unrelated pending request")
+			default:
+				// Expected: the real request is untouched.
+			}
+			ws.mu.Lock()
+			_, stillPending := ws.pendingRequests["the-real-request"]
+			ws.mu.Unlock()
+			if !stillPending {
+				t.Fatal("the real request was incorrectly settled")
+			}
+		})
+	}
+}
+
+// TestRouteRequestResponseSinglePendingFallback verifies the legitimate
+// fallback still works: when the server echoes NO message id anywhere and
+// exactly one request is pending, the response is delivered to it.
+func TestRouteRequestResponseSinglePendingFallback(t *testing.T) {
+	ws := newRoutingTestClient()
+	pending := make(chan wsResponse, 1)
+	ws.pendingRequests["only-request"] = pending
+
+	ws.routeRequestResponse("Success", rawMsg(t, map[string]interface{}{
+		"type":    "Success",
+		"payload": map[string]interface{}{"ok": true},
+	}))
+
+	select {
+	case <-pending:
+		// Expected: sequential request/response delivered.
+	case <-time.After(time.Second):
+		t.Fatal("single-pending fallback did not deliver the response")
+	}
+	ws.mu.Lock()
+	_, stillPending := ws.pendingRequests["only-request"]
+	ws.mu.Unlock()
+	if stillPending {
+		t.Fatal("the request should have been settled and removed")
+	}
+}
+
+// TestRouteRequestResponseMatchedID verifies an id that DOES match a pending
+// request is delivered to exactly that request even when others are pending.
+func TestRouteRequestResponseMatchedID(t *testing.T) {
+	ws := newRoutingTestClient()
+	want := make(chan wsResponse, 1)
+	other := make(chan wsResponse, 1)
+	ws.pendingRequests["req-A"] = want
+	ws.pendingRequests["req-B"] = other
+
+	ws.routeRequestResponse("Success", rawMsg(t, map[string]interface{}{
+		"type":      "Success",
+		"messageId": "req-A",
+		"payload":   map[string]interface{}{"ok": true},
+	}))
+
+	select {
+	case <-want:
+		// Expected.
+	case <-time.After(time.Second):
+		t.Fatal("matched id was not delivered to its request")
+	}
+	select {
+	case <-other:
+		t.Fatal("response leaked to the wrong pending request")
+	default:
 	}
 }
