@@ -2580,6 +2580,63 @@ func TestRollbackToSavepointEscapesName(t *testing.T) {
 	}
 }
 
+// TestSavepointEscapesTransactionID proves the transactionID path segment is
+// url.PathEscape'd in every savepoint method, so a transaction ID containing
+// reserved characters cannot break out of its path segment (defense-in-depth:
+// server-issued IDs are UUIDs today, but the client must not assume that).
+func TestSavepointEscapesTransactionID(t *testing.T) {
+	txID := "tx/a b"
+	escTx := url.PathEscape(txID) // "tx%2Fa%20b"
+
+	cases := []struct {
+		name       string
+		call       func(c *Client) error
+		wantPath   string
+		wantMethod string
+	}{
+		{
+			name:       "CreateSavepoint",
+			call:       func(c *Client) error { return c.CreateSavepoint(txID, "sp1") },
+			wantPath:   "/api/transactions/" + escTx + "/savepoints",
+			wantMethod: "POST",
+		},
+		{
+			name:       "RollbackToSavepoint",
+			call:       func(c *Client) error { return c.RollbackToSavepoint(txID, "sp1") },
+			wantPath:   "/api/transactions/" + escTx + "/savepoints/sp1/rollback",
+			wantMethod: "POST",
+		},
+		{
+			name:       "ReleaseSavepoint",
+			call:       func(c *Client) error { return c.ReleaseSavepoint(txID, "sp1") },
+			wantPath:   "/api/transactions/" + escTx + "/savepoints/sp1",
+			wantMethod: "DELETE",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got capturedRequest
+			server := newCapturingServer(t, &got)
+			defer server.Close()
+
+			client := createTestClient(t, server)
+			if err := tc.call(client); err != nil {
+				t.Fatalf("%s failed: %v", tc.name, err)
+			}
+			if got.method != tc.wantMethod {
+				t.Errorf("%s method = %q, want %q", tc.name, got.method, tc.wantMethod)
+			}
+			if got.escapedPath != tc.wantPath {
+				t.Errorf("%s path = %q, want %q", tc.name, got.escapedPath, tc.wantPath)
+			}
+			if !strings.Contains(got.escapedPath, "tx%2Fa%20b") {
+				t.Errorf("%s path %q does not contain percent-encoded tx id tx%%2Fa%%20b", tc.name, got.escapedPath)
+			}
+		})
+	}
+}
+
 func TestReleaseSavepointRequestShape(t *testing.T) {
 	var got capturedRequest
 	server := newCapturingServer(t, &got)

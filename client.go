@@ -1293,7 +1293,7 @@ func (c *Client) BeginTransaction(isolationLevel string) (string, error) {
 
 // GetTransactionStatus gets the status of a transaction
 func (c *Client) GetTransactionStatus(transactionID string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("GET", "/api/transactions/"+transactionID, nil)
+	respBody, err := c.makeRequest("GET", "/api/transactions/"+url.PathEscape(transactionID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1316,14 +1316,14 @@ func (c *Client) GetTransactionStatus(transactionID string) (map[string]interfac
 // if a record this transaction read or wrote was changed by another committed
 // transaction — retry the transaction in that case.
 func (c *Client) CommitTransaction(transactionID string) error {
-	_, err := c.makeRequest("POST", "/api/transactions/"+transactionID+"/commit", nil)
+	_, err := c.makeRequest("POST", "/api/transactions/"+url.PathEscape(transactionID)+"/commit", nil)
 	return err
 }
 
 // RollbackTransaction rolls back a transaction, discarding all staged writes
 // (nothing was applied).
 func (c *Client) RollbackTransaction(transactionID string) error {
-	_, err := c.makeRequest("POST", "/api/transactions/"+transactionID+"/rollback", nil)
+	_, err := c.makeRequest("POST", "/api/transactions/"+url.PathEscape(transactionID)+"/rollback", nil)
 	return err
 }
 
@@ -1331,20 +1331,20 @@ func (c *Client) RollbackTransaction(transactionID string) error {
 // RollbackToSavepoint discards everything staged after it.
 func (c *Client) CreateSavepoint(transactionID, name string) error {
 	data := map[string]interface{}{"name": name}
-	_, err := c.makeRequest("POST", "/api/transactions/"+transactionID+"/savepoints", data)
+	_, err := c.makeRequest("POST", "/api/transactions/"+url.PathEscape(transactionID)+"/savepoints", data)
 	return err
 }
 
 // RollbackToSavepoint rolls the transaction back to a savepoint, discarding
 // writes staged after it.
 func (c *Client) RollbackToSavepoint(transactionID, name string) error {
-	_, err := c.makeRequest("POST", "/api/transactions/"+transactionID+"/savepoints/"+url.PathEscape(name)+"/rollback", nil)
+	_, err := c.makeRequest("POST", "/api/transactions/"+url.PathEscape(transactionID)+"/savepoints/"+url.PathEscape(name)+"/rollback", nil)
 	return err
 }
 
 // ReleaseSavepoint releases (forgets) a savepoint. Staged work is unaffected.
 func (c *Client) ReleaseSavepoint(transactionID, name string) error {
-	_, err := c.makeRequest("DELETE", "/api/transactions/"+transactionID+"/savepoints/"+url.PathEscape(name), nil)
+	_, err := c.makeRequest("DELETE", "/api/transactions/"+url.PathEscape(transactionID)+"/savepoints/"+url.PathEscape(name), nil)
 	return err
 }
 
