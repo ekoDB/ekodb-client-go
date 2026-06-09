@@ -593,11 +593,23 @@ type FindOptions struct {
 	BypassRipple  *bool
 	SelectFields  []string
 	ExcludeFields []string
+	// TransactionId reads within a transaction (read-your-writes): the read is
+	// served from the transaction's own view — its uncommitted staged writes,
+	// else the committed store — and recorded in its read set for commit-time
+	// conflict detection. Nil for an ordinary committed read.
+	TransactionId *string
 }
 
 // Find finds documents in a collection
 func (c *Client) Find(collection string, query interface{}, opts ...FindOptions) ([]Record, error) {
 	path := "/api/find/" + collection
+	// transaction_id is a query parameter (read in the transaction's view), not
+	// part of the filter body.
+	if len(opts) > 0 && opts[0].TransactionId != nil {
+		params := url.Values{}
+		params.Add("transaction_id", *opts[0].TransactionId)
+		path += "?" + params.Encode()
+	}
 	respBody, err := c.makeRequest("POST", path, query)
 	if err != nil {
 		return nil, err
@@ -611,9 +623,33 @@ func (c *Client) Find(collection string, query interface{}, opts ...FindOptions)
 	return results, nil
 }
 
-// FindByID finds a document by ID
-func (c *Client) FindByID(collection, id string) (Record, error) {
+// FindByIDOptions contains optional parameters for FindByID, including
+// read-your-writes within a transaction (see FindOptions.TransactionId).
+type FindByIDOptions struct {
+	SelectFields  []string
+	ExcludeFields []string
+	TransactionId *string
+}
+
+// FindByID finds a document by ID. Pass FindByIDOptions to project fields or to
+// read within a transaction (read-your-writes).
+func (c *Client) FindByID(collection, id string, opts ...FindByIDOptions) (Record, error) {
 	path := fmt.Sprintf("/api/find/%s/%s", collection, id)
+	if len(opts) > 0 {
+		params := url.Values{}
+		if len(opts[0].SelectFields) > 0 {
+			params.Add("select_fields", strings.Join(opts[0].SelectFields, ","))
+		}
+		if len(opts[0].ExcludeFields) > 0 {
+			params.Add("exclude_fields", strings.Join(opts[0].ExcludeFields, ","))
+		}
+		if opts[0].TransactionId != nil {
+			params.Add("transaction_id", *opts[0].TransactionId)
+		}
+		if len(params) > 0 {
+			path += "?" + params.Encode()
+		}
+	}
 	respBody, err := c.makeRequest("GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -1270,15 +1306,45 @@ func (c *Client) GetTransactionStatus(transactionID string) (map[string]interfac
 	return result, nil
 }
 
-// CommitTransaction commits a transaction
+// CommitTransaction commits a transaction.
+//
+// Transactions are buffered: statements issued with this transaction ID (via
+// the TransactionId option on Insert/Update/Delete/Find/FindByID/…) are staged
+// and applied atomically here. They are invisible to others until commit, and
+// visible to this transaction's own reads (read-your-writes) only when those
+// reads also carry the transaction ID. Commit may fail with an HTTP 409 conflict
+// if a record this transaction read or wrote was changed by another committed
+// transaction — retry the transaction in that case.
 func (c *Client) CommitTransaction(transactionID string) error {
 	_, err := c.makeRequest("POST", "/api/transactions/"+transactionID+"/commit", nil)
 	return err
 }
 
-// RollbackTransaction rolls back a transaction
+// RollbackTransaction rolls back a transaction, discarding all staged writes
+// (nothing was applied).
 func (c *Client) RollbackTransaction(transactionID string) error {
 	_, err := c.makeRequest("POST", "/api/transactions/"+transactionID+"/rollback", nil)
+	return err
+}
+
+// CreateSavepoint creates a named savepoint within a transaction. A later
+// RollbackToSavepoint discards everything staged after it.
+func (c *Client) CreateSavepoint(transactionID, name string) error {
+	data := map[string]interface{}{"name": name}
+	_, err := c.makeRequest("POST", "/api/transactions/"+transactionID+"/savepoints", data)
+	return err
+}
+
+// RollbackToSavepoint rolls the transaction back to a savepoint, discarding
+// writes staged after it.
+func (c *Client) RollbackToSavepoint(transactionID, name string) error {
+	_, err := c.makeRequest("POST", "/api/transactions/"+transactionID+"/savepoints/"+url.PathEscape(name)+"/rollback", nil)
+	return err
+}
+
+// ReleaseSavepoint releases (forgets) a savepoint. Staged work is unaffected.
+func (c *Client) ReleaseSavepoint(transactionID, name string) error {
+	_, err := c.makeRequest("DELETE", "/api/transactions/"+transactionID+"/savepoints/"+url.PathEscape(name), nil)
 	return err
 }
 
