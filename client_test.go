@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -2454,5 +2455,295 @@ func TestRawCompletionStreamHTTPError(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("Expected error from 401 response, got nil")
+	}
+}
+
+// ============================================================================
+// Transaction Savepoint + Transactional Read Request-Shape Tests
+// ============================================================================
+//
+// These tests assert the HTTP method, path (including url.PathEscape of the
+// savepoint name), and query-param construction the client emits — not server
+// behavior. They spin up a capturing server that records the exact escaped path
+// and raw query string of the request so escaping/encoding can be verified.
+
+// capturedRequest records the parts of an inbound request we assert on.
+type capturedRequest struct {
+	method      string
+	escapedPath string // r.URL.EscapedPath() — reserved chars stay percent-encoded
+	rawQuery    string // r.URL.RawQuery — undecoded query string
+	queryValues url.Values
+}
+
+// newCapturingServer returns a test server that handles the token exchange and
+// records the first non-token request into *got, replying 200 with an empty
+// JSON object so client unmarshalling succeeds.
+func newCapturingServer(t *testing.T, got *capturedRequest) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/token" {
+			mockTokenHandler(t)(w, r)
+			return
+		}
+		if auth := r.Header.Get("Authorization"); auth != "Bearer test-jwt-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte("Unauthorized"))
+			return
+		}
+		got.method = r.Method
+		got.escapedPath = r.URL.EscapedPath()
+		got.rawQuery = r.URL.RawQuery
+		got.queryValues = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		// Find (POST /api/find/<collection>) unmarshals into []Record, so reply
+		// with an empty array there; every other path unmarshals into a single
+		// object/map, so reply with an empty object.
+		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/find/") {
+			_, _ = w.Write([]byte("[]"))
+		} else {
+			_, _ = w.Write([]byte("{}"))
+		}
+	}))
+}
+
+func TestCreateSavepointRequestShape(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	if err := client.CreateSavepoint("tx_123", "sp1"); err != nil {
+		t.Fatalf("CreateSavepoint failed: %v", err)
+	}
+
+	// CreateSavepoint POSTs to .../savepoints with the name in the JSON body,
+	// NOT in the path — so the path has no per-name escaping concern here.
+	if got.method != "POST" {
+		t.Errorf("CreateSavepoint method = %q, want POST", got.method)
+	}
+	wantPath := "/api/transactions/tx_123/savepoints"
+	if got.escapedPath != wantPath {
+		t.Errorf("CreateSavepoint path = %q, want %q", got.escapedPath, wantPath)
+	}
+}
+
+func TestRollbackToSavepointRequestShape(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	if err := client.RollbackToSavepoint("tx_123", "sp1"); err != nil {
+		t.Fatalf("RollbackToSavepoint failed: %v", err)
+	}
+
+	if got.method != "POST" {
+		t.Errorf("RollbackToSavepoint method = %q, want POST", got.method)
+	}
+	wantPath := "/api/transactions/tx_123/savepoints/sp1/rollback"
+	if got.escapedPath != wantPath {
+		t.Errorf("RollbackToSavepoint path = %q, want %q", got.escapedPath, wantPath)
+	}
+}
+
+// TestRollbackToSavepointEscapesName proves a savepoint name containing reserved
+// characters (slash + space) is url.PathEscape'd into the path so it can't break
+// out of the .../savepoints/<name>/rollback segment.
+func TestRollbackToSavepointEscapesName(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	name := "a/b c"
+	if err := client.RollbackToSavepoint("tx_123", name); err != nil {
+		t.Fatalf("RollbackToSavepoint failed: %v", err)
+	}
+
+	if got.method != "POST" {
+		t.Errorf("method = %q, want POST", got.method)
+	}
+	// url.PathEscape("a/b c") == "a%2Fb%20c". The escaped path must carry the
+	// percent-encoded form so the slash is NOT a path separator.
+	wantEscaped := "/api/transactions/tx_123/savepoints/" + url.PathEscape(name) + "/rollback"
+	if got.escapedPath != wantEscaped {
+		t.Errorf("escaped path = %q, want %q", got.escapedPath, wantEscaped)
+	}
+	if !strings.Contains(got.escapedPath, "a%2Fb%20c") {
+		t.Errorf("escaped path %q does not contain percent-encoded name a%%2Fb%%20c", got.escapedPath)
+	}
+	// The server's decoded path segment must round-trip back to the raw name.
+	wantDecodedPath := "/api/transactions/tx_123/savepoints/" + name + "/rollback"
+	if decoded, err := url.PathUnescape(got.escapedPath); err != nil {
+		t.Errorf("path unescape failed: %v", err)
+	} else if decoded != wantDecodedPath {
+		t.Errorf("decoded path = %q, want %q", decoded, wantDecodedPath)
+	}
+}
+
+func TestReleaseSavepointRequestShape(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	if err := client.ReleaseSavepoint("tx_123", "sp1"); err != nil {
+		t.Fatalf("ReleaseSavepoint failed: %v", err)
+	}
+
+	if got.method != "DELETE" {
+		t.Errorf("ReleaseSavepoint method = %q, want DELETE", got.method)
+	}
+	wantPath := "/api/transactions/tx_123/savepoints/sp1"
+	if got.escapedPath != wantPath {
+		t.Errorf("ReleaseSavepoint path = %q, want %q", got.escapedPath, wantPath)
+	}
+}
+
+// TestReleaseSavepointEscapesName proves ReleaseSavepoint url.PathEscape's a
+// reserved-char savepoint name into the DELETE path.
+func TestReleaseSavepointEscapesName(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	name := "a/b c"
+	if err := client.ReleaseSavepoint("tx_123", name); err != nil {
+		t.Fatalf("ReleaseSavepoint failed: %v", err)
+	}
+
+	if got.method != "DELETE" {
+		t.Errorf("method = %q, want DELETE", got.method)
+	}
+	wantEscaped := "/api/transactions/tx_123/savepoints/" + url.PathEscape(name)
+	if got.escapedPath != wantEscaped {
+		t.Errorf("escaped path = %q, want %q", got.escapedPath, wantEscaped)
+	}
+	if !strings.Contains(got.escapedPath, "a%2Fb%20c") {
+		t.Errorf("escaped path %q does not contain percent-encoded name a%%2Fb%%20c", got.escapedPath)
+	}
+}
+
+func TestFindWithTransactionIDQueryParam(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	txID := "tx_abc"
+	_, err := client.Find("users", map[string]interface{}{"limit": 10}, FindOptions{
+		TransactionId: &txID,
+	})
+	if err != nil {
+		t.Fatalf("Find failed: %v", err)
+	}
+
+	if got.method != "POST" {
+		t.Errorf("Find method = %q, want POST", got.method)
+	}
+	if got.escapedPath != "/api/find/users" {
+		t.Errorf("Find path = %q, want /api/find/users", got.escapedPath)
+	}
+	if v := got.queryValues.Get("transaction_id"); v != txID {
+		t.Errorf("transaction_id query param = %q, want %q", v, txID)
+	}
+	if !strings.Contains(got.rawQuery, "transaction_id="+txID) {
+		t.Errorf("raw query %q missing transaction_id=%s", got.rawQuery, txID)
+	}
+}
+
+func TestFindWithoutTransactionIDHasNoQueryParam(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	if _, err := client.Find("users", map[string]interface{}{"limit": 10}); err != nil {
+		t.Fatalf("Find failed: %v", err)
+	}
+
+	if got.rawQuery != "" {
+		t.Errorf("Find without transaction emitted query %q, want empty", got.rawQuery)
+	}
+}
+
+func TestFindByIDWithTransactionIDQueryParam(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	txID := "tx_xyz"
+	_, err := client.FindByID("users", "user_1", FindByIDOptions{
+		TransactionId: &txID,
+	})
+	if err != nil {
+		t.Fatalf("FindByID failed: %v", err)
+	}
+
+	if got.method != "GET" {
+		t.Errorf("FindByID method = %q, want GET", got.method)
+	}
+	if got.escapedPath != "/api/find/users/user_1" {
+		t.Errorf("FindByID path = %q, want /api/find/users/user_1", got.escapedPath)
+	}
+	if v := got.queryValues.Get("transaction_id"); v != txID {
+		t.Errorf("transaction_id query param = %q, want %q", v, txID)
+	}
+}
+
+// TestFindByIDProjectionCommaJoined asserts select_fields/exclude_fields are
+// encoded as a single comma-joined value (strings.Join at client.go:641/644),
+// not as repeated params, and that the transaction_id rides alongside them.
+func TestFindByIDProjectionCommaJoined(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	txID := "tx_proj"
+	_, err := client.FindByID("users", "user_1", FindByIDOptions{
+		SelectFields:  []string{"name", "email"},
+		ExcludeFields: []string{"secret", "internal"},
+		TransactionId: &txID,
+	})
+	if err != nil {
+		t.Fatalf("FindByID failed: %v", err)
+	}
+
+	if got.method != "GET" {
+		t.Errorf("method = %q, want GET", got.method)
+	}
+	if got.escapedPath != "/api/find/users/user_1" {
+		t.Errorf("path = %q, want /api/find/users/user_1", got.escapedPath)
+	}
+	// strings.Join with "," — a single value, not repeated query keys.
+	if sel := got.queryValues["select_fields"]; len(sel) != 1 || sel[0] != "name,email" {
+		t.Errorf("select_fields = %v, want exactly [\"name,email\"]", sel)
+	}
+	if exc := got.queryValues["exclude_fields"]; len(exc) != 1 || exc[0] != "secret,internal" {
+		t.Errorf("exclude_fields = %v, want exactly [\"secret,internal\"]", exc)
+	}
+	if v := got.queryValues.Get("transaction_id"); v != txID {
+		t.Errorf("transaction_id = %q, want %q", v, txID)
+	}
+	// The comma must be percent-encoded in the raw query (url.Values.Encode).
+	if !strings.Contains(got.rawQuery, "select_fields=name%2Cemail") {
+		t.Errorf("raw query %q missing select_fields=name%%2Cemail", got.rawQuery)
+	}
+}
+
+func TestFindByIDNoOptionsHasNoQueryParam(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	if _, err := client.FindByID("users", "user_1"); err != nil {
+		t.Fatalf("FindByID failed: %v", err)
+	}
+
+	if got.rawQuery != "" {
+		t.Errorf("FindByID without options emitted query %q, want empty", got.rawQuery)
 	}
 }
