@@ -136,8 +136,10 @@ func main() {
   scoring
 - ✅ **Schema Management** - Define and enforce data schemas with validation
 - ✅ **Join Operations** - Single and multi-collection joins with queries
-- ✅ **Transactions** - `BeginTransaction` / `CommitTransaction` /
-  `RollbackTransaction`
+- ✅ **Transactions** - buffered transactions with savepoints:
+  `BeginTransaction` / `CommitTransaction` / `RollbackTransaction`,
+  `CreateSavepoint` / `RollbackToSavepoint` / `ReleaseSavepoint`, and
+  read-your-writes via the `TransactionId` option on `Find` / `FindByID`
 - ✅ **KV document linking** - `KVLink` / `KVGetLinks` / `KVUnlink`
 - ✅ **Schedule management** - create/list/get/update/delete/pause/resume
   scheduled functions
@@ -314,11 +316,29 @@ results, err := client.Find("users", query)
 - `NewJoinConfig(collections []string, localField, foreignField, asField string) JoinConfig` -
   Multi-collection join
 
+### Transaction Methods
+
+- `BeginTransaction(isolationLevel string) (string, error)` - Begin a
+  transaction (READ_UNCOMMITTED / READ_COMMITTED / REPEATABLE_READ /
+  SERIALIZABLE); returns the transaction ID
+- `GetTransactionStatus(transactionID string) (map[string]interface{}, error)`
+- `CommitTransaction(transactionID string) error` - Apply staged writes
+  atomically (may return HTTP 409 on conflict — retry)
+- `RollbackTransaction(transactionID string) error`
+- `CreateSavepoint(transactionID, name string) error`
+- `RollbackToSavepoint(transactionID, name string) error`
+- `ReleaseSavepoint(transactionID, name string) error`
+
+Pass a transaction ID via the `TransactionId` option field on `Insert` /
+`Update` / `Delete` / `Find` / `FindByID` to stage writes / read-your-writes
+within the transaction.
+
 ### Key-Value Methods
 
 - `KVSet(key string, value interface{}) error`
 - `KVGet(key string) (interface{}, error)`
 - `KVDelete(key string) error`
+- `KVClear() error` - Clear all keys in the KV namespace
 
 ### Collection Methods
 
@@ -373,6 +393,13 @@ results, err := client.Find("users", query)
 - `CreateCollection(name, schema?) error`
 - `ListCollections() ([]string, error)`
 - `DeleteCollection(name) error`
+
+**Real-time subscriptions:**
+
+- `Subscribe(collection, opts?) (<-chan MutationNotification, error)` — stream
+  mutations for a collection
+- `Unsubscribe(collection string)` — stop delivery; sends a server-side
+  Unsubscribe frame and tears down the local channel
 
 **Schema Cache:**
 
