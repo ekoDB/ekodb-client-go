@@ -2637,6 +2637,63 @@ func TestSavepointEscapesTransactionID(t *testing.T) {
 	}
 }
 
+// TestTransactionLifecycleEscapesTransactionID proves the transaction-lifecycle
+// methods (status / commit / rollback) also url.PathEscape the transactionID,
+// matching the savepoint methods above, so a reserved character can't break out
+// of its path segment.
+func TestTransactionLifecycleEscapesTransactionID(t *testing.T) {
+	txID := "tx/a b"
+	escTx := url.PathEscape(txID) // "tx%2Fa%20b"
+
+	cases := []struct {
+		name       string
+		call       func(c *Client) error
+		wantPath   string
+		wantMethod string
+	}{
+		{
+			name:       "GetTransactionStatus",
+			call:       func(c *Client) error { _, err := c.GetTransactionStatus(txID); return err },
+			wantPath:   "/api/transactions/" + escTx,
+			wantMethod: "GET",
+		},
+		{
+			name:       "CommitTransaction",
+			call:       func(c *Client) error { return c.CommitTransaction(txID) },
+			wantPath:   "/api/transactions/" + escTx + "/commit",
+			wantMethod: "POST",
+		},
+		{
+			name:       "RollbackTransaction",
+			call:       func(c *Client) error { return c.RollbackTransaction(txID) },
+			wantPath:   "/api/transactions/" + escTx + "/rollback",
+			wantMethod: "POST",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got capturedRequest
+			server := newCapturingServer(t, &got)
+			defer server.Close()
+
+			client := createTestClient(t, server)
+			if err := tc.call(client); err != nil {
+				t.Fatalf("%s failed: %v", tc.name, err)
+			}
+			if got.method != tc.wantMethod {
+				t.Errorf("%s method = %q, want %q", tc.name, got.method, tc.wantMethod)
+			}
+			if got.escapedPath != tc.wantPath {
+				t.Errorf("%s path = %q, want %q", tc.name, got.escapedPath, tc.wantPath)
+			}
+			if !strings.Contains(got.escapedPath, "tx%2Fa%20b") {
+				t.Errorf("%s path %q does not contain percent-encoded tx id tx%%2Fa%%20b", tc.name, got.escapedPath)
+			}
+		})
+	}
+}
+
 func TestReleaseSavepointRequestShape(t *testing.T) {
 	var got capturedRequest
 	server := newCapturingServer(t, &got)
