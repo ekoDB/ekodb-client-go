@@ -3079,7 +3079,7 @@ func TestFindByIDBypassRippleFalse(t *testing.T) {
 }
 
 // TestFindByIDProjectionCommaJoined asserts select_fields/exclude_fields are
-// encoded as a single comma-joined value (strings.Join at client.go:641/644),
+// encoded as a single comma-joined value (FindByID joins them with strings.Join),
 // not as repeated params, and that the transaction_id rides alongside them.
 func TestFindByIDProjectionCommaJoined(t *testing.T) {
 	var got capturedRequest
