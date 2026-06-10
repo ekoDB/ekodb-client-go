@@ -206,8 +206,14 @@ func (ws *WebSocketClient) connect() error {
 
 	// DialContext(ws.ctx) so Close()/cancel() can abort an in-flight dial
 	// (DefaultDialer.HandshakeTimeout still bounds a hung handshake). This keeps
-	// a reconnect-loop dial from blocking a clean shutdown.
-	conn, _, err := websocket.DefaultDialer.DialContext(ws.ctx, u.String(), header)
+	// a reconnect-loop dial from blocking a clean shutdown. Fall back to a
+	// background context if ws.ctx is unset (e.g. a manually constructed client) —
+	// DialContext panics on a nil context.
+	dialCtx := ws.ctx
+	if dialCtx == nil {
+		dialCtx = context.Background()
+	}
+	conn, _, err := websocket.DefaultDialer.DialContext(dialCtx, u.String(), header)
 	if err != nil {
 		return fmt.Errorf("websocket connection failed: %w", err)
 	}
@@ -292,6 +298,26 @@ func (ws *WebSocketClient) reconnect() {
 				delay = reconnectMaxDelay
 			}
 			continue
+		}
+
+		// Re-check after the dial: the last subscription may have been removed
+		// while connect() was in flight (the pre-dial check only covers the
+		// backoff window). If so, the just-opened socket has nothing to replay —
+		// tear it down (mirroring Close()'s conn teardown) and stop rather than
+		// leak a zombie connection + readLoop.
+		ws.mu.Lock()
+		shuttingDown := ws.closing
+		stillHasSubs := len(ws.subscriptions) > 0
+		ws.mu.Unlock()
+		if shuttingDown || !stillHasSubs {
+			ws.writeMu.Lock()
+			conn := ws.conn
+			ws.conn = nil
+			ws.writeMu.Unlock()
+			if conn != nil {
+				_ = conn.Close()
+			}
+			return
 		}
 
 		// Connected. Re-send every tracked subscription so the server resumes

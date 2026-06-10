@@ -3,9 +3,12 @@ package ekodb
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1930,6 +1933,131 @@ func TestWebSocketReconnectExitsWhenSubscriptionsRemovedDuringBackoff(t *testing
 		t.Fatal("reconnect dialed despite all subscriptions being removed during backoff")
 	case <-time.After(2 * time.Second):
 		// Expected: reconnect exited without dialing.
+	}
+}
+
+// TestWebSocketConnectFallsBackToBackgroundContext verifies connect() does not
+// panic when ws.ctx is nil (e.g. a manually constructed client). DialContext
+// panics on a nil context, so connect() must fall back to context.Background().
+func TestWebSocketConnectFallsBackToBackgroundContext(t *testing.T) {
+	rts := setupReconnectTestServer(t)
+	defer rts.server.Close()
+
+	// A bare client with NO context set, mimicking a manually constructed one.
+	// connect() reads only wsURL + tokenProvider; ctx is left nil on purpose.
+	ws := &WebSocketClient{
+		wsURL:         rts.wsURL,
+		tokenProvider: func() string { return "test-token" },
+	}
+
+	// Must not panic: DialContext panics on a nil context, so connect() has to
+	// fall back to context.Background().
+	if err := ws.connect(); err != nil {
+		t.Fatalf("connect() with nil ctx should succeed via background fallback: %v", err)
+	}
+
+	// The dial reached the server and connect() stored a usable conn.
+	select {
+	case c := <-rts.connCh:
+		_ = c.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("dial did not reach the server")
+	}
+
+	// Tear down directly — connect() does not start a readLoop, so there is no
+	// reconnect machinery to stop.
+	ws.writeMu.Lock()
+	if ws.conn != nil {
+		_ = ws.conn.Close()
+	}
+	ws.writeMu.Unlock()
+}
+
+// TestWebSocketReconnectClosesSocketWhenSubsRemovedDuringDial covers the race the
+// pre-dial check cannot: the last subscription is removed WHILE connect() is
+// dialing (after the pre-dial check already passed). The just-opened socket then
+// has nothing to replay, so reconnect() must tear it down rather than leak a
+// zombie connection + readLoop.
+func TestWebSocketReconnectClosesSocketWhenSubsRemovedDuringDial(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	connCh := make(chan *websocket.Conn, 8)
+	dialStarted := make(chan struct{}, 1)
+	proceed := make(chan struct{})
+	var dialN int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Gate only the SECOND dial (the reconnect). The first dial (the initial
+		// connect) proceeds immediately so the subscription can be established.
+		if atomic.AddInt32(&dialN, 1) == 2 {
+			dialStarted <- struct{}{}
+			<-proceed
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade failed: %v", err)
+			return
+		}
+		connCh <- conn
+	}))
+	defer server.Close()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/ws"
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	conn1 := <-connCh
+
+	// Establish a subscription so a server-side drop hands off to reconnect().
+	subErr := make(chan error, 1)
+	go func() {
+		_, e := ws.Subscribe("orders")
+		subErr <- e
+	}()
+	msg := readMessage(t, conn1)
+	if msg["type"] != "Subscribe" {
+		t.Fatalf("expected Subscribe, got %v", msg["type"])
+	}
+	mustWriteJSON(t, conn1, map[string]interface{}{
+		"type":    "Success",
+		"payload": map[string]interface{}{"message_id": msg["messageId"]},
+	})
+	if e := <-subErr; e != nil {
+		t.Fatalf("subscribe failed: %v", e)
+	}
+
+	// Drop server-side; with an active subscription the client hands off to
+	// reconnect(), whose pre-dial check still sees the subscription and dials.
+	_ = conn1.Close()
+
+	// Once the reconnect dial is in flight (pre-dial check already passed),
+	// remove the only subscription so the POST-dial check is the one that must
+	// catch the now-empty set, then let the dial complete.
+	select {
+	case <-dialStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reconnect did not dial")
+	}
+	ws.Unsubscribe("orders")
+	close(proceed)
+
+	// The reconnect socket must be torn down (nothing to replay). A teardown
+	// closes the socket, so the server's read returns a non-timeout error
+	// promptly; a leaked zombie would stay open and the read would block until
+	// the deadline (a timeout).
+	conn2 := <-connCh
+	_ = conn2.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, _, readErr := conn2.ReadMessage()
+	if readErr == nil {
+		t.Fatal("reconnect unexpectedly replayed onto the socket")
+	}
+	var ne net.Error
+	if errors.As(readErr, &ne) && ne.Timeout() {
+		t.Fatal("reconnect left the socket open (zombie connection): the read timed " +
+			"out waiting for data instead of observing a client-side close")
 	}
 }
 
