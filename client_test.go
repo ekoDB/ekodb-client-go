@@ -2884,6 +2884,63 @@ func assertStringSlice(t *testing.T, body map[string]interface{}, key string, wa
 	}
 }
 
+// TestFindNonMapQueryPassThrough verifies Find sends the caller's query
+// unchanged when no FindOptions body field needs to override it — so a non-map
+// (struct) query is not forced through a map, and a TransactionId-only call
+// (TransactionId is a query param, not a body field) still passes the query
+// through verbatim.
+func TestFindNonMapQueryPassThrough(t *testing.T) {
+	type structQuery struct {
+		Limit int `json:"limit"`
+	}
+
+	t.Run("no options", func(t *testing.T) {
+		var got capturedRequest
+		server := newCapturingServer(t, &got)
+		defer server.Close()
+		client := createTestClient(t, server)
+
+		if _, err := client.Find("users", structQuery{Limit: 7}); err != nil {
+			t.Fatalf("Find failed: %v", err)
+		}
+		var body map[string]interface{}
+		if err := json.Unmarshal(got.body, &body); err != nil {
+			t.Fatalf("body not JSON: %v (body=%s)", err, got.body)
+		}
+		if body["limit"] != float64(7) {
+			t.Errorf("body limit = %v, want 7", body["limit"])
+		}
+		if got.rawQuery != "" {
+			t.Errorf("unexpected query string %q", got.rawQuery)
+		}
+	})
+
+	t.Run("transaction id only still passes query through", func(t *testing.T) {
+		var got capturedRequest
+		server := newCapturingServer(t, &got)
+		defer server.Close()
+		client := createTestClient(t, server)
+
+		txID := "tx_1"
+		if _, err := client.Find("users", structQuery{Limit: 7}, FindOptions{TransactionId: &txID}); err != nil {
+			t.Fatalf("Find failed: %v", err)
+		}
+		if v := got.queryValues.Get("transaction_id"); v != txID {
+			t.Errorf("transaction_id query param = %q, want %q", v, txID)
+		}
+		var body map[string]interface{}
+		if err := json.Unmarshal(got.body, &body); err != nil {
+			t.Fatalf("body not JSON: %v (body=%s)", err, got.body)
+		}
+		if body["limit"] != float64(7) {
+			t.Errorf("body limit = %v, want 7 (query must pass through)", body["limit"])
+		}
+		if _, ok := body["transaction_id"]; ok {
+			t.Error("transaction_id must be a query param, not in the body")
+		}
+	})
+}
+
 func TestFindByIDWithTransactionIDQueryParam(t *testing.T) {
 	var got capturedRequest
 	server := newCapturingServer(t, &got)

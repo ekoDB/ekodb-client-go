@@ -609,11 +609,18 @@ type FindOptions struct {
 func (c *Client) Find(collection string, query interface{}, opts ...FindOptions) ([]Record, error) {
 	path := "/api/find/" + collection
 
-	// Build the request body (the server's FindBody) from the query object
-	// overlaid with any explicitly-set FindOptions fields.
-	body, err := mergeFindOptions(query, opts)
-	if err != nil {
-		return nil, err
+	// Default: send the caller's query unchanged, so a non-map query (e.g. a
+	// struct relying on msgpack tags — /api/find is MessagePack by default) keeps
+	// its serialization and we avoid a needless marshal/unmarshal round-trip. Only
+	// materialize a mutable body map when a FindOptions body field has to override
+	// the query.
+	body := query
+	if findOptionsHaveBodyFields(opts) {
+		merged, err := mergeFindOptions(query, opts)
+		if err != nil {
+			return nil, err
+		}
+		body = merged
 	}
 	// transaction_id is a query parameter (the read runs in the transaction's
 	// read-your-writes view), not part of the FindBody.
@@ -634,6 +641,20 @@ func (c *Client) Find(collection string, query interface{}, opts ...FindOptions)
 	}
 
 	return results, nil
+}
+
+// findOptionsHaveBodyFields reports whether opts sets any field that Find merges
+// into the request body (the server's FindBody). TransactionId is excluded — it
+// is a query parameter, not a body field — so a Find that only sets TransactionId
+// still passes its query through unchanged.
+func findOptionsHaveBodyFields(opts []FindOptions) bool {
+	if len(opts) == 0 {
+		return false
+	}
+	o := opts[0]
+	return o.Filter != nil || o.Sort != nil || o.Limit != nil || o.Skip != nil ||
+		o.Join != nil || o.BypassCache != nil || o.BypassRipple != nil ||
+		len(o.SelectFields) > 0 || len(o.ExcludeFields) > 0
 }
 
 // mergeFindOptions builds the POST /api/find request body (the server's
