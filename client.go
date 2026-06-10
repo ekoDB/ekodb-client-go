@@ -616,7 +616,7 @@ func (c *Client) Find(collection string, query interface{}, opts ...FindOptions)
 	// the query.
 	body := query
 	if findOptionsHaveBodyFields(opts) {
-		merged, err := mergeFindOptions(query, opts)
+		merged, err := c.mergeFindOptions(path, query, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -661,9 +661,10 @@ func findOptionsHaveBodyFields(opts []FindOptions) bool {
 // FindBody) from the caller's query object overlaid with any explicitly-set
 // FindOptions fields. A field set on FindOptions overrides the same field
 // carried in query. TransactionId is intentionally excluded here — it is a query
-// parameter, applied by the caller.
-func mergeFindOptions(query interface{}, opts []FindOptions) (map[string]interface{}, error) {
-	body, err := queryToBodyMap(query)
+// parameter, applied by the caller. path selects the codec used to materialize a
+// non-map query into a map, so it matches the request's wire format.
+func (c *Client) mergeFindOptions(path string, query interface{}, opts []FindOptions) (map[string]interface{}, error) {
+	body, err := c.queryToBodyMap(path, query)
 	if err != nil {
 		return nil, err
 	}
@@ -703,9 +704,12 @@ func mergeFindOptions(query interface{}, opts []FindOptions) (map[string]interfa
 
 // queryToBodyMap converts a find query object into a mutable FindBody-shaped map.
 // A nil query yields an empty body. A query that is already a map is copied so
-// the caller's map is not mutated; anything else is round-tripped through JSON,
-// which requires it to encode as a JSON object.
-func queryToBodyMap(query interface{}) (map[string]interface{}, error) {
+// the caller's map is not mutated; anything else is round-tripped into a map
+// using the SAME codec the request body will use (MessagePack vs JSON, decided by
+// path and the client format), so a struct's field names match the wire format —
+// e.g. its msgpack tags are honored on a MessagePack find rather than silently
+// replaced by its json tags.
+func (c *Client) queryToBodyMap(path string, query interface{}) (map[string]interface{}, error) {
 	if query == nil {
 		return map[string]interface{}{}, nil
 	}
@@ -716,11 +720,21 @@ func queryToBodyMap(query interface{}) (map[string]interface{}, error) {
 		}
 		return out, nil
 	}
+	out := map[string]interface{}{}
+	if !shouldUseJSON(path) && c.format == MessagePack {
+		raw, err := msgpack.Marshal(query)
+		if err != nil {
+			return nil, fmt.Errorf("invalid find query: %w", err)
+		}
+		if err := msgpack.Unmarshal(raw, &out); err != nil {
+			return nil, fmt.Errorf("find query must encode as a MessagePack map: %w", err)
+		}
+		return out, nil
+	}
 	raw, err := json.Marshal(query)
 	if err != nil {
 		return nil, fmt.Errorf("invalid find query: %w", err)
 	}
-	out := map[string]interface{}{}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, fmt.Errorf("find query must encode as a JSON object: %w", err)
 	}

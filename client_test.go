@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 // ============================================================================
@@ -2939,6 +2941,60 @@ func TestFindNonMapQueryPassThrough(t *testing.T) {
 			t.Error("transaction_id must be a query param, not in the body")
 		}
 	})
+}
+
+// TestFindStructQueryUsesMsgpackTagsInMessagePackMode verifies that when a
+// FindOptions body field forces a non-map (struct) query to be materialized into
+// a map, the conversion uses the SAME codec as the request body. On a MessagePack
+// find the struct's msgpack tags must be honored, not silently replaced by its
+// json tags (which would send wrong field names to the server).
+func TestFindStructQueryUsesMsgpackTagsInMessagePackMode(t *testing.T) {
+	// Distinct msgpack vs json tags so the captured body reveals which codec ran.
+	type structQuery struct {
+		Marker int `msgpack:"mp_marker" json:"json_marker"`
+	}
+
+	var captured []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/token" {
+			mockTokenHandler(t)(w, r)
+			return
+		}
+		captured, _ = io.ReadAll(r.Body)
+		// The MessagePack client decodes the /api/find response via msgpack, so
+		// reply with a MessagePack-encoded empty record array.
+		w.Header().Set("Content-Type", "application/msgpack")
+		resp, _ := msgpack.Marshal([]Record{})
+		_, _ = w.Write(resp)
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithConfig(ClientConfig{
+		BaseURL: server.URL,
+		APIKey:  "test-api-key",
+		Timeout: 60 * time.Second,
+		Format:  MessagePack,
+	})
+	if err != nil {
+		t.Fatalf("NewClientWithConfig failed: %v", err)
+	}
+
+	// A FindOptions body field forces the struct→map merge path.
+	limit := 25
+	if _, err := client.Find("users", structQuery{Marker: 7}, FindOptions{Limit: &limit}); err != nil {
+		t.Fatalf("Find failed: %v", err)
+	}
+
+	var body map[string]interface{}
+	if err := msgpack.Unmarshal(captured, &body); err != nil {
+		t.Fatalf("request body is not MessagePack: %v (body=%x)", err, captured)
+	}
+	if _, ok := body["mp_marker"]; !ok {
+		t.Errorf("struct query must convert via msgpack tags: want key \"mp_marker\", got %v", body)
+	}
+	if _, ok := body["json_marker"]; ok {
+		t.Error("json tag \"json_marker\" must not appear — the wrong codec was used for struct→map")
+	}
 }
 
 func TestFindByIDWithTransactionIDQueryParam(t *testing.T) {
