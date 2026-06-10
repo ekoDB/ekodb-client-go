@@ -3,6 +3,7 @@ package ekodb
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -2473,6 +2474,7 @@ type capturedRequest struct {
 	escapedPath string // r.URL.EscapedPath() — reserved chars stay percent-encoded
 	rawQuery    string // r.URL.RawQuery — undecoded query string
 	queryValues url.Values
+	body        []byte // raw request body bytes
 }
 
 // newCapturingServer returns a test server that handles the token exchange and
@@ -2493,6 +2495,7 @@ func newCapturingServer(t *testing.T, got *capturedRequest) *httptest.Server {
 		got.escapedPath = r.URL.EscapedPath()
 		got.rawQuery = r.URL.RawQuery
 		got.queryValues = r.URL.Query()
+		got.body, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
 		// Find (POST /api/find/<collection>) unmarshals into []Record, so reply
 		// with an empty array there; every other path unmarshals into a single
@@ -2781,6 +2784,106 @@ func TestFindWithoutTransactionIDHasNoQueryParam(t *testing.T) {
 	}
 }
 
+// TestFindHonorsAllFindOptions verifies every FindOptions field reaches the
+// request: the body fields land in the FindBody (overriding the query argument),
+// and TransactionId is sent as a query parameter rather than in the body.
+func TestFindHonorsAllFindOptions(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+
+	limit := 25
+	skip := 5
+	bypassCache := true
+	bypassRipple := false
+	txID := "tx_opts"
+	filter := map[string]interface{}{
+		"type":    "Condition",
+		"content": map[string]interface{}{"field": "age", "operator": "Gt", "value": 18},
+	}
+	sort := map[string]interface{}{"name": "asc"}
+	join := map[string]interface{}{"collection": "orders"}
+
+	// The query argument carries a limit that FindOptions must override.
+	_, err := client.Find("users", map[string]interface{}{"limit": 999}, FindOptions{
+		Filter:        filter,
+		Sort:          sort,
+		Limit:         &limit,
+		Skip:          &skip,
+		Join:          join,
+		BypassCache:   &bypassCache,
+		BypassRipple:  &bypassRipple,
+		SelectFields:  []string{"name", "email"},
+		ExcludeFields: []string{"secret"},
+		TransactionId: &txID,
+	})
+	if err != nil {
+		t.Fatalf("Find failed: %v", err)
+	}
+
+	if got.method != "POST" {
+		t.Errorf("method = %q, want POST", got.method)
+	}
+	if got.escapedPath != "/api/find/users" {
+		t.Errorf("path = %q, want /api/find/users", got.escapedPath)
+	}
+	// transaction_id is a query param.
+	if v := got.queryValues.Get("transaction_id"); v != txID {
+		t.Errorf("transaction_id query param = %q, want %q", v, txID)
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(got.body, &body); err != nil {
+		t.Fatalf("request body is not JSON: %v (body=%s)", err, got.body)
+	}
+
+	// FindOptions.Limit must override the query argument's limit (999 -> 25).
+	if body["limit"] != float64(limit) {
+		t.Errorf("body limit = %v, want %d (FindOptions must override the query arg)", body["limit"], limit)
+	}
+	if body["skip"] != float64(skip) {
+		t.Errorf("body skip = %v, want %d", body["skip"], skip)
+	}
+	if body["bypass_cache"] != true {
+		t.Errorf("body bypass_cache = %v, want true", body["bypass_cache"])
+	}
+	if body["bypass_ripple"] != false {
+		t.Errorf("body bypass_ripple = %v, want false", body["bypass_ripple"])
+	}
+	for _, key := range []string{"filter", "sort", "join"} {
+		if _, ok := body[key]; !ok {
+			t.Errorf("body missing %q", key)
+		}
+	}
+	assertStringSlice(t, body, "select_fields", []string{"name", "email"})
+	assertStringSlice(t, body, "exclude_fields", []string{"secret"})
+
+	// transaction_id must NOT be in the body — it is a query param only.
+	if _, ok := body["transaction_id"]; ok {
+		t.Error("transaction_id must be a query param, not in the request body")
+	}
+}
+
+func assertStringSlice(t *testing.T, body map[string]interface{}, key string, want []string) {
+	t.Helper()
+	raw, ok := body[key].([]interface{})
+	if !ok {
+		t.Errorf("body[%q] = %v, want a string array", key, body[key])
+		return
+	}
+	if len(raw) != len(want) {
+		t.Errorf("body[%q] len = %d, want %d", key, len(raw), len(want))
+		return
+	}
+	for i, w := range want {
+		if raw[i] != w {
+			t.Errorf("body[%q][%d] = %v, want %q", key, i, raw[i], w)
+		}
+	}
+}
+
 func TestFindByIDWithTransactionIDQueryParam(t *testing.T) {
 	var got capturedRequest
 	server := newCapturingServer(t, &got)
@@ -2803,6 +2906,62 @@ func TestFindByIDWithTransactionIDQueryParam(t *testing.T) {
 	}
 	if v := got.queryValues.Get("transaction_id"); v != txID {
 		t.Errorf("transaction_id query param = %q, want %q", v, txID)
+	}
+}
+
+// TestFindByIDBypassRippleWithTransactionID asserts bypass_ripple is sent as a
+// GET query param and rides alongside transaction_id when both are set on the
+// transactional read path. Mirrors how the non-transactional read carries
+// bypass_ripple (a GET query param). Previously FindByIDOptions had no
+// BypassRipple field, so a Go caller could not express it at all.
+func TestFindByIDBypassRippleWithTransactionID(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	txID := "tx_br"
+	bypass := true
+	_, err := client.FindByID("users", "user_1", FindByIDOptions{
+		BypassRipple:  &bypass,
+		TransactionId: &txID,
+	})
+	if err != nil {
+		t.Fatalf("FindByID failed: %v", err)
+	}
+
+	if got.method != "GET" {
+		t.Errorf("method = %q, want GET", got.method)
+	}
+	if got.escapedPath != "/api/find/users/user_1" {
+		t.Errorf("path = %q, want /api/find/users/user_1", got.escapedPath)
+	}
+	if v := got.queryValues.Get("bypass_ripple"); v != "true" {
+		t.Errorf("bypass_ripple query param = %q, want %q", v, "true")
+	}
+	if v := got.queryValues.Get("transaction_id"); v != txID {
+		t.Errorf("transaction_id query param = %q, want %q", v, txID)
+	}
+}
+
+// TestFindByIDBypassRippleFalse asserts an explicit BypassRipple:false is sent
+// as bypass_ripple=false (not omitted), since the field is a *bool.
+func TestFindByIDBypassRippleFalse(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	bypass := false
+	_, err := client.FindByID("users", "user_1", FindByIDOptions{
+		BypassRipple: &bypass,
+	})
+	if err != nil {
+		t.Fatalf("FindByID failed: %v", err)
+	}
+
+	if v := got.queryValues.Get("bypass_ripple"); v != "false" {
+		t.Errorf("bypass_ripple query param = %q, want %q", v, "false")
 	}
 }
 

@@ -582,7 +582,12 @@ func (c *Client) Insert(collection string, record Record, opts ...InsertOptions)
 	return result, nil
 }
 
-// FindOptions contains optional parameters for Find
+// FindOptions carries optional shaping for Find. Every field is applied to the
+// request. Filter, Sort, Limit, Skip, Join, BypassCache, BypassRipple,
+// SelectFields, and ExcludeFields are merged into the request body (the
+// server's FindBody); when one is set here it overrides the same field carried
+// in the query argument. TransactionId is sent as a query parameter instead,
+// since the read runs in the transaction's read-your-writes view.
 type FindOptions struct {
 	Filter        interface{}
 	Sort          interface{}
@@ -603,14 +608,22 @@ type FindOptions struct {
 // Find finds documents in a collection
 func (c *Client) Find(collection string, query interface{}, opts ...FindOptions) ([]Record, error) {
 	path := "/api/find/" + collection
-	// transaction_id is a query parameter (read in the transaction's view), not
-	// part of the filter body.
+
+	// Build the request body (the server's FindBody) from the query object
+	// overlaid with any explicitly-set FindOptions fields.
+	body, err := mergeFindOptions(query, opts)
+	if err != nil {
+		return nil, err
+	}
+	// transaction_id is a query parameter (the read runs in the transaction's
+	// read-your-writes view), not part of the FindBody.
 	if len(opts) > 0 && opts[0].TransactionId != nil {
 		params := url.Values{}
 		params.Add("transaction_id", *opts[0].TransactionId)
 		path += "?" + params.Encode()
 	}
-	respBody, err := c.makeRequest("POST", path, query)
+
+	respBody, err := c.makeRequest("POST", path, body)
 	if err != nil {
 		return nil, err
 	}
@@ -623,11 +636,86 @@ func (c *Client) Find(collection string, query interface{}, opts ...FindOptions)
 	return results, nil
 }
 
+// mergeFindOptions builds the POST /api/find request body (the server's
+// FindBody) from the caller's query object overlaid with any explicitly-set
+// FindOptions fields. A field set on FindOptions overrides the same field
+// carried in query. TransactionId is intentionally excluded here — it is a query
+// parameter, applied by the caller.
+func mergeFindOptions(query interface{}, opts []FindOptions) (map[string]interface{}, error) {
+	body, err := queryToBodyMap(query)
+	if err != nil {
+		return nil, err
+	}
+	if len(opts) == 0 {
+		return body, nil
+	}
+	o := opts[0]
+	if o.Filter != nil {
+		body["filter"] = o.Filter
+	}
+	if o.Sort != nil {
+		body["sort"] = o.Sort
+	}
+	if o.Limit != nil {
+		body["limit"] = *o.Limit
+	}
+	if o.Skip != nil {
+		body["skip"] = *o.Skip
+	}
+	if o.Join != nil {
+		body["join"] = o.Join
+	}
+	if o.BypassCache != nil {
+		body["bypass_cache"] = *o.BypassCache
+	}
+	if o.BypassRipple != nil {
+		body["bypass_ripple"] = *o.BypassRipple
+	}
+	if len(o.SelectFields) > 0 {
+		body["select_fields"] = o.SelectFields
+	}
+	if len(o.ExcludeFields) > 0 {
+		body["exclude_fields"] = o.ExcludeFields
+	}
+	return body, nil
+}
+
+// queryToBodyMap converts a find query object into a mutable FindBody-shaped map.
+// A nil query yields an empty body. A query that is already a map is copied so
+// the caller's map is not mutated; anything else is round-tripped through JSON,
+// which requires it to encode as a JSON object.
+func queryToBodyMap(query interface{}) (map[string]interface{}, error) {
+	if query == nil {
+		return map[string]interface{}{}, nil
+	}
+	if m, ok := query.(map[string]interface{}); ok {
+		out := make(map[string]interface{}, len(m))
+		for k, v := range m {
+			out[k] = v
+		}
+		return out, nil
+	}
+	raw, err := json.Marshal(query)
+	if err != nil {
+		return nil, fmt.Errorf("invalid find query: %w", err)
+	}
+	out := map[string]interface{}{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("find query must encode as a JSON object: %w", err)
+	}
+	return out, nil
+}
+
 // FindByIDOptions contains optional parameters for FindByID, including
 // read-your-writes within a transaction (see FindOptions.TransactionId).
 type FindByIDOptions struct {
 	SelectFields  []string
 	ExcludeFields []string
+	// BypassRipple skips ripple propagation for this read. Sent as the
+	// bypass_ripple GET query param (the same way the non-transactional read
+	// carries it) and rides alongside transaction_id when both are set. Nil
+	// leaves it off.
+	BypassRipple  *bool
 	TransactionId *string
 }
 
@@ -642,6 +730,9 @@ func (c *Client) FindByID(collection, id string, opts ...FindByIDOptions) (Recor
 		}
 		if len(opts[0].ExcludeFields) > 0 {
 			params.Add("exclude_fields", strings.Join(opts[0].ExcludeFields, ","))
+		}
+		if opts[0].BypassRipple != nil {
+			params.Add("bypass_ripple", fmt.Sprintf("%t", *opts[0].BypassRipple))
 		}
 		if opts[0].TransactionId != nil {
 			params.Add("transaction_id", *opts[0].TransactionId)
