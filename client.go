@@ -553,7 +553,7 @@ func (c *Client) Insert(collection string, record Record, opts ...InsertOptions)
 	}
 
 	// Build query parameters
-	path := "/api/insert/" + collection
+	path := "/api/insert/" + url.PathEscape(collection)
 	if len(opts) > 0 {
 		params := url.Values{}
 		if opts[0].BypassRipple != nil {
@@ -607,7 +607,7 @@ type FindOptions struct {
 
 // Find finds documents in a collection
 func (c *Client) Find(collection string, query interface{}, opts ...FindOptions) ([]Record, error) {
-	path := "/api/find/" + collection
+	path := "/api/find/" + url.PathEscape(collection)
 
 	// Default: send the caller's query unchanged, so a non-map query (e.g. a
 	// struct relying on msgpack tags — /api/find is MessagePack by default) keeps
@@ -757,7 +757,7 @@ type FindByIDOptions struct {
 // FindByID finds a document by ID. Pass FindByIDOptions to project fields or to
 // read within a transaction (read-your-writes).
 func (c *Client) FindByID(collection, id string, opts ...FindByIDOptions) (Record, error) {
-	path := fmt.Sprintf("/api/find/%s/%s", collection, id)
+	path := fmt.Sprintf("/api/find/%s/%s", url.PathEscape(collection), url.PathEscape(id))
 	if len(opts) > 0 {
 		params := url.Values{}
 		if len(opts[0].SelectFields) > 0 {
@@ -831,7 +831,7 @@ type UpdateOptions struct {
 // Update updates a document
 func (c *Client) Update(collection, id string, record Record, opts ...UpdateOptions) (Record, error) {
 	// Build query parameters
-	path := fmt.Sprintf("/api/update/%s/%s", collection, id)
+	path := fmt.Sprintf("/api/update/%s/%s", url.PathEscape(collection), url.PathEscape(id))
 	if len(opts) > 0 {
 		params := url.Values{}
 		if opts[0].BypassRipple != nil {
@@ -884,7 +884,7 @@ type UpdateWithActionBody struct {
 // Supported actions: increment, decrement, multiply, divide, modulo,
 // push, pop, shift, unshift, remove, append, clear.
 func (c *Client) UpdateWithAction(collection, id, action, field string, value interface{}) (Record, error) {
-	path := fmt.Sprintf("/api/update/%s/%s/action/%s", collection, id, action)
+	path := fmt.Sprintf("/api/update/%s/%s/action/%s", url.PathEscape(collection), url.PathEscape(id), url.PathEscape(action))
 	body := UpdateWithActionBody{Field: field, Value: value}
 	respBody, err := c.makeRequest("PUT", path, body)
 	if err != nil {
@@ -906,7 +906,7 @@ func (c *Client) UpdateWithAction(collection, id, action, field string, value in
 //
 // Each action is a 3-element slice: [action, field, value].
 func (c *Client) UpdateWithActionSequence(collection, id string, actions [][3]interface{}) (Record, error) {
-	path := fmt.Sprintf("/api/update/sequence/%s/%s", collection, id)
+	path := fmt.Sprintf("/api/update/sequence/%s/%s", url.PathEscape(collection), url.PathEscape(id))
 	respBody, err := c.makeRequest("PUT", path, actions)
 	if err != nil {
 		return nil, err
@@ -929,7 +929,7 @@ type DeleteOptions struct {
 // Delete deletes a document
 func (c *Client) Delete(collection, id string, opts ...DeleteOptions) error {
 	// Build query parameters
-	path := fmt.Sprintf("/api/delete/%s/%s", collection, id)
+	path := fmt.Sprintf("/api/delete/%s/%s", url.PathEscape(collection), url.PathEscape(id))
 	if len(opts) > 0 {
 		params := url.Values{}
 		if opts[0].BypassRipple != nil {
@@ -1528,7 +1528,7 @@ func (c *Client) CountDocuments(collection string) (int, error) {
 // RestoreRecord restores a deleted record from trash
 // Records remain in trash for 30 days before permanent deletion
 func (c *Client) RestoreRecord(collection, id string) error {
-	path := fmt.Sprintf("/api/trash/%s/%s", collection, id)
+	path := fmt.Sprintf("/api/trash/%s/%s", url.PathEscape(collection), url.PathEscape(id))
 	_, err := c.makeRequest("POST", path, nil)
 	return err
 }
@@ -1536,7 +1536,7 @@ func (c *Client) RestoreRecord(collection, id string) error {
 // RestoreCollection restores all deleted records in a collection from trash
 // Records remain in trash for 30 days before permanent deletion
 func (c *Client) RestoreCollection(collection string) (int, error) {
-	path := fmt.Sprintf("/api/trash/%s", collection)
+	path := fmt.Sprintf("/api/trash/%s", url.PathEscape(collection))
 	respBody, err := c.makeRequest("POST", path, nil)
 	if err != nil {
 		return 0, err

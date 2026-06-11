@@ -3119,6 +3119,39 @@ func TestFindByIDProjectionCommaJoined(t *testing.T) {
 	}
 }
 
+// TestFindEscapesCollectionPathSegment verifies Find percent-encodes the
+// collection in the path, so reserved characters can't break routing or inject
+// into the URL.
+func TestFindEscapesCollectionPathSegment(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+	client := createTestClient(t, server)
+
+	if _, err := client.Find("odd coll/name", map[string]interface{}{"limit": 1}); err != nil {
+		t.Fatalf("Find failed: %v", err)
+	}
+	if want := "/api/find/odd%20coll%2Fname"; got.escapedPath != want {
+		t.Errorf("Find path = %q, want %q", got.escapedPath, want)
+	}
+}
+
+// TestFindByIDEscapesPathSegments verifies FindByID percent-encodes BOTH the
+// collection and id path segments.
+func TestFindByIDEscapesPathSegments(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+	client := createTestClient(t, server)
+
+	if _, err := client.FindByID("odd coll", "id/with space"); err != nil {
+		t.Fatalf("FindByID failed: %v", err)
+	}
+	if want := "/api/find/odd%20coll/id%2Fwith%20space"; got.escapedPath != want {
+		t.Errorf("FindByID path = %q, want %q", got.escapedPath, want)
+	}
+}
+
 func TestFindByIDNoOptionsHasNoQueryParam(t *testing.T) {
 	var got capturedRequest
 	server := newCapturingServer(t, &got)

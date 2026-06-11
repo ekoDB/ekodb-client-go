@@ -560,10 +560,15 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 		}
 	}
 	extractID(msg)
-	if payloadRaw, ok := msg["payload"]; ok {
-		var payload map[string]json.RawMessage
-		if json.Unmarshal(payloadRaw, &payload) == nil {
-			extractID(payload)
+	// Only fall through to the payload when the top level didn't yield a usable
+	// id — a valid top-level messageId already sets idFieldPresent, so this skips
+	// an avoidable unmarshal (and shortens the lock hold) on the hot path.
+	if messageID == "" {
+		if payloadRaw, ok := msg["payload"]; ok {
+			var payload map[string]json.RawMessage
+			if json.Unmarshal(payloadRaw, &payload) == nil {
+				extractID(payload)
+			}
 		}
 	}
 
