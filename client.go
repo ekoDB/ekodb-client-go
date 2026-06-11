@@ -622,12 +622,20 @@ func (c *Client) Find(collection string, query interface{}, opts ...FindOptions)
 		}
 		body = merged
 	}
-	// transaction_id is a query parameter (the read runs in the transaction's
-	// read-your-writes view), not part of the FindBody.
-	if len(opts) > 0 && opts[0].TransactionId != nil {
+	// transaction_id and bypass_ripple are query parameters — the same way every
+	// other method (Insert/Update/FindByID) carries bypass_ripple — not part of
+	// the FindBody.
+	if len(opts) > 0 {
 		params := url.Values{}
-		params.Add("transaction_id", *opts[0].TransactionId)
-		path += "?" + params.Encode()
+		if opts[0].TransactionId != nil {
+			params.Add("transaction_id", *opts[0].TransactionId)
+		}
+		if opts[0].BypassRipple != nil {
+			params.Add("bypass_ripple", fmt.Sprintf("%t", *opts[0].BypassRipple))
+		}
+		if encoded := params.Encode(); encoded != "" {
+			path += "?" + encoded
+		}
 	}
 
 	respBody, err := c.makeRequest("POST", path, body)
@@ -652,8 +660,10 @@ func findOptionsHaveBodyFields(opts []FindOptions) bool {
 		return false
 	}
 	o := opts[0]
+	// BypassRipple is intentionally excluded — like TransactionId, it is sent as a
+	// query parameter by Find, not merged into the FindBody.
 	return o.Filter != nil || o.Sort != nil || o.Limit != nil || o.Skip != nil ||
-		o.Join != nil || o.BypassCache != nil || o.BypassRipple != nil ||
+		o.Join != nil || o.BypassCache != nil ||
 		len(o.SelectFields) > 0 || len(o.ExcludeFields) > 0
 }
 
@@ -690,9 +700,7 @@ func (c *Client) mergeFindOptions(path string, query interface{}, opts []FindOpt
 	if o.BypassCache != nil {
 		body["bypass_cache"] = *o.BypassCache
 	}
-	if o.BypassRipple != nil {
-		body["bypass_ripple"] = *o.BypassRipple
-	}
+	// BypassRipple is not merged into the body — Find sends it as a query param.
 	if len(o.SelectFields) > 0 {
 		body["select_fields"] = o.SelectFields
 	}

@@ -2851,8 +2851,12 @@ func TestFindHonorsAllFindOptions(t *testing.T) {
 	if body["bypass_cache"] != true {
 		t.Errorf("body bypass_cache = %v, want true", body["bypass_cache"])
 	}
-	if body["bypass_ripple"] != false {
-		t.Errorf("body bypass_ripple = %v, want false", body["bypass_ripple"])
+	// bypass_ripple is a query param now (like every other method), not the body.
+	if _, present := body["bypass_ripple"]; present {
+		t.Error("bypass_ripple must be a query param, not in the FindBody")
+	}
+	if v := got.queryValues.Get("bypass_ripple"); v != "false" {
+		t.Errorf("bypass_ripple query param = %q, want \"false\"", v)
 	}
 	for _, key := range []string{"filter", "sort", "join"} {
 		if _, ok := body[key]; !ok {
