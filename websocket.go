@@ -206,12 +206,14 @@ func (ws *WebSocketClient) connect() error {
 
 	// DialContext(ws.ctx) so Close()/cancel() can abort an in-flight dial
 	// (DefaultDialer.HandshakeTimeout still bounds a hung handshake). This keeps
-	// a reconnect-loop dial from blocking a clean shutdown. Fall back to a
-	// background context if ws.ctx is unset (e.g. a manually constructed client) —
-	// DialContext panics on a nil context.
+	// a reconnect-loop dial from blocking a clean shutdown. If ws.ctx is unset
+	// (a manually constructed client), initialize a cancelable context now —
+	// DialContext panics on a nil context, and ws.ctx/ws.cancel are also used by
+	// Close(), reconnect(), and sendRequest(), which would otherwise panic.
 	dialCtx := ws.ctx
 	if dialCtx == nil {
-		dialCtx = context.Background()
+		dialCtx, ws.cancel = context.WithCancel(context.Background())
+		ws.ctx = dialCtx
 	}
 	conn, _, err := websocket.DefaultDialer.DialContext(dialCtx, u.String(), header)
 	if err != nil {

@@ -1936,9 +1936,11 @@ func TestWebSocketReconnectExitsWhenSubscriptionsRemovedDuringBackoff(t *testing
 	}
 }
 
-// TestWebSocketConnectFallsBackToBackgroundContext verifies connect() does not
-// panic when ws.ctx is nil (e.g. a manually constructed client). DialContext
-// panics on a nil context, so connect() must fall back to context.Background().
+// TestWebSocketConnectFallsBackToBackgroundContext verifies connect() handles a
+// nil ws.ctx (e.g. a manually constructed client): DialContext panics on a nil
+// context, so connect() must initialize a cancelable context. It must also leave
+// the client in a consistent state — Close() (which calls ws.cancel()) must not
+// panic afterward.
 func TestWebSocketConnectFallsBackToBackgroundContext(t *testing.T) {
 	rts := setupReconnectTestServer(t)
 	defer rts.server.Close()
@@ -1950,10 +1952,15 @@ func TestWebSocketConnectFallsBackToBackgroundContext(t *testing.T) {
 		tokenProvider: func() string { return "test-token" },
 	}
 
-	// Must not panic: DialContext panics on a nil context, so connect() has to
-	// fall back to context.Background().
+	// Must not panic on the nil context.
 	if err := ws.connect(); err != nil {
-		t.Fatalf("connect() with nil ctx should succeed via background fallback: %v", err)
+		t.Fatalf("connect() with nil ctx should succeed: %v", err)
+	}
+
+	// connect() must have initialized ws.ctx and ws.cancel so later operations
+	// don't panic on nil.
+	if ws.ctx == nil || ws.cancel == nil {
+		t.Fatal("connect() must initialize ws.ctx and ws.cancel when they were nil")
 	}
 
 	// The dial reached the server and connect() stored a usable conn.
@@ -1964,13 +1971,10 @@ func TestWebSocketConnectFallsBackToBackgroundContext(t *testing.T) {
 		t.Fatal("dial did not reach the server")
 	}
 
-	// Tear down directly — connect() does not start a readLoop, so there is no
-	// reconnect machinery to stop.
-	ws.writeMu.Lock()
-	if ws.conn != nil {
-		_ = ws.conn.Close()
+	// Close() calls ws.cancel(); it must not panic now that connect() set it.
+	if err := ws.Close(); err != nil {
+		t.Fatalf("Close() after nil-ctx connect should not error: %v", err)
 	}
-	ws.writeMu.Unlock()
 }
 
 // TestWebSocketReconnectClosesSocketWhenSubsRemovedDuringDial covers the race the

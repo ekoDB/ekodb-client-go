@@ -2872,6 +2872,34 @@ func TestFindHonorsAllFindOptions(t *testing.T) {
 	}
 }
 
+// TestFindHoistsBypassRippleFromQueryObject verifies that bypass_ripple carried
+// on the query object (as QueryBuilder.BypassRipple() builds) is hoisted out of
+// the body and sent as a query param — never in the FindBody.
+func TestFindHoistsBypassRippleFromQueryObject(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+	client := createTestClient(t, server)
+
+	if _, err := client.Find("users", map[string]interface{}{"limit": 5, "bypass_ripple": true}); err != nil {
+		t.Fatalf("Find failed: %v", err)
+	}
+
+	if v := got.queryValues.Get("bypass_ripple"); v != "true" {
+		t.Errorf("bypass_ripple query param = %q, want \"true\"", v)
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(got.body, &body); err != nil {
+		t.Fatalf("body not JSON: %v (body=%s)", err, got.body)
+	}
+	if _, present := body["bypass_ripple"]; present {
+		t.Error("bypass_ripple must be hoisted out of the FindBody")
+	}
+	if body["limit"] != float64(5) {
+		t.Errorf("body limit = %v, want 5", body["limit"])
+	}
+}
+
 func assertStringSlice(t *testing.T, body map[string]interface{}, key string, want []string) {
 	t.Helper()
 	raw, ok := body[key].([]interface{})

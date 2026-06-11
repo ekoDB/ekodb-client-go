@@ -582,12 +582,13 @@ func (c *Client) Insert(collection string, record Record, opts ...InsertOptions)
 	return result, nil
 }
 
-// FindOptions carries optional shaping for Find. Every field is applied to the
-// request. Filter, Sort, Limit, Skip, Join, BypassCache, BypassRipple,
-// SelectFields, and ExcludeFields are merged into the request body (the
-// server's FindBody); when one is set here it overrides the same field carried
-// in the query argument. TransactionId is sent as a query parameter instead,
-// since the read runs in the transaction's read-your-writes view.
+// FindOptions carries optional shaping for Find. Filter, Sort, Limit, Skip,
+// Join, BypassCache, SelectFields, and ExcludeFields are merged into the request
+// body (the server's FindBody); when one is set here it overrides the same field
+// carried in the query argument. TransactionId and BypassRipple are sent as
+// query parameters instead, not in the FindBody — TransactionId because the read
+// runs in the transaction's read-your-writes view, and BypassRipple to match how
+// every other method (Insert/Update/FindByID) carries it.
 type FindOptions struct {
 	Filter        interface{}
 	Sort          interface{}
@@ -622,20 +623,42 @@ func (c *Client) Find(collection string, query interface{}, opts ...FindOptions)
 		}
 		body = merged
 	}
+
 	// transaction_id and bypass_ripple are query parameters — the same way every
 	// other method (Insert/Update/FindByID) carries bypass_ripple — not part of
-	// the FindBody.
+	// the FindBody. Hoist any bypass_ripple carried on the query object (e.g. from
+	// QueryBuilder.BypassRipple()) out of the body so it is ALWAYS sent as a query
+	// param; an explicit FindOptions.BypassRipple wins.
+	var bypassRipple *bool
 	if len(opts) > 0 {
-		params := url.Values{}
-		if opts[0].TransactionId != nil {
-			params.Add("transaction_id", *opts[0].TransactionId)
+		bypassRipple = opts[0].BypassRipple
+	}
+	if m, ok := body.(map[string]interface{}); ok {
+		if v, present := m["bypass_ripple"]; present {
+			stripped := make(map[string]interface{}, len(m))
+			for k, val := range m {
+				if k != "bypass_ripple" {
+					stripped[k] = val
+				}
+			}
+			body = stripped
+			if bypassRipple == nil {
+				if b, ok := v.(bool); ok {
+					bypassRipple = &b
+				}
+			}
 		}
-		if opts[0].BypassRipple != nil {
-			params.Add("bypass_ripple", fmt.Sprintf("%t", *opts[0].BypassRipple))
-		}
-		if encoded := params.Encode(); encoded != "" {
-			path += "?" + encoded
-		}
+	}
+
+	params := url.Values{}
+	if len(opts) > 0 && opts[0].TransactionId != nil {
+		params.Add("transaction_id", *opts[0].TransactionId)
+	}
+	if bypassRipple != nil {
+		params.Add("bypass_ripple", fmt.Sprintf("%t", *bypassRipple))
+	}
+	if encoded := params.Encode(); encoded != "" {
+		path += "?" + encoded
 	}
 
 	respBody, err := c.makeRequest("POST", path, body)
@@ -670,9 +693,10 @@ func findOptionsHaveBodyFields(opts []FindOptions) bool {
 // mergeFindOptions builds the POST /api/find request body (the server's
 // FindBody) from the caller's query object overlaid with any explicitly-set
 // FindOptions fields. A field set on FindOptions overrides the same field
-// carried in query. TransactionId is intentionally excluded here — it is a query
-// parameter, applied by the caller. path selects the codec used to materialize a
-// non-map query into a map, so it matches the request's wire format.
+// carried in query. TransactionId and BypassRipple are intentionally excluded
+// here — they are query parameters, applied by the caller. path selects the codec
+// used to materialize a non-map query into a map, so it matches the request's
+// wire format.
 func (c *Client) mergeFindOptions(path string, query interface{}, opts []FindOptions) (map[string]interface{}, error) {
 	body, err := c.queryToBodyMap(path, query)
 	if err != nil {
