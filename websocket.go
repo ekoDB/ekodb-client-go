@@ -227,11 +227,12 @@ func (ws *WebSocketClient) connect() error {
 	if dialCtx == nil {
 		dialCtx = context.Background()
 	}
-	// Derive a cancelable context whenever cancel is unset — this covers BOTH a
-	// nil ctx and a manually constructed client that set ctx without cancel.
-	// Close(), reconnect(), and sendRequest() call ws.cancel() unconditionally,
-	// so a nil cancel would panic on teardown.
-	if ws.cancel == nil {
+	// Derive a cancelable context whenever EITHER ctx or cancel is unset — this
+	// covers every manual-construction combination: nil ctx, ctx-without-cancel,
+	// and cancel-without-ctx. Close()/reconnect() call ws.cancel(), and
+	// sendRequest()/the subscribe loops deref ws.ctx (context.WithTimeout,
+	// ws.ctx.Done()), so a nil in either field would panic.
+	if ws.ctx == nil || ws.cancel == nil {
 		dialCtx, ws.cancel = context.WithCancel(dialCtx)
 		ws.ctx = dialCtx
 	}

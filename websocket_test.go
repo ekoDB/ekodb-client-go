@@ -2051,6 +2051,42 @@ func TestWebSocketConnectInitsCancelWhenCtxSetWithoutCancel(t *testing.T) {
 	}
 }
 
+// TestWebSocketConnectInitsCtxWhenCancelSetWithoutCtx covers the symmetric gap:
+// a manually constructed client that set cancel but NOT ctx. connect() must
+// derive a non-nil ctx, or sendRequest()/the subscribe loops would panic
+// dereferencing ws.ctx (context.WithTimeout, ws.ctx.Done()).
+func TestWebSocketConnectInitsCtxWhenCancelSetWithoutCtx(t *testing.T) {
+	rts := setupReconnectTestServer(t)
+	defer rts.server.Close()
+
+	// cancel set, ctx deliberately left nil.
+	ws := &WebSocketClient{
+		wsURL:         rts.wsURL,
+		tokenProvider: func() string { return "test-token" },
+		cancel:        func() {},
+	}
+
+	if err := ws.connect(); err != nil {
+		t.Fatalf("connect() with cancel-but-no-ctx should succeed: %v", err)
+	}
+
+	// connect() must have derived a non-nil ctx even though cancel was set.
+	if ws.ctx == nil {
+		t.Fatal("connect() must initialize ws.ctx when cancel was set but ctx was nil")
+	}
+
+	select {
+	case c := <-rts.connCh:
+		_ = c.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("dial did not reach the server")
+	}
+
+	if err := ws.Close(); err != nil {
+		t.Fatalf("Close() must not error/panic when ctx was derived: %v", err)
+	}
+}
+
 // TestWebSocketReconnectClosesSocketWhenSubsRemovedDuringDial covers the race the
 // pre-dial check cannot: the last subscription is removed WHILE connect() is
 // dialing (after the pre-dial check already passed). The just-opened socket then
