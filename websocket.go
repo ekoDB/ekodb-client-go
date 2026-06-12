@@ -272,6 +272,15 @@ func (ws *WebSocketClient) connect() error {
 const (
 	reconnectBaseDelay = 200 * time.Millisecond
 	reconnectMaxDelay  = 5 * time.Second
+
+	// welcomeHandshakeTimeout bounds how long negotiateFormat waits for the
+	// Welcome reply. The read returns as soon as the Welcome arrives, so this
+	// only caps the wait when NO Welcome comes (a silent/old server) — keeping
+	// it modest avoids adding that stall to such (re)connects. 2s comfortably
+	// exceeds the handshake round-trip even on high-latency/cross-region links
+	// (the server replies to the first frame immediately), so a real msgpack
+	// Welcome is never missed.
+	welcomeHandshakeTimeout = 2 * time.Second
 )
 
 // reconnect runs the automatic reconnect loop after an unexpected disconnect.
@@ -459,7 +468,7 @@ func (ws *WebSocketClient) negotiateFormat(conn *websocket.Conn) {
 	}
 	// Bound the Welcome read so a silent/old server can't stall connect, then
 	// clear the deadline so readLoop's blocking reads are unaffected.
-	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(welcomeHandshakeTimeout))
 	_, data, err := conn.ReadMessage()
 	_ = conn.SetReadDeadline(time.Time{})
 	if err != nil {
