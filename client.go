@@ -313,6 +313,19 @@ func (c *Client) ClearTokenCache() {
 	c.tokenExpiry = 0
 }
 
+// RefreshToken forces a fresh authentication token to be fetched immediately
+// (bypassing any cached token) and returns it. Parity with the other clients'
+// refresh_token; unlike ClearTokenCache, which defers the fetch to the next
+// request, this fetches eagerly.
+func (c *Client) RefreshToken() (string, error) {
+	if err := c.refreshToken(); err != nil {
+		return "", err
+	}
+	c.tokenMu.RLock()
+	defer c.tokenMu.RUnlock()
+	return c.token, nil
+}
+
 // retryBackoffBase returns the deterministic, capped exponential backoff for a
 // (0-indexed) retry attempt: 200ms, 400ms, 800ms, ... clamped to 5s. It never
 // overflows regardless of attempt count.
