@@ -133,10 +133,8 @@ func (c *Client) WebSocket(wsURL string) (*WebSocketClient, error) {
 		ws.schemaCache = c.schemaCache
 	}
 
-	// Negotiate msgpack before the dispatcher starts so the Welcome is consumed
-	// by the handshake, not the readLoop.
-	ws.negotiateFormat(ws.conn)
-
+	// Format negotiation already happened inside connect() (before ws.conn was
+	// published), so the dispatcher can start straight away.
 	ws.dispatcherDone = make(chan struct{})
 	go ws.readLoop(ws.conn)
 
@@ -240,6 +238,17 @@ func (ws *WebSocketClient) connect() error {
 	if err != nil {
 		return fmt.Errorf("websocket connection failed: %w", err)
 	}
+
+	// Negotiate the wire format on the freshly-dialed conn BEFORE it is published
+	// to ws.conn, so the Hello is guaranteed to be the very first frame. Once
+	// ws.conn is visible, another goroutine (a concurrent Find/Subscribe/etc.
+	// during a reconnect) could acquire writeMu and send an application frame that
+	// races ahead of the handshake — and its response could then be swallowed by
+	// the Welcome read. Doing this here, before the store, closes that window for
+	// both the initial connect and every reconnect. No lock is held during the
+	// handshake, so a concurrent Close() is still handled by the closing check
+	// below (the conn is simply discarded).
+	ws.negotiateFormat(conn)
 
 	// A dial that completes in the instant before Close() runs still needs this
 	// guard: don't store a connection Close() has already moved past, or it
@@ -354,15 +363,11 @@ func (ws *WebSocketClient) reconnect() {
 			return
 		}
 
-		// Re-negotiate FIRST, before any real frame: the server may have
-		// changed, and the Hello/Welcome must be exchanged before resubscribeAll
-		// sends a Subscribe (otherwise that frame races ahead of the handshake,
-		// and any msgpack upgrade would miss the resubscribe). negotiateFormat
-		// consumes the Welcome before the dispatcher starts.
-		ws.negotiateFormat(conn)
-
-		// Connected and negotiated. Re-send every tracked subscription so the
-		// server resumes pushing notifications onto the still-open channels.
+		// Format negotiation already happened inside connect() on the freshly
+		// dialed conn, before ws.conn was published — so the Hello was the first
+		// frame and the negotiated format is set before any resubscribe write.
+		// Re-send every tracked subscription so the server resumes pushing
+		// notifications onto the still-open channels.
 		ws.resubscribeAll()
 
 		// Install a fresh dispatcherDone for the new readLoop and resume.

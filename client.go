@@ -639,9 +639,9 @@ func (c *Client) Find(collection string, query interface{}, opts ...FindOptions)
 
 	// transaction_id and bypass_ripple are query parameters — the same way every
 	// other method (Insert/Update/FindByID) carries bypass_ripple — not part of
-	// the FindBody. Hoist any bypass_ripple carried on the query object (e.g. from
-	// QueryBuilder.BypassRipple()) out of the body so it is ALWAYS sent as a query
-	// param; an explicit FindOptions.BypassRipple wins.
+	// the FindBody. When the query is a map (e.g. QueryBuilder.BypassRipple()
+	// output), hoist any bypass_ripple it carries out of the body so it is sent
+	// as a query param instead; an explicit FindOptions.BypassRipple wins.
 	var bypassRipple *bool
 	if len(opts) > 0 {
 		bypassRipple = opts[0].BypassRipple
