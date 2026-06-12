@@ -2014,6 +2014,43 @@ func TestWebSocketConnectFallsBackToBackgroundContext(t *testing.T) {
 	}
 }
 
+// TestWebSocketConnectInitsCancelWhenCtxSetWithoutCancel covers the case the
+// nil-ctx fallback missed: a manually constructed client that set ctx but NOT
+// cancel. connect() must still derive a cancelable context so Close() (which
+// calls ws.cancel() unconditionally) doesn't panic.
+func TestWebSocketConnectInitsCancelWhenCtxSetWithoutCancel(t *testing.T) {
+	rts := setupReconnectTestServer(t)
+	defer rts.server.Close()
+
+	// ctx set, cancel deliberately left nil.
+	ws := &WebSocketClient{
+		wsURL:         rts.wsURL,
+		tokenProvider: func() string { return "test-token" },
+		ctx:           context.Background(),
+	}
+
+	if err := ws.connect(); err != nil {
+		t.Fatalf("connect() with ctx-but-no-cancel should succeed: %v", err)
+	}
+
+	// connect() must have derived a cancel even though ctx was already set.
+	if ws.cancel == nil {
+		t.Fatal("connect() must initialize ws.cancel when ctx was set but cancel was nil")
+	}
+
+	select {
+	case c := <-rts.connCh:
+		_ = c.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("dial did not reach the server")
+	}
+
+	// Close() calls ws.cancel() unconditionally; must not panic now.
+	if err := ws.Close(); err != nil {
+		t.Fatalf("Close() must not error/panic when cancel was derived: %v", err)
+	}
+}
+
 // TestWebSocketReconnectClosesSocketWhenSubsRemovedDuringDial covers the race the
 // pre-dial check cannot: the last subscription is removed WHILE connect() is
 // dialing (after the pre-dial check already passed). The just-opened socket then

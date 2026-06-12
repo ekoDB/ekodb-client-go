@@ -225,7 +225,14 @@ func (ws *WebSocketClient) connect() error {
 	// Close(), reconnect(), and sendRequest(), which would otherwise panic.
 	dialCtx := ws.ctx
 	if dialCtx == nil {
-		dialCtx, ws.cancel = context.WithCancel(context.Background())
+		dialCtx = context.Background()
+	}
+	// Derive a cancelable context whenever cancel is unset — this covers BOTH a
+	// nil ctx and a manually constructed client that set ctx without cancel.
+	// Close(), reconnect(), and sendRequest() call ws.cancel() unconditionally,
+	// so a nil cancel would panic on teardown.
+	if ws.cancel == nil {
+		dialCtx, ws.cancel = context.WithCancel(dialCtx)
 		ws.ctx = dialCtx
 	}
 	conn, _, err := websocket.DefaultDialer.DialContext(dialCtx, u.String(), header)
