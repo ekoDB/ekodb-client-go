@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 // MutationNotification represents a subscription event from collection changes.
@@ -84,6 +85,14 @@ type WebSocketClient struct {
 	messageCounter atomic.Int64
 	schemaCache    *SchemaCache // optional, for auto-invalidation on SchemaChanged
 
+	// binary is set per-connection by negotiateFormat() during connect: true
+	// once the server has Welcomed msgpack, so writes go out as binary msgpack
+	// frames and incoming binary frames are decoded as msgpack. Defaults false
+	// (JSON text), and an older server that never Welcomes leaves it false, so
+	// the connection stays fully back-compatible. Read/written across the
+	// dispatcher and writer goroutines, hence atomic.
+	binary atomic.Bool
+
 	// closing is set by Close() so the reconnect loop exits cleanly and an
 	// intentional shutdown is never mistaken for a transient drop.
 	closing bool
@@ -123,6 +132,10 @@ func (c *Client) WebSocket(wsURL string) (*WebSocketClient, error) {
 	if c.schemaCache != nil {
 		ws.schemaCache = c.schemaCache
 	}
+
+	// Negotiate msgpack before the dispatcher starts so the Welcome is consumed
+	// by the handshake, not the readLoop.
+	ws.negotiateFormat(ws.conn)
 
 	ws.dispatcherDone = make(chan struct{})
 	go ws.readLoop(ws.conn)
@@ -322,19 +335,6 @@ func (ws *WebSocketClient) reconnect() {
 			return
 		}
 
-		// Connected. Re-send every tracked subscription so the server resumes
-		// pushing notifications onto the still-open caller channels.
-		ws.resubscribeAll()
-
-		// Install a fresh dispatcherDone for the new readLoop and resume.
-		ws.mu.Lock()
-		if ws.closing {
-			ws.mu.Unlock()
-			return
-		}
-		ws.dispatcherDone = make(chan struct{})
-		ws.mu.Unlock()
-
 		// ws.conn is written by connect(), cleared by Close(), and read by
 		// writeJSON() all under writeMu — read it under the same lock here. A
 		// concurrent Close() may have nil'd it, in which case there is nothing
@@ -345,6 +345,26 @@ func (ws *WebSocketClient) reconnect() {
 		if conn == nil {
 			return
 		}
+
+		// Re-negotiate FIRST, before any real frame: the server may have
+		// changed, and the Hello/Welcome must be exchanged before resubscribeAll
+		// sends a Subscribe (otherwise that frame races ahead of the handshake,
+		// and any msgpack upgrade would miss the resubscribe). negotiateFormat
+		// consumes the Welcome before the dispatcher starts.
+		ws.negotiateFormat(conn)
+
+		// Connected and negotiated. Re-send every tracked subscription so the
+		// server resumes pushing notifications onto the still-open channels.
+		ws.resubscribeAll()
+
+		// Install a fresh dispatcherDone for the new readLoop and resume.
+		ws.mu.Lock()
+		if ws.closing {
+			ws.mu.Unlock()
+			return
+		}
+		ws.dispatcherDone = make(chan struct{})
+		ws.mu.Unlock()
 
 		go ws.readLoop(conn)
 		return
@@ -396,7 +416,99 @@ func (ws *WebSocketClient) writeJSON(v interface{}) error {
 	if ws.conn == nil {
 		return fmt.Errorf("websocket connection closed")
 	}
+	if ws.binary.Load() {
+		data, err := msgpack.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("websocket msgpack encode failed: %w", err)
+		}
+		return ws.conn.WriteMessage(websocket.BinaryMessage, data)
+	}
 	return ws.conn.WriteJSON(v)
+}
+
+// negotiateFormat runs the additive capability handshake on a freshly-dialed
+// conn, before readLoop starts so the Welcome (or an older server's Error) is
+// consumed here and never leaks into the response stream. It offers msgpack;
+// if the server Welcomes msgpack this connection flips to binary frames,
+// otherwise it stays on JSON text. Fully back-compatible: an older server that
+// doesn't understand Hello replies with an Error (not a Welcome), or stays
+// silent until the deadline, and the connection remains JSON. The handshake is
+// best-effort — any failure leaves ws.binary false (JSON), never an error,
+// because JSON always works.
+func (ws *WebSocketClient) negotiateFormat(conn *websocket.Conn) {
+	ws.binary.Store(false)
+	hello := []byte(`{"type":"Hello","payload":{"formats":["msgpack","json"]}}`)
+	ws.writeMu.Lock()
+	werr := conn.WriteMessage(websocket.TextMessage, hello)
+	ws.writeMu.Unlock()
+	if werr != nil {
+		return
+	}
+	// Bound the Welcome read so a silent/old server can't stall connect, then
+	// clear the deadline so readLoop's blocking reads are unaffected.
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_, data, err := conn.ReadMessage()
+	_ = conn.SetReadDeadline(time.Time{})
+	if err != nil {
+		return
+	}
+	var welcome struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Format string `json:"format"`
+		} `json:"payload"`
+	}
+	if json.Unmarshal(data, &welcome) == nil &&
+		welcome.Type == "Welcome" && welcome.Payload.Format == "msgpack" {
+		ws.binary.Store(true)
+	}
+}
+
+// msgpackToJSON transcodes one binary (msgpack) WS frame into JSON so the
+// existing JSON-based dispatch (map[string]json.RawMessage + routeMessage)
+// processes it unchanged. The transcode is value-identical to a JSON frame:
+// any []byte (a msgpack bin, e.g. a Binary field) is rewritten as a number
+// array, matching the exact wire shape the server uses for binary fields over
+// JSON, so decoded data is the same regardless of negotiated transport.
+func msgpackToJSON(data []byte) ([]byte, error) {
+	var v interface{}
+	if err := msgpack.Unmarshal(data, &v); err != nil {
+		return nil, err
+	}
+	return json.Marshal(normalizeForJSON(v))
+}
+
+// normalizeForJSON makes a msgpack-decoded value json.Marshal-safe and
+// wire-identical to the JSON transport: []byte becomes a number array (not
+// base64), and any non-string map keys are coerced to strings (JSON object
+// keys must be strings). Recurses through maps and slices.
+func normalizeForJSON(v interface{}) interface{} {
+	switch t := v.(type) {
+	case []byte:
+		nums := make([]interface{}, len(t))
+		for i, b := range t {
+			nums[i] = int(b)
+		}
+		return nums
+	case map[string]interface{}:
+		for k, val := range t {
+			t[k] = normalizeForJSON(val)
+		}
+		return t
+	case map[interface{}]interface{}:
+		out := make(map[string]interface{}, len(t))
+		for k, val := range t {
+			out[fmt.Sprintf("%v", k)] = normalizeForJSON(val)
+		}
+		return out
+	case []interface{}:
+		for i, val := range t {
+			t[i] = normalizeForJSON(val)
+		}
+		return t
+	default:
+		return v
+	}
 }
 
 // readLoop is the dispatcher goroutine that routes incoming messages.
@@ -410,7 +522,7 @@ func (ws *WebSocketClient) readLoop(conn *websocket.Conn) {
 	ws.mu.Unlock()
 
 	for {
-		_, data, err := conn.ReadMessage()
+		messageType, data, err := conn.ReadMessage()
 		if err != nil {
 			// Connection dropped. Fail in-flight request/chat callers so they
 			// don't hang, but KEEP subscription channels alive — a transient
@@ -489,6 +601,18 @@ func (ws *WebSocketClient) readLoop(conn *websocket.Conn) {
 			close(done)
 			go ws.reconnect()
 			return
+		}
+
+		// A binary frame is msgpack: transcode it to JSON so the dispatch below
+		// (and routeMessage's re-parses) run unchanged and value-identically to
+		// the text transport. A non-transcodable frame is dropped, same as a
+		// malformed JSON frame below.
+		if messageType == websocket.BinaryMessage {
+			jsonData, terr := msgpackToJSON(data)
+			if terr != nil {
+				continue
+			}
+			data = jsonData
 		}
 
 		var msg map[string]json.RawMessage

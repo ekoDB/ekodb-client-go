@@ -13,7 +13,37 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/vmihailenco/msgpack/v5"
 )
+
+// performServerHandshake mirrors the real server's additive negotiation: it
+// consumes the client's Hello and replies with a Welcome offering the given
+// format ("json" or "msgpack") so the test client proceeds without stalling on
+// its Welcome read. Tolerant by design — if the first frame can't be read (the
+// client closed before handshaking, e.g. the closing-leak test) or isn't a
+// Hello, it returns silently so the handler can still hand off the conn.
+func performServerHandshake(t *testing.T, conn *websocket.Conn, format string) {
+	t.Helper()
+	// Bound the read: a client that dials without handshaking (e.g. a direct
+	// connect() unit test) must not hang the handler forever. Clear the deadline
+	// after so the test's own reads on this conn are unaffected.
+	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+	mt, data, err := conn.ReadMessage()
+	_ = conn.SetReadDeadline(time.Time{})
+	if err != nil {
+		return
+	}
+	var hello map[string]interface{}
+	if mt == websocket.TextMessage && json.Unmarshal(data, &hello) == nil && hello["type"] == "Hello" {
+		// t.Errorf (not Fatalf) is goroutine-safe; the handler runs off-test.
+		if werr := conn.WriteJSON(map[string]interface{}{
+			"type":    "Welcome",
+			"payload": map[string]interface{}{"format": format},
+		}); werr != nil {
+			t.Errorf("handshake Welcome write failed: %v", werr)
+		}
+	}
+}
 
 // Test helper: write JSON to server conn, fail test on error
 func mustWriteJSON(t *testing.T, conn *websocket.Conn, v interface{}) {
@@ -38,6 +68,10 @@ func setupTestWSServer(t *testing.T) (string, chan *websocket.Conn, *httptest.Se
 			t.Errorf("upgrade failed: %v", err)
 			return
 		}
+		// Mirror the real server: answer the client's Hello so connect() doesn't
+		// stall on its Welcome read. "json" keeps these tests on the text
+		// transport they assert against.
+		performServerHandshake(t, conn, "json")
 		connCh <- conn
 	}))
 
@@ -1494,6 +1528,9 @@ func setupReconnectTestServer(t *testing.T) *reconnectTestServer {
 			t.Errorf("upgrade failed: %v", err)
 			return
 		}
+		// Every (re)dial begins with the client's Hello; answer it (JSON) so the
+		// reconnect path negotiates and proceeds, exactly like the real server.
+		performServerHandshake(t, conn, "json")
 		rts.connCh <- conn
 	}))
 	rts.wsURL = "ws" + strings.TrimPrefix(rts.server.URL, "http") + "/api/ws"
@@ -2001,6 +2038,7 @@ func TestWebSocketReconnectClosesSocketWhenSubsRemovedDuringDial(t *testing.T) {
 			t.Errorf("upgrade failed: %v", err)
 			return
 		}
+		performServerHandshake(t, conn, "json")
 		connCh <- conn
 	}))
 	defer server.Close()
@@ -2203,5 +2241,196 @@ func TestRouteRequestResponseMatchedID(t *testing.T) {
 	case <-other:
 		t.Fatal("response leaked to the wrong pending request")
 	default:
+	}
+}
+
+// TestWebSocketBinaryNegotiation drives the full binary path end-to-end: the
+// server Welcomes msgpack, the client must then send its request as a binary
+// msgpack frame, and a binary msgpack response must decode back into records
+// transparently. This is the Go mirror of the server's
+// test_ws_binary_msgpack_round_trip.
+func TestWebSocketBinaryNegotiation(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	connCh := make(chan *websocket.Conn, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade failed: %v", err)
+			return
+		}
+		performServerHandshake(t, conn, "msgpack")
+		connCh <- conn
+	}))
+	defer server.Close()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/ws"
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	// After a Welcome{msgpack}, the connection must be in binary mode.
+	if !ws.binary.Load() {
+		t.Fatal("client did not negotiate binary (msgpack) mode after Welcome")
+	}
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	resultCh := make(chan []Record, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		records, err := ws.FindAll("users")
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- records
+	}()
+
+	// The request must arrive as a binary msgpack frame.
+	mt, data, err := serverConn.ReadMessage()
+	if err != nil {
+		t.Fatalf("failed to read request: %v", err)
+	}
+	if mt != websocket.BinaryMessage {
+		t.Fatalf("expected a binary request frame, got message type %d", mt)
+	}
+	var req map[string]interface{}
+	if err := msgpack.Unmarshal(data, &req); err != nil {
+		t.Fatalf("request frame is not valid msgpack: %v", err)
+	}
+	if req["type"] != "FindAll" {
+		t.Fatalf("expected FindAll, got %v", req["type"])
+	}
+
+	// Respond with a binary msgpack Success frame.
+	resp := map[string]interface{}{
+		"type": "Success",
+		"payload": map[string]interface{}{
+			"message_id": req["messageId"],
+			"data": []map[string]interface{}{
+				{"id": "1", "name": "Alice"},
+			},
+		},
+	}
+	respBytes, err := msgpack.Marshal(resp)
+	if err != nil {
+		t.Fatalf("failed to marshal msgpack response: %v", err)
+	}
+	if err := serverConn.WriteMessage(websocket.BinaryMessage, respBytes); err != nil {
+		t.Fatalf("failed to write msgpack response: %v", err)
+	}
+
+	select {
+	case records := <-resultCh:
+		if len(records) != 1 {
+			t.Fatalf("expected 1 record, got %d", len(records))
+		}
+		if records[0]["name"] != "Alice" {
+			t.Fatalf("expected name Alice, got %v", records[0]["name"])
+		}
+	case err := <-errCh:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for binary FindAll result")
+	}
+}
+
+// TestWebSocketJSONStaysJSONWhenServerDeclinesMsgpack proves back-compat: a
+// server that Welcomes only "json" (or, like an older server, never Welcomes
+// at all and the read times out / errors) leaves the connection on JSON text.
+func TestWebSocketJSONStaysJSONWhenServerDeclinesMsgpack(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t) // Welcomes "json"
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	if ws.binary.Load() {
+		t.Fatal("client must stay on JSON when the server does not Welcome msgpack")
+	}
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := ws.FindAll("users")
+		errCh <- err
+	}()
+
+	// The request must arrive as a JSON text frame, not binary.
+	mt, _, err := serverConn.ReadMessage()
+	if err != nil {
+		t.Fatalf("failed to read request: %v", err)
+	}
+	if mt != websocket.TextMessage {
+		t.Fatalf("expected a JSON text request frame, got message type %d", mt)
+	}
+	// Drain the in-flight call so the goroutine doesn't leak.
+	_ = serverConn.Close()
+	select {
+	case <-errCh:
+	case <-time.After(2 * time.Second):
+	}
+}
+
+// TestMsgpackToJSONTranscode verifies the binary->JSON transcode is
+// value-identical to the JSON wire shape, including the key edge case: a
+// msgpack bin (a Binary field) must become a number array, not base64, so
+// decoded data is the same regardless of negotiated transport.
+func TestMsgpackToJSONTranscode(t *testing.T) {
+	source := map[string]interface{}{
+		"type": "Success",
+		"payload": map[string]interface{}{
+			"message_id": "m1",
+			"data": map[string]interface{}{
+				"name":   "Alice",
+				"count":  42,
+				"active": true,
+				"photo":  []byte{255, 216, 255},
+				"tags":   []interface{}{"x", "y"},
+			},
+		},
+	}
+	packed, err := msgpack.Marshal(source)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	jsonBytes, err := msgpackToJSON(packed)
+	if err != nil {
+		t.Fatalf("transcode: %v", err)
+	}
+
+	var got map[string]interface{}
+	if err := json.Unmarshal(jsonBytes, &got); err != nil {
+		t.Fatalf("transcoded output is not valid JSON: %v", err)
+	}
+	if got["type"] != "Success" {
+		t.Fatalf("type lost in transcode: %v", got["type"])
+	}
+	payload := got["payload"].(map[string]interface{})
+	data := payload["data"].(map[string]interface{})
+	if data["name"] != "Alice" {
+		t.Fatalf("string field lost: %v", data["name"])
+	}
+	if data["active"] != true {
+		t.Fatalf("bool field lost: %v", data["active"])
+	}
+	// Binary must be a number array matching the server's JSON wire shape, not
+	// a base64 string.
+	photo, ok := data["photo"].([]interface{})
+	if !ok {
+		t.Fatalf("binary field is not a number array: %T = %v", data["photo"], data["photo"])
+	}
+	if len(photo) != 3 || photo[0].(float64) != 255 || photo[1].(float64) != 216 || photo[2].(float64) != 255 {
+		t.Fatalf("binary field bytes wrong: %v", photo)
 	}
 }

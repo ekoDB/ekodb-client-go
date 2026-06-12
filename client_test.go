@@ -910,6 +910,34 @@ func TestListCollectionsSuccess(t *testing.T) {
 	}
 }
 
+func TestListUserCollectionsSuccess(t *testing.T) {
+	var gotExcludeInternal string
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/collections": func(w http.ResponseWriter, r *http.Request) {
+			gotExcludeInternal = r.URL.Query().Get("exclude_internal")
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string][]string{
+				"collections": {"users", "posts"},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	collections, err := client.ListUserCollections()
+	if err != nil {
+		t.Fatalf("ListUserCollections failed: %v", err)
+	}
+	// Must pass the server-side exclude_internal filter.
+	if gotExcludeInternal != "true" {
+		t.Errorf("ListUserCollections sent exclude_internal=%q, want \"true\"", gotExcludeInternal)
+	}
+	if len(collections) != 2 {
+		t.Errorf("ListUserCollections returned %d collections, want 2", len(collections))
+	}
+}
+
 func TestDeleteCollectionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"DELETE /api/collections/test_collection": func(w http.ResponseWriter, r *http.Request) {

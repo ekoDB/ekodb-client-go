@@ -1524,6 +1524,26 @@ func (c *Client) ListCollections() ([]string, error) {
 	return result.Collections, nil
 }
 
+// ListUserCollections lists only user-created collections, excluding internal
+// chat/system collections the server maintains. It mirrors the other clients'
+// list_user_collections by passing the server's exclude_internal=true filter.
+func (c *Client) ListUserCollections() ([]string, error) {
+	respBody, err := c.makeRequest("GET", "/api/collections?exclude_internal=true", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Collections []string `json:"collections"`
+	}
+	// Always use JSON for metadata endpoints
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result.Collections, nil
+}
+
 // DeleteCollection deletes a collection
 func (c *Client) DeleteCollection(collection string) error {
 	_, err := c.makeRequest("DELETE", "/api/collections/"+collection, nil)
