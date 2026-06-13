@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 // MutationNotification represents a subscription event from collection changes.
@@ -84,6 +85,14 @@ type WebSocketClient struct {
 	messageCounter atomic.Int64
 	schemaCache    *SchemaCache // optional, for auto-invalidation on SchemaChanged
 
+	// binary is set per-connection by negotiateFormat() during connect: true
+	// once the server has Welcomed msgpack, so writes go out as binary msgpack
+	// frames and incoming binary frames are decoded as msgpack. Defaults false
+	// (JSON text), and an older server that never Welcomes leaves it false, so
+	// the connection stays fully back-compatible. Read/written across the
+	// dispatcher and writer goroutines, hence atomic.
+	binary atomic.Bool
+
 	// closing is set by Close() so the reconnect loop exits cleanly and an
 	// intentional shutdown is never mistaken for a transient drop.
 	closing bool
@@ -124,6 +133,8 @@ func (c *Client) WebSocket(wsURL string) (*WebSocketClient, error) {
 		ws.schemaCache = c.schemaCache
 	}
 
+	// Format negotiation already happened inside connect() (before ws.conn was
+	// published), so the dispatcher can start straight away.
 	ws.dispatcherDone = make(chan struct{})
 	go ws.readLoop(ws.conn)
 
@@ -204,16 +215,46 @@ func (ws *WebSocketClient) connect() error {
 	header := make(map[string][]string)
 	header["Authorization"] = []string{"Bearer " + token}
 
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), header)
+	// DialContext(ws.ctx) so Close()/cancel() can abort an in-flight dial
+	// (DefaultDialer.HandshakeTimeout still bounds a hung handshake). This keeps
+	// a reconnect-loop dial from blocking a clean shutdown. If ws.ctx is unset
+	// (a manually constructed client), initialize a cancelable context now —
+	// DialContext panics on a nil context, and ws.ctx/ws.cancel are also used by
+	// Close(), reconnect(), and sendRequest(), which would otherwise panic.
+	dialCtx := ws.ctx
+	if dialCtx == nil {
+		dialCtx = context.Background()
+	}
+	// Derive a cancelable context whenever EITHER ctx or cancel is unset — this
+	// covers every manual-construction combination: nil ctx, ctx-without-cancel,
+	// and cancel-without-ctx. Close()/reconnect() call ws.cancel(), and
+	// sendRequest()/the subscribe loops deref ws.ctx (context.WithTimeout,
+	// ws.ctx.Done()), so a nil in either field would panic.
+	if ws.ctx == nil || ws.cancel == nil {
+		dialCtx, ws.cancel = context.WithCancel(dialCtx)
+		ws.ctx = dialCtx
+	}
+	conn, _, err := websocket.DefaultDialer.DialContext(dialCtx, u.String(), header)
 	if err != nil {
 		return fmt.Errorf("websocket connection failed: %w", err)
 	}
 
-	// If Close() ran while the (context-less) Dial was in flight, don't store
-	// the freshly-dialed connection. Close() has already torn down the previous
-	// conn and will never see this one, so storing it would leak an open socket.
-	// Holding ws.mu across the closing check and the store keeps it atomic vs
-	// Close(), which sets ws.closing under ws.mu before nil'ing ws.conn.
+	// Negotiate the wire format on the freshly-dialed conn BEFORE it is published
+	// to ws.conn, so the Hello is guaranteed to be the very first frame. Once
+	// ws.conn is visible, another goroutine (a concurrent Find/Subscribe/etc.
+	// during a reconnect) could acquire writeMu and send an application frame that
+	// races ahead of the handshake — and its response could then be swallowed by
+	// the Welcome read. Doing this here, before the store, closes that window for
+	// both the initial connect and every reconnect. No lock is held during the
+	// handshake, so a concurrent Close() is still handled by the closing check
+	// below (the conn is simply discarded).
+	ws.negotiateFormat(conn)
+
+	// A dial that completes in the instant before Close() runs still needs this
+	// guard: don't store a connection Close() has already moved past, or it
+	// leaks an open socket. Holding ws.mu across the closing check and the store
+	// keeps it atomic vs Close(), which sets ws.closing under ws.mu before
+	// nil'ing ws.conn.
 	ws.mu.Lock()
 	if ws.closing {
 		ws.mu.Unlock()
@@ -231,6 +272,15 @@ func (ws *WebSocketClient) connect() error {
 const (
 	reconnectBaseDelay = 200 * time.Millisecond
 	reconnectMaxDelay  = 5 * time.Second
+
+	// welcomeHandshakeTimeout bounds how long negotiateFormat waits for the
+	// Welcome reply. The read returns as soon as the Welcome arrives, so this
+	// only caps the wait when NO Welcome comes (a silent/old server) — keeping
+	// it modest avoids adding that stall to such (re)connects. 2s comfortably
+	// exceeds the handshake round-trip even on high-latency/cross-region links
+	// (the server replies to the first frame immediately), so a real msgpack
+	// Welcome is never missed.
+	welcomeHandshakeTimeout = 2 * time.Second
 )
 
 // reconnect runs the automatic reconnect loop after an unexpected disconnect.
@@ -270,8 +320,15 @@ func (ws *WebSocketClient) reconnect() {
 
 		ws.mu.Lock()
 		closing = ws.closing
+		hasSubs := len(ws.subscriptions) > 0
 		ws.mu.Unlock()
-		if closing {
+		// Bail if closed, or if every subscription was removed while we were
+		// backing off (e.g. an in-flight Subscribe failed and deleted its sub
+		// after the drop had already spawned this loop). Reviving a connection
+		// with nothing to replay would leak a zombie socket + readLoop. After
+		// this exit a later Subscribe won't auto-redial, which is already true
+		// today since Subscribe never calls connect().
+		if closing || !hasSubs {
 			return
 		}
 
@@ -284,18 +341,25 @@ func (ws *WebSocketClient) reconnect() {
 			continue
 		}
 
-		// Connected. Re-send every tracked subscription so the server resumes
-		// pushing notifications onto the still-open caller channels.
-		ws.resubscribeAll()
-
-		// Install a fresh dispatcherDone for the new readLoop and resume.
+		// Re-check after the dial: the last subscription may have been removed
+		// while connect() was in flight (the pre-dial check only covers the
+		// backoff window). If so, the just-opened socket has nothing to replay —
+		// tear it down (mirroring Close()'s conn teardown) and stop rather than
+		// leak a zombie connection + readLoop.
 		ws.mu.Lock()
-		if ws.closing {
-			ws.mu.Unlock()
+		shuttingDown := ws.closing
+		stillHasSubs := len(ws.subscriptions) > 0
+		ws.mu.Unlock()
+		if shuttingDown || !stillHasSubs {
+			ws.writeMu.Lock()
+			conn := ws.conn
+			ws.conn = nil
+			ws.writeMu.Unlock()
+			if conn != nil {
+				_ = conn.Close()
+			}
 			return
 		}
-		ws.dispatcherDone = make(chan struct{})
-		ws.mu.Unlock()
 
 		// ws.conn is written by connect(), cleared by Close(), and read by
 		// writeJSON() all under writeMu — read it under the same lock here. A
@@ -307,6 +371,22 @@ func (ws *WebSocketClient) reconnect() {
 		if conn == nil {
 			return
 		}
+
+		// Format negotiation already happened inside connect() on the freshly
+		// dialed conn, before ws.conn was published — so the Hello was the first
+		// frame and the negotiated format is set before any resubscribe write.
+		// Re-send every tracked subscription so the server resumes pushing
+		// notifications onto the still-open channels.
+		ws.resubscribeAll()
+
+		// Install a fresh dispatcherDone for the new readLoop and resume.
+		ws.mu.Lock()
+		if ws.closing {
+			ws.mu.Unlock()
+			return
+		}
+		ws.dispatcherDone = make(chan struct{})
+		ws.mu.Unlock()
 
 		go ws.readLoop(conn)
 		return
@@ -358,7 +438,99 @@ func (ws *WebSocketClient) writeJSON(v interface{}) error {
 	if ws.conn == nil {
 		return fmt.Errorf("websocket connection closed")
 	}
+	if ws.binary.Load() {
+		data, err := msgpack.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("websocket msgpack encode failed: %w", err)
+		}
+		return ws.conn.WriteMessage(websocket.BinaryMessage, data)
+	}
 	return ws.conn.WriteJSON(v)
+}
+
+// negotiateFormat runs the additive capability handshake on a freshly-dialed
+// conn, before readLoop starts so the Welcome (or an older server's Error) is
+// consumed here and never leaks into the response stream. It offers msgpack;
+// if the server Welcomes msgpack this connection flips to binary frames,
+// otherwise it stays on JSON text. Fully back-compatible: an older server that
+// doesn't understand Hello replies with an Error (not a Welcome), or stays
+// silent until the deadline, and the connection remains JSON. The handshake is
+// best-effort — any failure leaves ws.binary false (JSON), never an error,
+// because JSON always works.
+func (ws *WebSocketClient) negotiateFormat(conn *websocket.Conn) {
+	ws.binary.Store(false)
+	hello := []byte(`{"type":"Hello","payload":{"formats":["msgpack","json"]}}`)
+	ws.writeMu.Lock()
+	werr := conn.WriteMessage(websocket.TextMessage, hello)
+	ws.writeMu.Unlock()
+	if werr != nil {
+		return
+	}
+	// Bound the Welcome read so a silent/old server can't stall connect, then
+	// clear the deadline so readLoop's blocking reads are unaffected.
+	_ = conn.SetReadDeadline(time.Now().Add(welcomeHandshakeTimeout))
+	_, data, err := conn.ReadMessage()
+	_ = conn.SetReadDeadline(time.Time{})
+	if err != nil {
+		return
+	}
+	var welcome struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Format string `json:"format"`
+		} `json:"payload"`
+	}
+	if json.Unmarshal(data, &welcome) == nil &&
+		welcome.Type == "Welcome" && welcome.Payload.Format == "msgpack" {
+		ws.binary.Store(true)
+	}
+}
+
+// msgpackToJSON transcodes one binary (msgpack) WS frame into JSON so the
+// existing JSON-based dispatch (map[string]json.RawMessage + routeMessage)
+// processes it unchanged. The transcode is value-identical to a JSON frame:
+// any []byte (a msgpack bin, e.g. a Binary field) is rewritten as a number
+// array, matching the exact wire shape the server uses for binary fields over
+// JSON, so decoded data is the same regardless of negotiated transport.
+func msgpackToJSON(data []byte) ([]byte, error) {
+	var v interface{}
+	if err := msgpack.Unmarshal(data, &v); err != nil {
+		return nil, err
+	}
+	return json.Marshal(normalizeForJSON(v))
+}
+
+// normalizeForJSON makes a msgpack-decoded value json.Marshal-safe and
+// wire-identical to the JSON transport: []byte becomes a number array (not
+// base64), and any non-string map keys are coerced to strings (JSON object
+// keys must be strings). Recurses through maps and slices.
+func normalizeForJSON(v interface{}) interface{} {
+	switch t := v.(type) {
+	case []byte:
+		nums := make([]interface{}, len(t))
+		for i, b := range t {
+			nums[i] = int(b)
+		}
+		return nums
+	case map[string]interface{}:
+		for k, val := range t {
+			t[k] = normalizeForJSON(val)
+		}
+		return t
+	case map[interface{}]interface{}:
+		out := make(map[string]interface{}, len(t))
+		for k, val := range t {
+			out[fmt.Sprintf("%v", k)] = normalizeForJSON(val)
+		}
+		return out
+	case []interface{}:
+		for i, val := range t {
+			t[i] = normalizeForJSON(val)
+		}
+		return t
+	default:
+		return v
+	}
 }
 
 // readLoop is the dispatcher goroutine that routes incoming messages.
@@ -372,7 +544,7 @@ func (ws *WebSocketClient) readLoop(conn *websocket.Conn) {
 	ws.mu.Unlock()
 
 	for {
-		_, data, err := conn.ReadMessage()
+		messageType, data, err := conn.ReadMessage()
 		if err != nil {
 			// Connection dropped. Fail in-flight request/chat callers so they
 			// don't hang, but KEEP subscription channels alive — a transient
@@ -453,6 +625,18 @@ func (ws *WebSocketClient) readLoop(conn *websocket.Conn) {
 			return
 		}
 
+		// A binary frame is msgpack: transcode it to JSON so the dispatch below
+		// (and routeMessage's re-parses) run unchanged and value-identically to
+		// the text transport. A non-transcodable frame is dropped, same as a
+		// malformed JSON frame below.
+		if messageType == websocket.BinaryMessage {
+			jsonData, terr := msgpackToJSON(data)
+			if terr != nil {
+				continue
+			}
+			data = jsonData
+		}
+
 		var msg map[string]json.RawMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			continue
@@ -495,27 +679,43 @@ func (ws *WebSocketClient) routeMessage(msgType string, msg map[string]json.RawM
 func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]json.RawMessage) {
 	ws.mu.Lock()
 
-	// Try to extract messageId from top-level, then from payload.
-	// Only fall back to the "single pending request" path when no
-	// message-id field was present at all — not when parsing failed.
+	// Extract the messageId from the top level, then from the payload. The
+	// server echoes it top-level for Success/Error, but some message shapes
+	// carry it in the payload, so check both before giving up.
+	//
+	// idFieldPresent tracks whether a message-id field was present ANYWHERE with
+	// a usable (non-null, non-empty) value, even if it failed to parse into a
+	// string (e.g. a malformed numeric/object id). This mirrors the TypeScript
+	// client's truthiness check (`msg.messageId || msg.payload?.message_id`):
+	// a present-but-unparseable id must still suppress the single-pending
+	// fallback so a stray ack can't be misrouted to an unrelated request.
 	var messageID string
-	hasMessageIDField := false
-	if midRaw, ok := msg["messageId"]; ok {
-		hasMessageIDField = true
-		_ = json.Unmarshal(midRaw, &messageID)
-	} else if midRaw, ok := msg["message_id"]; ok {
-		hasMessageIDField = true
-		_ = json.Unmarshal(midRaw, &messageID)
+	idFieldPresent := false
+	extractID := func(m map[string]json.RawMessage) {
+		for _, key := range []string{"messageId", "message_id"} {
+			midRaw, ok := m[key]
+			if !ok {
+				continue
+			}
+			// JSON null or "" is not a usable id (and is falsy in the TS client).
+			if trimmed := strings.TrimSpace(string(midRaw)); trimmed == "null" || trimmed == `""` {
+				continue
+			}
+			idFieldPresent = true
+			if messageID == "" {
+				_ = json.Unmarshal(midRaw, &messageID)
+			}
+		}
 	}
-	if messageID == "" && !hasMessageIDField {
+	extractID(msg)
+	// Only fall through to the payload when the top level didn't yield a usable
+	// id — a valid top-level messageId already sets idFieldPresent, so this skips
+	// an avoidable unmarshal (and shortens the lock hold) on the hot path.
+	if messageID == "" {
 		if payloadRaw, ok := msg["payload"]; ok {
 			var payload map[string]json.RawMessage
 			if json.Unmarshal(payloadRaw, &payload) == nil {
-				if midRaw, ok := payload["message_id"]; ok {
-					_ = json.Unmarshal(midRaw, &messageID)
-				} else if midRaw, ok := payload["messageId"]; ok {
-					_ = json.Unmarshal(midRaw, &messageID)
-				}
+				extractID(payload)
 			}
 		}
 	}
@@ -529,11 +729,14 @@ func (ws *WebSocketClient) routeRequestResponse(msgType string, msg map[string]j
 		}
 	}
 
-	// Server doesn't echo messageId — if there's exactly one pending
-	// request, deliver the response to it (sequential request/response).
-	// Only use this fallback when no message-id field was present at all;
-	// if a field existed but was malformed, don't risk misrouting.
-	if target == nil && !hasMessageIDField && len(ws.pendingRequests) == 1 {
+	// Fallback: the server didn't echo a usable messageId ANYWHERE — if exactly
+	// one request is pending, deliver to it (sequential request/response). Gate
+	// on `!idFieldPresent`, not "no top-level id field" nor just "messageID == ''":
+	// a present id (e.g. a best-effort Unsubscribe ack, a late response for an
+	// already-settled request, or even a malformed/unparseable id) must NOT be
+	// misrouted to an unrelated in-flight request. (Matches the TypeScript
+	// client's routing.)
+	if target == nil && !idFieldPresent && len(ws.pendingRequests) == 1 {
 		for id, ch := range ws.pendingRequests {
 			target = ch
 			delete(ws.pendingRequests, id)
@@ -873,23 +1076,35 @@ func (ws *WebSocketClient) Subscribe(collection string, opts ...SubscribeOptions
 	return ch, nil
 }
 
-// Unsubscribe stops local delivery for a collection: it removes the subscription
-// so it is no longer replayed on reconnect and closes its notification channel.
+// Unsubscribe stops delivery for a collection: it sends a best-effort
+// Unsubscribe frame to the server (so the server stops streaming mutations for
+// this collection on this connection), removes the local subscription so it is
+// no longer replayed on reconnect, and closes its notification channel.
 // It is safe to call for a collection that is not currently subscribed (no-op).
 //
-// Note: this only affects the local client. It does not currently send an
-// Unsubscribe message to the server, so the server keeps streaming mutations for
-// this connection until it disconnects. Sending a server-side Unsubscribe is
-// tracked as a cross-client enhancement.
+// The server frame is best-effort: if the socket is already gone the local
+// teardown is sufficient, since the server drops all subscriptions when the
+// connection closes. A unique messageId is attached purely so the server can
+// echo it on its ack: Unsubscribe registers no pending request, so the
+// dispatcher finds no match and silently discards the ack. The id stops that
+// unmatched ack from falling through to the single-pending-request heuristic
+// and being misrouted to an unrelated in-flight request.
 func (ws *WebSocketClient) Unsubscribe(collection string) {
 	ws.mu.Lock()
 	ch, ok := ws.subscriptions[collection]
 	delete(ws.subscriptions, collection)
 	delete(ws.subParams, collection)
 	ws.mu.Unlock()
-	if ok {
-		close(ch)
+	if !ok {
+		return
 	}
+	close(ch)
+
+	_ = ws.writeJSON(map[string]interface{}{
+		"type":      "Unsubscribe",
+		"messageId": ws.genMessageID(),
+		"payload":   map[string]interface{}{"collection": collection},
+	})
 }
 
 // ChatSend sends a chat message and returns a channel of streaming events.

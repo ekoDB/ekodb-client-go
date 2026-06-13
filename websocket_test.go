@@ -1,15 +1,49 @@
 package ekodb
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/vmihailenco/msgpack/v5"
 )
+
+// performServerHandshake mirrors the real server's additive negotiation: it
+// consumes the client's Hello and replies with a Welcome offering the given
+// format ("json" or "msgpack") so the test client proceeds without stalling on
+// its Welcome read. Tolerant by design — if the first frame can't be read (the
+// client closed before handshaking, e.g. the closing-leak test) or isn't a
+// Hello, it returns silently so the handler can still hand off the conn.
+func performServerHandshake(t *testing.T, conn *websocket.Conn, format string) {
+	t.Helper()
+	// Bound the read: a client that dials without handshaking (e.g. a direct
+	// connect() unit test) must not hang the handler forever. Clear the deadline
+	// after so the test's own reads on this conn are unaffected.
+	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+	mt, data, err := conn.ReadMessage()
+	_ = conn.SetReadDeadline(time.Time{})
+	if err != nil {
+		return
+	}
+	var hello map[string]interface{}
+	if mt == websocket.TextMessage && json.Unmarshal(data, &hello) == nil && hello["type"] == "Hello" {
+		// t.Errorf (not Fatalf) is goroutine-safe; the handler runs off-test.
+		if werr := conn.WriteJSON(map[string]interface{}{
+			"type":    "Welcome",
+			"payload": map[string]interface{}{"format": format},
+		}); werr != nil {
+			t.Errorf("handshake Welcome write failed: %v", werr)
+		}
+	}
+}
 
 // Test helper: write JSON to server conn, fail test on error
 func mustWriteJSON(t *testing.T, conn *websocket.Conn, v interface{}) {
@@ -34,6 +68,10 @@ func setupTestWSServer(t *testing.T) (string, chan *websocket.Conn, *httptest.Se
 			t.Errorf("upgrade failed: %v", err)
 			return
 		}
+		// Mirror the real server: answer the client's Hello so connect() doesn't
+		// stall on its Welcome read. "json" keeps these tests on the text
+		// transport they assert against.
+		performServerHandshake(t, conn, "json")
 		connCh <- conn
 	}))
 
@@ -59,9 +97,13 @@ func TestWebSocketConnectDoesNotLeakWhenClosing(t *testing.T) {
 	wsURL, connCh, server := setupTestWSServer(t)
 	defer server.Close()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	ws := &WebSocketClient{
 		wsURL:         wsURL,
 		tokenProvider: func() string { return "test-token" },
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 	// Simulate Close() having already set `closing` before connect() finishes dialing.
 	ws.closing = true
@@ -1486,6 +1528,9 @@ func setupReconnectTestServer(t *testing.T) *reconnectTestServer {
 			t.Errorf("upgrade failed: %v", err)
 			return
 		}
+		// Every (re)dial begins with the client's Hello; answer it (JSON) so the
+		// reconnect path negotiates and proceeds, exactly like the real server.
+		performServerHandshake(t, conn, "json")
 		rts.connCh <- conn
 	}))
 	rts.wsURL = "ws" + strings.TrimPrefix(rts.server.URL, "http") + "/api/ws"
@@ -1812,5 +1857,653 @@ func TestWebSocketNoReconnectWithoutSubscriptions(t *testing.T) {
 		t.Fatal("client reconnected despite having no active subscriptions")
 	case <-time.After(2 * time.Second):
 		// Expected: no reconnect.
+	}
+}
+
+// TestWebSocketUnsubscribeSendsServerFrame verifies that Unsubscribe sends a
+// best-effort Unsubscribe frame to the server (so the server stops streaming),
+// not just a local teardown.
+func TestWebSocketUnsubscribeSendsServerFrame(t *testing.T) {
+	rts := setupReconnectTestServer(t)
+	defer rts.server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(rts.wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	conn := <-rts.connCh
+
+	subErr := make(chan error, 1)
+	go func() {
+		_, e := ws.Subscribe("orders")
+		subErr <- e
+	}()
+	msg := readMessage(t, conn)
+	if msg["type"] != "Subscribe" {
+		t.Fatalf("expected Subscribe, got %v", msg["type"])
+	}
+	mustWriteJSON(t, conn, map[string]interface{}{
+		"type":    "Success",
+		"payload": map[string]interface{}{"message_id": msg["messageId"]},
+	})
+	if e := <-subErr; e != nil {
+		t.Fatalf("subscribe failed: %v", e)
+	}
+
+	ws.Unsubscribe("orders")
+
+	msg = readMessage(t, conn)
+	if msg["type"] != "Unsubscribe" {
+		t.Fatalf("expected Unsubscribe frame, got %v", msg["type"])
+	}
+	payload, ok := msg["payload"].(map[string]interface{})
+	if !ok || payload["collection"] != "orders" {
+		t.Fatalf("expected Unsubscribe payload collection=orders, got %v", msg["payload"])
+	}
+}
+
+// TestWebSocketReconnectExitsWhenSubscriptionsRemovedDuringBackoff covers the
+// case where a drop hands off to reconnect() WITH an active subscription, but
+// that subscription is removed (e.g. an in-flight Subscribe failed and deleted
+// it) before reconnect dials. reconnect() must exit instead of reviving a
+// zombie connection with nothing to replay.
+func TestWebSocketReconnectExitsWhenSubscriptionsRemovedDuringBackoff(t *testing.T) {
+	rts := setupReconnectTestServer(t)
+	defer rts.server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(rts.wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	conn1 := <-rts.connCh
+
+	subErr := make(chan error, 1)
+	go func() {
+		_, e := ws.Subscribe("orders")
+		subErr <- e
+	}()
+	msg := readMessage(t, conn1)
+	if msg["type"] != "Subscribe" {
+		t.Fatalf("expected Subscribe, got %v", msg["type"])
+	}
+	mustWriteJSON(t, conn1, map[string]interface{}{
+		"type":    "Success",
+		"payload": map[string]interface{}{"message_id": msg["messageId"]},
+	})
+	if e := <-subErr; e != nil {
+		t.Fatalf("subscribe failed: %v", e)
+	}
+
+	// Drop from the server side; with an active subscription the client hands
+	// off to reconnect(), which starts a ~200ms backoff before its first dial.
+	_ = conn1.Close()
+
+	// Deterministically wait until readLoop has observed the drop and flipped
+	// the reconnecting flag (set under ws.mu before reconnect() is spawned),
+	// rather than racing a fixed sleep. Once it's set, reconnect() is in its
+	// pre-dial backoff window; removing the only subscription now forces its
+	// pre-dial check to see zero subscriptions and exit without dialing.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		ws.mu.Lock()
+		reconnecting := ws.reconnecting
+		ws.mu.Unlock()
+		if reconnecting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for reconnect loop to start")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	ws.Unsubscribe("orders")
+
+	select {
+	case c := <-rts.connCh:
+		c.Close()
+		t.Fatal("reconnect dialed despite all subscriptions being removed during backoff")
+	case <-time.After(2 * time.Second):
+		// Expected: reconnect exited without dialing.
+	}
+}
+
+// TestWebSocketConnectFallsBackToBackgroundContext verifies connect() handles a
+// nil ws.ctx (e.g. a manually constructed client): DialContext panics on a nil
+// context, so connect() must initialize a cancelable context. It must also leave
+// the client in a consistent state — Close() (which calls ws.cancel()) must not
+// panic afterward.
+func TestWebSocketConnectFallsBackToBackgroundContext(t *testing.T) {
+	rts := setupReconnectTestServer(t)
+	defer rts.server.Close()
+
+	// A bare client with NO context set, mimicking a manually constructed one.
+	// connect() reads only wsURL + tokenProvider; ctx is left nil on purpose.
+	ws := &WebSocketClient{
+		wsURL:         rts.wsURL,
+		tokenProvider: func() string { return "test-token" },
+	}
+
+	// Must not panic on the nil context.
+	if err := ws.connect(); err != nil {
+		t.Fatalf("connect() with nil ctx should succeed: %v", err)
+	}
+
+	// connect() must have initialized ws.ctx and ws.cancel so later operations
+	// don't panic on nil.
+	if ws.ctx == nil || ws.cancel == nil {
+		t.Fatal("connect() must initialize ws.ctx and ws.cancel when they were nil")
+	}
+
+	// The dial reached the server and connect() stored a usable conn.
+	select {
+	case c := <-rts.connCh:
+		_ = c.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("dial did not reach the server")
+	}
+
+	// Close() calls ws.cancel(); it must not panic now that connect() set it.
+	if err := ws.Close(); err != nil {
+		t.Fatalf("Close() after nil-ctx connect should not error: %v", err)
+	}
+}
+
+// TestWebSocketConnectInitsCancelWhenCtxSetWithoutCancel covers the case the
+// nil-ctx fallback missed: a manually constructed client that set ctx but NOT
+// cancel. connect() must still derive a cancelable context so Close() (which
+// calls ws.cancel() unconditionally) doesn't panic.
+func TestWebSocketConnectInitsCancelWhenCtxSetWithoutCancel(t *testing.T) {
+	rts := setupReconnectTestServer(t)
+	defer rts.server.Close()
+
+	// ctx set, cancel deliberately left nil.
+	ws := &WebSocketClient{
+		wsURL:         rts.wsURL,
+		tokenProvider: func() string { return "test-token" },
+		ctx:           context.Background(),
+	}
+
+	if err := ws.connect(); err != nil {
+		t.Fatalf("connect() with ctx-but-no-cancel should succeed: %v", err)
+	}
+
+	// connect() must have derived a cancel even though ctx was already set.
+	if ws.cancel == nil {
+		t.Fatal("connect() must initialize ws.cancel when ctx was set but cancel was nil")
+	}
+
+	select {
+	case c := <-rts.connCh:
+		_ = c.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("dial did not reach the server")
+	}
+
+	// Close() calls ws.cancel() unconditionally; must not panic now.
+	if err := ws.Close(); err != nil {
+		t.Fatalf("Close() must not error/panic when cancel was derived: %v", err)
+	}
+}
+
+// TestWebSocketConnectInitsCtxWhenCancelSetWithoutCtx covers the symmetric gap:
+// a manually constructed client that set cancel but NOT ctx. connect() must
+// derive a non-nil ctx, or sendRequest()/the subscribe loops would panic
+// dereferencing ws.ctx (context.WithTimeout, ws.ctx.Done()).
+func TestWebSocketConnectInitsCtxWhenCancelSetWithoutCtx(t *testing.T) {
+	rts := setupReconnectTestServer(t)
+	defer rts.server.Close()
+
+	// cancel set, ctx deliberately left nil.
+	ws := &WebSocketClient{
+		wsURL:         rts.wsURL,
+		tokenProvider: func() string { return "test-token" },
+		cancel:        func() {},
+	}
+
+	if err := ws.connect(); err != nil {
+		t.Fatalf("connect() with cancel-but-no-ctx should succeed: %v", err)
+	}
+
+	// connect() must have derived a non-nil ctx even though cancel was set.
+	if ws.ctx == nil {
+		t.Fatal("connect() must initialize ws.ctx when cancel was set but ctx was nil")
+	}
+
+	select {
+	case c := <-rts.connCh:
+		_ = c.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("dial did not reach the server")
+	}
+
+	if err := ws.Close(); err != nil {
+		t.Fatalf("Close() must not error/panic when ctx was derived: %v", err)
+	}
+}
+
+// TestWebSocketReconnectClosesSocketWhenSubsRemovedDuringDial covers the race the
+// pre-dial check cannot: the last subscription is removed WHILE connect() is
+// dialing (after the pre-dial check already passed). The just-opened socket then
+// has nothing to replay, so reconnect() must tear it down rather than leak a
+// zombie connection + readLoop.
+func TestWebSocketReconnectClosesSocketWhenSubsRemovedDuringDial(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	connCh := make(chan *websocket.Conn, 8)
+	dialStarted := make(chan struct{}, 1)
+	proceed := make(chan struct{})
+	var dialN int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Gate only the SECOND dial (the reconnect). The first dial (the initial
+		// connect) proceeds immediately so the subscription can be established.
+		if atomic.AddInt32(&dialN, 1) == 2 {
+			dialStarted <- struct{}{}
+			<-proceed
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade failed: %v", err)
+			return
+		}
+		performServerHandshake(t, conn, "json")
+		connCh <- conn
+	}))
+	defer server.Close()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/ws"
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	conn1 := <-connCh
+
+	// Establish a subscription so a server-side drop hands off to reconnect().
+	subErr := make(chan error, 1)
+	go func() {
+		_, e := ws.Subscribe("orders")
+		subErr <- e
+	}()
+	msg := readMessage(t, conn1)
+	if msg["type"] != "Subscribe" {
+		t.Fatalf("expected Subscribe, got %v", msg["type"])
+	}
+	mustWriteJSON(t, conn1, map[string]interface{}{
+		"type":    "Success",
+		"payload": map[string]interface{}{"message_id": msg["messageId"]},
+	})
+	if e := <-subErr; e != nil {
+		t.Fatalf("subscribe failed: %v", e)
+	}
+
+	// Drop server-side; with an active subscription the client hands off to
+	// reconnect(), whose pre-dial check still sees the subscription and dials.
+	_ = conn1.Close()
+
+	// Once the reconnect dial is in flight (pre-dial check already passed),
+	// remove the only subscription so the POST-dial check is the one that must
+	// catch the now-empty set, then let the dial complete.
+	select {
+	case <-dialStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reconnect did not dial")
+	}
+	ws.Unsubscribe("orders")
+	close(proceed)
+
+	// The reconnect socket must be torn down (nothing to replay). A teardown
+	// closes the socket, so the server's read returns a non-timeout error
+	// promptly; a leaked zombie would stay open and the read would block until
+	// the deadline (a timeout).
+	conn2 := <-connCh
+	_ = conn2.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, _, readErr := conn2.ReadMessage()
+	if readErr == nil {
+		t.Fatal("reconnect unexpectedly replayed onto the socket")
+	}
+	var ne net.Error
+	if errors.As(readErr, &ne) && ne.Timeout() {
+		t.Fatal("reconnect left the socket open (zombie connection): the read timed " +
+			"out waiting for data instead of observing a client-side close")
+	}
+}
+
+// newRoutingTestClient builds a bare WebSocketClient with just the maps needed
+// to drive routeRequestResponse directly (no live socket).
+func newRoutingTestClient() *WebSocketClient {
+	return &WebSocketClient{
+		pendingRequests: make(map[string]chan wsResponse),
+		subscriptions:   make(map[string]chan MutationNotification),
+		subParams:       make(map[string]SubscribeOptions),
+		chatStreams:     make(map[string]chan ChatStreamEvent),
+	}
+}
+
+// rawMsg marshals a JSON object into the map[string]json.RawMessage shape that
+// routeRequestResponse consumes.
+func rawMsg(t *testing.T, obj map[string]interface{}) map[string]json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(obj)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return m
+}
+
+// TestRouteRequestResponseDoesNotMisrouteUnmatchedID verifies that when a
+// Success carries a message id that is PRESENT but does not match any pending
+// request, the single-pending-request fallback is suppressed — the stray ack
+// must not be delivered to an unrelated in-flight request. This covers the
+// Unsubscribe ack case (a present id that matches nothing) and a parseable but
+// unmatched id (a late ack for an already-settled request).
+func TestRouteRequestResponseDoesNotMisrouteUnmatchedID(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  map[string]interface{}
+	}{
+		{
+			name: "present unmatched id top-level",
+			msg: map[string]interface{}{
+				"type":      "Success",
+				"messageId": "unsub-999",
+				"payload":   map[string]interface{}{"ok": true},
+			},
+		},
+		{
+			name: "present unmatched id in payload",
+			msg: map[string]interface{}{
+				"type":    "Success",
+				"payload": map[string]interface{}{"message_id": "unsub-999"},
+			},
+		},
+		{
+			name: "present but malformed (numeric) id",
+			msg: map[string]interface{}{
+				"type":      "Success",
+				"messageId": 12345,
+				"payload":   map[string]interface{}{"ok": true},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := newRoutingTestClient()
+			pending := make(chan wsResponse, 1)
+			ws.pendingRequests["the-real-request"] = pending
+
+			ws.routeRequestResponse("Success", rawMsg(t, tc.msg))
+
+			select {
+			case <-pending:
+				t.Fatal("stray ack was misrouted to the unrelated pending request")
+			default:
+				// Expected: the real request is untouched.
+			}
+			ws.mu.Lock()
+			_, stillPending := ws.pendingRequests["the-real-request"]
+			ws.mu.Unlock()
+			if !stillPending {
+				t.Fatal("the real request was incorrectly settled")
+			}
+		})
+	}
+}
+
+// TestRouteRequestResponseSinglePendingFallback verifies the legitimate
+// fallback still works: when the server echoes NO message id anywhere and
+// exactly one request is pending, the response is delivered to it.
+func TestRouteRequestResponseSinglePendingFallback(t *testing.T) {
+	ws := newRoutingTestClient()
+	pending := make(chan wsResponse, 1)
+	ws.pendingRequests["only-request"] = pending
+
+	ws.routeRequestResponse("Success", rawMsg(t, map[string]interface{}{
+		"type":    "Success",
+		"payload": map[string]interface{}{"ok": true},
+	}))
+
+	select {
+	case <-pending:
+		// Expected: sequential request/response delivered.
+	case <-time.After(time.Second):
+		t.Fatal("single-pending fallback did not deliver the response")
+	}
+	ws.mu.Lock()
+	_, stillPending := ws.pendingRequests["only-request"]
+	ws.mu.Unlock()
+	if stillPending {
+		t.Fatal("the request should have been settled and removed")
+	}
+}
+
+// TestRouteRequestResponseMatchedID verifies an id that DOES match a pending
+// request is delivered to exactly that request even when others are pending.
+func TestRouteRequestResponseMatchedID(t *testing.T) {
+	ws := newRoutingTestClient()
+	want := make(chan wsResponse, 1)
+	other := make(chan wsResponse, 1)
+	ws.pendingRequests["req-A"] = want
+	ws.pendingRequests["req-B"] = other
+
+	ws.routeRequestResponse("Success", rawMsg(t, map[string]interface{}{
+		"type":      "Success",
+		"messageId": "req-A",
+		"payload":   map[string]interface{}{"ok": true},
+	}))
+
+	select {
+	case <-want:
+		// Expected.
+	case <-time.After(time.Second):
+		t.Fatal("matched id was not delivered to its request")
+	}
+	select {
+	case <-other:
+		t.Fatal("response leaked to the wrong pending request")
+	default:
+	}
+}
+
+// TestWebSocketBinaryNegotiation drives the full binary path end-to-end: the
+// server Welcomes msgpack, the client must then send its request as a binary
+// msgpack frame, and a binary msgpack response must decode back into records
+// transparently. This is the Go mirror of the server's
+// test_ws_binary_msgpack_round_trip.
+func TestWebSocketBinaryNegotiation(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	connCh := make(chan *websocket.Conn, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade failed: %v", err)
+			return
+		}
+		performServerHandshake(t, conn, "msgpack")
+		connCh <- conn
+	}))
+	defer server.Close()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/ws"
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	// After a Welcome{msgpack}, the connection must be in binary mode.
+	if !ws.binary.Load() {
+		t.Fatal("client did not negotiate binary (msgpack) mode after Welcome")
+	}
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	resultCh := make(chan []Record, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		records, err := ws.FindAll("users")
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- records
+	}()
+
+	// The request must arrive as a binary msgpack frame.
+	mt, data, err := serverConn.ReadMessage()
+	if err != nil {
+		t.Fatalf("failed to read request: %v", err)
+	}
+	if mt != websocket.BinaryMessage {
+		t.Fatalf("expected a binary request frame, got message type %d", mt)
+	}
+	var req map[string]interface{}
+	if err := msgpack.Unmarshal(data, &req); err != nil {
+		t.Fatalf("request frame is not valid msgpack: %v", err)
+	}
+	if req["type"] != "FindAll" {
+		t.Fatalf("expected FindAll, got %v", req["type"])
+	}
+
+	// Respond with a binary msgpack Success frame.
+	resp := map[string]interface{}{
+		"type": "Success",
+		"payload": map[string]interface{}{
+			"message_id": req["messageId"],
+			"data": []map[string]interface{}{
+				{"id": "1", "name": "Alice"},
+			},
+		},
+	}
+	respBytes, err := msgpack.Marshal(resp)
+	if err != nil {
+		t.Fatalf("failed to marshal msgpack response: %v", err)
+	}
+	if err := serverConn.WriteMessage(websocket.BinaryMessage, respBytes); err != nil {
+		t.Fatalf("failed to write msgpack response: %v", err)
+	}
+
+	select {
+	case records := <-resultCh:
+		if len(records) != 1 {
+			t.Fatalf("expected 1 record, got %d", len(records))
+		}
+		if records[0]["name"] != "Alice" {
+			t.Fatalf("expected name Alice, got %v", records[0]["name"])
+		}
+	case err := <-errCh:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for binary FindAll result")
+	}
+}
+
+// TestWebSocketJSONStaysJSONWhenServerDeclinesMsgpack proves back-compat: a
+// server that Welcomes only "json" (or, like an older server, never Welcomes
+// at all and the read times out / errors) leaves the connection on JSON text.
+func TestWebSocketJSONStaysJSONWhenServerDeclinesMsgpack(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t) // Welcomes "json"
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	if ws.binary.Load() {
+		t.Fatal("client must stay on JSON when the server does not Welcome msgpack")
+	}
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := ws.FindAll("users")
+		errCh <- err
+	}()
+
+	// The request must arrive as a JSON text frame, not binary.
+	mt, _, err := serverConn.ReadMessage()
+	if err != nil {
+		t.Fatalf("failed to read request: %v", err)
+	}
+	if mt != websocket.TextMessage {
+		t.Fatalf("expected a JSON text request frame, got message type %d", mt)
+	}
+	// Drain the in-flight call so the goroutine doesn't leak.
+	_ = serverConn.Close()
+	select {
+	case <-errCh:
+	case <-time.After(2 * time.Second):
+	}
+}
+
+// TestMsgpackToJSONTranscode verifies the binary->JSON transcode is
+// value-identical to the JSON wire shape, including the key edge case: a
+// msgpack bin (a Binary field) must become a number array, not base64, so
+// decoded data is the same regardless of negotiated transport.
+func TestMsgpackToJSONTranscode(t *testing.T) {
+	source := map[string]interface{}{
+		"type": "Success",
+		"payload": map[string]interface{}{
+			"message_id": "m1",
+			"data": map[string]interface{}{
+				"name":   "Alice",
+				"count":  42,
+				"active": true,
+				"photo":  []byte{255, 216, 255},
+				"tags":   []interface{}{"x", "y"},
+			},
+		},
+	}
+	packed, err := msgpack.Marshal(source)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	jsonBytes, err := msgpackToJSON(packed)
+	if err != nil {
+		t.Fatalf("transcode: %v", err)
+	}
+
+	var got map[string]interface{}
+	if err := json.Unmarshal(jsonBytes, &got); err != nil {
+		t.Fatalf("transcoded output is not valid JSON: %v", err)
+	}
+	if got["type"] != "Success" {
+		t.Fatalf("type lost in transcode: %v", got["type"])
+	}
+	payload := got["payload"].(map[string]interface{})
+	data := payload["data"].(map[string]interface{})
+	if data["name"] != "Alice" {
+		t.Fatalf("string field lost: %v", data["name"])
+	}
+	if data["active"] != true {
+		t.Fatalf("bool field lost: %v", data["active"])
+	}
+	// Binary must be a number array matching the server's JSON wire shape, not
+	// a base64 string.
+	photo, ok := data["photo"].([]interface{})
+	if !ok {
+		t.Fatalf("binary field is not a number array: %T = %v", data["photo"], data["photo"])
+	}
+	if len(photo) != 3 || photo[0].(float64) != 255 || photo[1].(float64) != 216 || photo[2].(float64) != 255 {
+		t.Fatalf("binary field bytes wrong: %v", photo)
 	}
 }

@@ -248,8 +248,9 @@ func (qb *QueryBuilder) Skip(skip int) *QueryBuilder {
 
 // Page sets the page number and page size (convenience method).
 //
-// Page numbers are 1-indexed: page 1 is the first page. This matches
-// Client.Paginate. Values below 1 are treated as page 1.
+// Page numbers are 1-indexed: page 1 is the first page. Values below 1 are
+// treated as page 1 (unlike Client.Paginate, which returns an error for
+// page < 1). The offset calculation matches Client.Paginate.
 func (qb *QueryBuilder) Page(page, pageSize int) *QueryBuilder {
 	if page < 1 {
 		page = 1

@@ -3,11 +3,15 @@ package ekodb
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 // ============================================================================
@@ -736,6 +740,22 @@ func TestKVDeleteSuccess(t *testing.T) {
 	}
 }
 
+func TestKVClearSuccess(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"DELETE /api/kv/clear": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "success"})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	if err := client.KVClear(); err != nil {
+		t.Errorf("KVClear failed: %v", err)
+	}
+}
+
 func TestKVExistsSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/kv/get/existing_key": func(w http.ResponseWriter, r *http.Request) {
@@ -887,6 +907,34 @@ func TestListCollectionsSuccess(t *testing.T) {
 	}
 	if len(collections) != 3 {
 		t.Errorf("ListCollections returned %d collections, want 3", len(collections))
+	}
+}
+
+func TestListUserCollectionsSuccess(t *testing.T) {
+	var gotExcludeInternal string
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/collections": func(w http.ResponseWriter, r *http.Request) {
+			gotExcludeInternal = r.URL.Query().Get("exclude_internal")
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string][]string{
+				"collections": {"users", "posts"},
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	collections, err := client.ListUserCollections()
+	if err != nil {
+		t.Fatalf("ListUserCollections failed: %v", err)
+	}
+	// Must pass the server-side exclude_internal filter.
+	if gotExcludeInternal != "true" {
+		t.Errorf("ListUserCollections sent exclude_internal=%q, want \"true\"", gotExcludeInternal)
+	}
+	if len(collections) != 2 {
+		t.Errorf("ListUserCollections returned %d collections, want 2", len(collections))
 	}
 }
 
@@ -2438,5 +2486,743 @@ func TestRawCompletionStreamHTTPError(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("Expected error from 401 response, got nil")
+	}
+}
+
+// ============================================================================
+// Transaction Savepoint + Transactional Read Request-Shape Tests
+// ============================================================================
+//
+// These tests assert the HTTP method, path (including url.PathEscape of the
+// savepoint name), and query-param construction the client emits — not server
+// behavior. They spin up a capturing server that records the exact escaped path
+// and raw query string of the request so escaping/encoding can be verified.
+
+// capturedRequest records the parts of an inbound request we assert on.
+type capturedRequest struct {
+	method      string
+	escapedPath string // r.URL.EscapedPath() — reserved chars stay percent-encoded
+	rawQuery    string // r.URL.RawQuery — undecoded query string
+	queryValues url.Values
+	body        []byte // raw request body bytes
+}
+
+// newCapturingServer returns a test server that handles the token exchange and
+// records the first non-token request into *got, replying 200 with an empty
+// JSON object so client unmarshalling succeeds.
+func newCapturingServer(t *testing.T, got *capturedRequest) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/token" {
+			mockTokenHandler(t)(w, r)
+			return
+		}
+		if auth := r.Header.Get("Authorization"); auth != "Bearer test-jwt-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte("Unauthorized"))
+			return
+		}
+		got.method = r.Method
+		got.escapedPath = r.URL.EscapedPath()
+		got.rawQuery = r.URL.RawQuery
+		got.queryValues = r.URL.Query()
+		got.body, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		// Find (POST /api/find/<collection>) unmarshals into []Record, so reply
+		// with an empty array there; every other path unmarshals into a single
+		// object/map, so reply with an empty object.
+		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/find/") {
+			_, _ = w.Write([]byte("[]"))
+		} else {
+			_, _ = w.Write([]byte("{}"))
+		}
+	}))
+}
+
+func TestCreateSavepointRequestShape(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	if err := client.CreateSavepoint("tx_123", "sp1"); err != nil {
+		t.Fatalf("CreateSavepoint failed: %v", err)
+	}
+
+	// CreateSavepoint POSTs to .../savepoints with the name in the JSON body,
+	// NOT in the path — so the path has no per-name escaping concern here.
+	if got.method != "POST" {
+		t.Errorf("CreateSavepoint method = %q, want POST", got.method)
+	}
+	wantPath := "/api/transactions/tx_123/savepoints"
+	if got.escapedPath != wantPath {
+		t.Errorf("CreateSavepoint path = %q, want %q", got.escapedPath, wantPath)
+	}
+}
+
+func TestRollbackToSavepointRequestShape(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	if err := client.RollbackToSavepoint("tx_123", "sp1"); err != nil {
+		t.Fatalf("RollbackToSavepoint failed: %v", err)
+	}
+
+	if got.method != "POST" {
+		t.Errorf("RollbackToSavepoint method = %q, want POST", got.method)
+	}
+	wantPath := "/api/transactions/tx_123/savepoints/sp1/rollback"
+	if got.escapedPath != wantPath {
+		t.Errorf("RollbackToSavepoint path = %q, want %q", got.escapedPath, wantPath)
+	}
+}
+
+// TestRollbackToSavepointEscapesName proves a savepoint name containing reserved
+// characters (slash + space) is url.PathEscape'd into the path so it can't break
+// out of the .../savepoints/<name>/rollback segment.
+func TestRollbackToSavepointEscapesName(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	name := "a/b c"
+	if err := client.RollbackToSavepoint("tx_123", name); err != nil {
+		t.Fatalf("RollbackToSavepoint failed: %v", err)
+	}
+
+	if got.method != "POST" {
+		t.Errorf("method = %q, want POST", got.method)
+	}
+	// url.PathEscape("a/b c") == "a%2Fb%20c". The escaped path must carry the
+	// percent-encoded form so the slash is NOT a path separator.
+	wantEscaped := "/api/transactions/tx_123/savepoints/" + url.PathEscape(name) + "/rollback"
+	if got.escapedPath != wantEscaped {
+		t.Errorf("escaped path = %q, want %q", got.escapedPath, wantEscaped)
+	}
+	if !strings.Contains(got.escapedPath, "a%2Fb%20c") {
+		t.Errorf("escaped path %q does not contain percent-encoded name a%%2Fb%%20c", got.escapedPath)
+	}
+	// The server's decoded path segment must round-trip back to the raw name.
+	wantDecodedPath := "/api/transactions/tx_123/savepoints/" + name + "/rollback"
+	if decoded, err := url.PathUnescape(got.escapedPath); err != nil {
+		t.Errorf("path unescape failed: %v", err)
+	} else if decoded != wantDecodedPath {
+		t.Errorf("decoded path = %q, want %q", decoded, wantDecodedPath)
+	}
+}
+
+// TestSavepointEscapesTransactionID proves the transactionID path segment is
+// url.PathEscape'd in every savepoint method, so a transaction ID containing
+// reserved characters cannot break out of its path segment (defense-in-depth:
+// server-issued IDs are UUIDs today, but the client must not assume that).
+func TestSavepointEscapesTransactionID(t *testing.T) {
+	txID := "tx/a b"
+	escTx := url.PathEscape(txID) // "tx%2Fa%20b"
+
+	cases := []struct {
+		name       string
+		call       func(c *Client) error
+		wantPath   string
+		wantMethod string
+	}{
+		{
+			name:       "CreateSavepoint",
+			call:       func(c *Client) error { return c.CreateSavepoint(txID, "sp1") },
+			wantPath:   "/api/transactions/" + escTx + "/savepoints",
+			wantMethod: "POST",
+		},
+		{
+			name:       "RollbackToSavepoint",
+			call:       func(c *Client) error { return c.RollbackToSavepoint(txID, "sp1") },
+			wantPath:   "/api/transactions/" + escTx + "/savepoints/sp1/rollback",
+			wantMethod: "POST",
+		},
+		{
+			name:       "ReleaseSavepoint",
+			call:       func(c *Client) error { return c.ReleaseSavepoint(txID, "sp1") },
+			wantPath:   "/api/transactions/" + escTx + "/savepoints/sp1",
+			wantMethod: "DELETE",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got capturedRequest
+			server := newCapturingServer(t, &got)
+			defer server.Close()
+
+			client := createTestClient(t, server)
+			if err := tc.call(client); err != nil {
+				t.Fatalf("%s failed: %v", tc.name, err)
+			}
+			if got.method != tc.wantMethod {
+				t.Errorf("%s method = %q, want %q", tc.name, got.method, tc.wantMethod)
+			}
+			if got.escapedPath != tc.wantPath {
+				t.Errorf("%s path = %q, want %q", tc.name, got.escapedPath, tc.wantPath)
+			}
+			if !strings.Contains(got.escapedPath, "tx%2Fa%20b") {
+				t.Errorf("%s path %q does not contain percent-encoded tx id tx%%2Fa%%20b", tc.name, got.escapedPath)
+			}
+		})
+	}
+}
+
+// TestTransactionLifecycleEscapesTransactionID proves the transaction-lifecycle
+// methods (status / commit / rollback) also url.PathEscape the transactionID,
+// matching the savepoint methods above, so a reserved character can't break out
+// of its path segment.
+func TestTransactionLifecycleEscapesTransactionID(t *testing.T) {
+	txID := "tx/a b"
+	escTx := url.PathEscape(txID) // "tx%2Fa%20b"
+
+	cases := []struct {
+		name       string
+		call       func(c *Client) error
+		wantPath   string
+		wantMethod string
+	}{
+		{
+			name:       "GetTransactionStatus",
+			call:       func(c *Client) error { _, err := c.GetTransactionStatus(txID); return err },
+			wantPath:   "/api/transactions/" + escTx,
+			wantMethod: "GET",
+		},
+		{
+			name:       "CommitTransaction",
+			call:       func(c *Client) error { return c.CommitTransaction(txID) },
+			wantPath:   "/api/transactions/" + escTx + "/commit",
+			wantMethod: "POST",
+		},
+		{
+			name:       "RollbackTransaction",
+			call:       func(c *Client) error { return c.RollbackTransaction(txID) },
+			wantPath:   "/api/transactions/" + escTx + "/rollback",
+			wantMethod: "POST",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got capturedRequest
+			server := newCapturingServer(t, &got)
+			defer server.Close()
+
+			client := createTestClient(t, server)
+			if err := tc.call(client); err != nil {
+				t.Fatalf("%s failed: %v", tc.name, err)
+			}
+			if got.method != tc.wantMethod {
+				t.Errorf("%s method = %q, want %q", tc.name, got.method, tc.wantMethod)
+			}
+			if got.escapedPath != tc.wantPath {
+				t.Errorf("%s path = %q, want %q", tc.name, got.escapedPath, tc.wantPath)
+			}
+			if !strings.Contains(got.escapedPath, "tx%2Fa%20b") {
+				t.Errorf("%s path %q does not contain percent-encoded tx id tx%%2Fa%%20b", tc.name, got.escapedPath)
+			}
+		})
+	}
+}
+
+func TestReleaseSavepointRequestShape(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	if err := client.ReleaseSavepoint("tx_123", "sp1"); err != nil {
+		t.Fatalf("ReleaseSavepoint failed: %v", err)
+	}
+
+	if got.method != "DELETE" {
+		t.Errorf("ReleaseSavepoint method = %q, want DELETE", got.method)
+	}
+	wantPath := "/api/transactions/tx_123/savepoints/sp1"
+	if got.escapedPath != wantPath {
+		t.Errorf("ReleaseSavepoint path = %q, want %q", got.escapedPath, wantPath)
+	}
+}
+
+// TestReleaseSavepointEscapesName proves ReleaseSavepoint url.PathEscape's a
+// reserved-char savepoint name into the DELETE path.
+func TestReleaseSavepointEscapesName(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	name := "a/b c"
+	if err := client.ReleaseSavepoint("tx_123", name); err != nil {
+		t.Fatalf("ReleaseSavepoint failed: %v", err)
+	}
+
+	if got.method != "DELETE" {
+		t.Errorf("method = %q, want DELETE", got.method)
+	}
+	wantEscaped := "/api/transactions/tx_123/savepoints/" + url.PathEscape(name)
+	if got.escapedPath != wantEscaped {
+		t.Errorf("escaped path = %q, want %q", got.escapedPath, wantEscaped)
+	}
+	if !strings.Contains(got.escapedPath, "a%2Fb%20c") {
+		t.Errorf("escaped path %q does not contain percent-encoded name a%%2Fb%%20c", got.escapedPath)
+	}
+}
+
+func TestFindWithTransactionIDQueryParam(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	txID := "tx_abc"
+	_, err := client.Find("users", map[string]interface{}{"limit": 10}, FindOptions{
+		TransactionId: &txID,
+	})
+	if err != nil {
+		t.Fatalf("Find failed: %v", err)
+	}
+
+	if got.method != "POST" {
+		t.Errorf("Find method = %q, want POST", got.method)
+	}
+	if got.escapedPath != "/api/find/users" {
+		t.Errorf("Find path = %q, want /api/find/users", got.escapedPath)
+	}
+	if v := got.queryValues.Get("transaction_id"); v != txID {
+		t.Errorf("transaction_id query param = %q, want %q", v, txID)
+	}
+	if !strings.Contains(got.rawQuery, "transaction_id="+txID) {
+		t.Errorf("raw query %q missing transaction_id=%s", got.rawQuery, txID)
+	}
+}
+
+func TestFindWithoutTransactionIDHasNoQueryParam(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	if _, err := client.Find("users", map[string]interface{}{"limit": 10}); err != nil {
+		t.Fatalf("Find failed: %v", err)
+	}
+
+	if got.rawQuery != "" {
+		t.Errorf("Find without transaction emitted query %q, want empty", got.rawQuery)
+	}
+}
+
+// TestFindHonorsAllFindOptions verifies every FindOptions field reaches the
+// request: the body fields land in the FindBody (overriding the query argument),
+// and TransactionId is sent as a query parameter rather than in the body.
+func TestFindHonorsAllFindOptions(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+
+	limit := 25
+	skip := 5
+	bypassCache := true
+	bypassRipple := false
+	txID := "tx_opts"
+	filter := map[string]interface{}{
+		"type":    "Condition",
+		"content": map[string]interface{}{"field": "age", "operator": "Gt", "value": 18},
+	}
+	sort := map[string]interface{}{"name": "asc"}
+	join := map[string]interface{}{"collection": "orders"}
+
+	// The query argument carries a limit that FindOptions must override.
+	_, err := client.Find("users", map[string]interface{}{"limit": 999}, FindOptions{
+		Filter:        filter,
+		Sort:          sort,
+		Limit:         &limit,
+		Skip:          &skip,
+		Join:          join,
+		BypassCache:   &bypassCache,
+		BypassRipple:  &bypassRipple,
+		SelectFields:  []string{"name", "email"},
+		ExcludeFields: []string{"secret"},
+		TransactionId: &txID,
+	})
+	if err != nil {
+		t.Fatalf("Find failed: %v", err)
+	}
+
+	if got.method != "POST" {
+		t.Errorf("method = %q, want POST", got.method)
+	}
+	if got.escapedPath != "/api/find/users" {
+		t.Errorf("path = %q, want /api/find/users", got.escapedPath)
+	}
+	// transaction_id is a query param.
+	if v := got.queryValues.Get("transaction_id"); v != txID {
+		t.Errorf("transaction_id query param = %q, want %q", v, txID)
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(got.body, &body); err != nil {
+		t.Fatalf("request body is not JSON: %v (body=%s)", err, got.body)
+	}
+
+	// FindOptions.Limit must override the query argument's limit (999 -> 25).
+	if body["limit"] != float64(limit) {
+		t.Errorf("body limit = %v, want %d (FindOptions must override the query arg)", body["limit"], limit)
+	}
+	if body["skip"] != float64(skip) {
+		t.Errorf("body skip = %v, want %d", body["skip"], skip)
+	}
+	if body["bypass_cache"] != true {
+		t.Errorf("body bypass_cache = %v, want true", body["bypass_cache"])
+	}
+	// bypass_ripple is a query param now (like every other method), not the body.
+	if _, present := body["bypass_ripple"]; present {
+		t.Error("bypass_ripple must be a query param, not in the FindBody")
+	}
+	if v := got.queryValues.Get("bypass_ripple"); v != "false" {
+		t.Errorf("bypass_ripple query param = %q, want \"false\"", v)
+	}
+	for _, key := range []string{"filter", "sort", "join"} {
+		if _, ok := body[key]; !ok {
+			t.Errorf("body missing %q", key)
+		}
+	}
+	assertStringSlice(t, body, "select_fields", []string{"name", "email"})
+	assertStringSlice(t, body, "exclude_fields", []string{"secret"})
+
+	// transaction_id must NOT be in the body — it is a query param only.
+	if _, ok := body["transaction_id"]; ok {
+		t.Error("transaction_id must be a query param, not in the request body")
+	}
+}
+
+// TestFindHoistsBypassRippleFromQueryObject verifies that bypass_ripple carried
+// on the query object (as QueryBuilder.BypassRipple() builds) is hoisted out of
+// the body and sent as a query param — never in the FindBody.
+func TestFindHoistsBypassRippleFromQueryObject(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+	client := createTestClient(t, server)
+
+	if _, err := client.Find("users", map[string]interface{}{"limit": 5, "bypass_ripple": true}); err != nil {
+		t.Fatalf("Find failed: %v", err)
+	}
+
+	if v := got.queryValues.Get("bypass_ripple"); v != "true" {
+		t.Errorf("bypass_ripple query param = %q, want \"true\"", v)
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(got.body, &body); err != nil {
+		t.Fatalf("body not JSON: %v (body=%s)", err, got.body)
+	}
+	if _, present := body["bypass_ripple"]; present {
+		t.Error("bypass_ripple must be hoisted out of the FindBody")
+	}
+	if body["limit"] != float64(5) {
+		t.Errorf("body limit = %v, want 5", body["limit"])
+	}
+}
+
+func assertStringSlice(t *testing.T, body map[string]interface{}, key string, want []string) {
+	t.Helper()
+	raw, ok := body[key].([]interface{})
+	if !ok {
+		t.Errorf("body[%q] = %v, want a string array", key, body[key])
+		return
+	}
+	if len(raw) != len(want) {
+		t.Errorf("body[%q] len = %d, want %d", key, len(raw), len(want))
+		return
+	}
+	for i, w := range want {
+		if raw[i] != w {
+			t.Errorf("body[%q][%d] = %v, want %q", key, i, raw[i], w)
+		}
+	}
+}
+
+// TestFindNonMapQueryPassThrough verifies Find sends the caller's query
+// unchanged when no FindOptions body field needs to override it — so a non-map
+// (struct) query is not forced through a map, and a TransactionId-only call
+// (TransactionId is a query param, not a body field) still passes the query
+// through verbatim.
+func TestFindNonMapQueryPassThrough(t *testing.T) {
+	type structQuery struct {
+		Limit int `json:"limit"`
+	}
+
+	t.Run("no options", func(t *testing.T) {
+		var got capturedRequest
+		server := newCapturingServer(t, &got)
+		defer server.Close()
+		client := createTestClient(t, server)
+
+		if _, err := client.Find("users", structQuery{Limit: 7}); err != nil {
+			t.Fatalf("Find failed: %v", err)
+		}
+		var body map[string]interface{}
+		if err := json.Unmarshal(got.body, &body); err != nil {
+			t.Fatalf("body not JSON: %v (body=%s)", err, got.body)
+		}
+		if body["limit"] != float64(7) {
+			t.Errorf("body limit = %v, want 7", body["limit"])
+		}
+		if got.rawQuery != "" {
+			t.Errorf("unexpected query string %q", got.rawQuery)
+		}
+	})
+
+	t.Run("transaction id only still passes query through", func(t *testing.T) {
+		var got capturedRequest
+		server := newCapturingServer(t, &got)
+		defer server.Close()
+		client := createTestClient(t, server)
+
+		txID := "tx_1"
+		if _, err := client.Find("users", structQuery{Limit: 7}, FindOptions{TransactionId: &txID}); err != nil {
+			t.Fatalf("Find failed: %v", err)
+		}
+		if v := got.queryValues.Get("transaction_id"); v != txID {
+			t.Errorf("transaction_id query param = %q, want %q", v, txID)
+		}
+		var body map[string]interface{}
+		if err := json.Unmarshal(got.body, &body); err != nil {
+			t.Fatalf("body not JSON: %v (body=%s)", err, got.body)
+		}
+		if body["limit"] != float64(7) {
+			t.Errorf("body limit = %v, want 7 (query must pass through)", body["limit"])
+		}
+		if _, ok := body["transaction_id"]; ok {
+			t.Error("transaction_id must be a query param, not in the body")
+		}
+	})
+}
+
+// TestFindStructQueryUsesMsgpackTagsInMessagePackMode verifies that when a
+// FindOptions body field forces a non-map (struct) query to be materialized into
+// a map, the conversion uses the SAME codec as the request body. On a MessagePack
+// find the struct's msgpack tags must be honored, not silently replaced by its
+// json tags (which would send wrong field names to the server).
+func TestFindStructQueryUsesMsgpackTagsInMessagePackMode(t *testing.T) {
+	// Distinct msgpack vs json tags so the captured body reveals which codec ran.
+	type structQuery struct {
+		Marker int `msgpack:"mp_marker" json:"json_marker"`
+	}
+
+	var captured []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/token" {
+			mockTokenHandler(t)(w, r)
+			return
+		}
+		captured, _ = io.ReadAll(r.Body)
+		// The MessagePack client decodes the /api/find response via msgpack, so
+		// reply with a MessagePack-encoded empty record array.
+		w.Header().Set("Content-Type", "application/msgpack")
+		resp, _ := msgpack.Marshal([]Record{})
+		_, _ = w.Write(resp)
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithConfig(ClientConfig{
+		BaseURL: server.URL,
+		APIKey:  "test-api-key",
+		Timeout: 60 * time.Second,
+		Format:  MessagePack,
+	})
+	if err != nil {
+		t.Fatalf("NewClientWithConfig failed: %v", err)
+	}
+
+	// A FindOptions body field forces the struct→map merge path.
+	limit := 25
+	if _, err := client.Find("users", structQuery{Marker: 7}, FindOptions{Limit: &limit}); err != nil {
+		t.Fatalf("Find failed: %v", err)
+	}
+
+	var body map[string]interface{}
+	if err := msgpack.Unmarshal(captured, &body); err != nil {
+		t.Fatalf("request body is not MessagePack: %v (body=%x)", err, captured)
+	}
+	if _, ok := body["mp_marker"]; !ok {
+		t.Errorf("struct query must convert via msgpack tags: want key \"mp_marker\", got %v", body)
+	}
+	if _, ok := body["json_marker"]; ok {
+		t.Error("json tag \"json_marker\" must not appear — the wrong codec was used for struct→map")
+	}
+}
+
+func TestFindByIDWithTransactionIDQueryParam(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	txID := "tx_xyz"
+	_, err := client.FindByID("users", "user_1", FindByIDOptions{
+		TransactionId: &txID,
+	})
+	if err != nil {
+		t.Fatalf("FindByID failed: %v", err)
+	}
+
+	if got.method != "GET" {
+		t.Errorf("FindByID method = %q, want GET", got.method)
+	}
+	if got.escapedPath != "/api/find/users/user_1" {
+		t.Errorf("FindByID path = %q, want /api/find/users/user_1", got.escapedPath)
+	}
+	if v := got.queryValues.Get("transaction_id"); v != txID {
+		t.Errorf("transaction_id query param = %q, want %q", v, txID)
+	}
+}
+
+// TestFindByIDBypassRippleWithTransactionID asserts bypass_ripple is sent as a
+// GET query param and rides alongside transaction_id when both are set on the
+// transactional read path. Mirrors how the non-transactional read carries
+// bypass_ripple (a GET query param). Previously FindByIDOptions had no
+// BypassRipple field, so a Go caller could not express it at all.
+func TestFindByIDBypassRippleWithTransactionID(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	txID := "tx_br"
+	bypass := true
+	_, err := client.FindByID("users", "user_1", FindByIDOptions{
+		BypassRipple:  &bypass,
+		TransactionId: &txID,
+	})
+	if err != nil {
+		t.Fatalf("FindByID failed: %v", err)
+	}
+
+	if got.method != "GET" {
+		t.Errorf("method = %q, want GET", got.method)
+	}
+	if got.escapedPath != "/api/find/users/user_1" {
+		t.Errorf("path = %q, want /api/find/users/user_1", got.escapedPath)
+	}
+	if v := got.queryValues.Get("bypass_ripple"); v != "true" {
+		t.Errorf("bypass_ripple query param = %q, want %q", v, "true")
+	}
+	if v := got.queryValues.Get("transaction_id"); v != txID {
+		t.Errorf("transaction_id query param = %q, want %q", v, txID)
+	}
+}
+
+// TestFindByIDBypassRippleFalse asserts an explicit BypassRipple:false is sent
+// as bypass_ripple=false (not omitted), since the field is a *bool.
+func TestFindByIDBypassRippleFalse(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	bypass := false
+	_, err := client.FindByID("users", "user_1", FindByIDOptions{
+		BypassRipple: &bypass,
+	})
+	if err != nil {
+		t.Fatalf("FindByID failed: %v", err)
+	}
+
+	if v := got.queryValues.Get("bypass_ripple"); v != "false" {
+		t.Errorf("bypass_ripple query param = %q, want %q", v, "false")
+	}
+}
+
+// TestFindByIDProjectionCommaJoined asserts select_fields/exclude_fields are
+// encoded as a single comma-joined value (FindByID joins them with strings.Join),
+// not as repeated params, and that the transaction_id rides alongside them.
+func TestFindByIDProjectionCommaJoined(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	txID := "tx_proj"
+	_, err := client.FindByID("users", "user_1", FindByIDOptions{
+		SelectFields:  []string{"name", "email"},
+		ExcludeFields: []string{"secret", "internal"},
+		TransactionId: &txID,
+	})
+	if err != nil {
+		t.Fatalf("FindByID failed: %v", err)
+	}
+
+	if got.method != "GET" {
+		t.Errorf("method = %q, want GET", got.method)
+	}
+	if got.escapedPath != "/api/find/users/user_1" {
+		t.Errorf("path = %q, want /api/find/users/user_1", got.escapedPath)
+	}
+	// strings.Join with "," — a single value, not repeated query keys.
+	if sel := got.queryValues["select_fields"]; len(sel) != 1 || sel[0] != "name,email" {
+		t.Errorf("select_fields = %v, want exactly [\"name,email\"]", sel)
+	}
+	if exc := got.queryValues["exclude_fields"]; len(exc) != 1 || exc[0] != "secret,internal" {
+		t.Errorf("exclude_fields = %v, want exactly [\"secret,internal\"]", exc)
+	}
+	if v := got.queryValues.Get("transaction_id"); v != txID {
+		t.Errorf("transaction_id = %q, want %q", v, txID)
+	}
+	// The comma must be percent-encoded in the raw query (url.Values.Encode).
+	if !strings.Contains(got.rawQuery, "select_fields=name%2Cemail") {
+		t.Errorf("raw query %q missing select_fields=name%%2Cemail", got.rawQuery)
+	}
+}
+
+// TestFindEscapesCollectionPathSegment verifies Find percent-encodes the
+// collection in the path, so reserved characters can't break routing or inject
+// into the URL.
+func TestFindEscapesCollectionPathSegment(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+	client := createTestClient(t, server)
+
+	if _, err := client.Find("odd coll/name", map[string]interface{}{"limit": 1}); err != nil {
+		t.Fatalf("Find failed: %v", err)
+	}
+	if want := "/api/find/odd%20coll%2Fname"; got.escapedPath != want {
+		t.Errorf("Find path = %q, want %q", got.escapedPath, want)
+	}
+}
+
+// TestFindByIDEscapesPathSegments verifies FindByID percent-encodes BOTH the
+// collection and id path segments.
+func TestFindByIDEscapesPathSegments(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+	client := createTestClient(t, server)
+
+	if _, err := client.FindByID("odd coll", "id/with space"); err != nil {
+		t.Fatalf("FindByID failed: %v", err)
+	}
+	if want := "/api/find/odd%20coll/id%2Fwith%20space"; got.escapedPath != want {
+		t.Errorf("FindByID path = %q, want %q", got.escapedPath, want)
+	}
+}
+
+func TestFindByIDNoOptionsHasNoQueryParam(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	if _, err := client.FindByID("users", "user_1"); err != nil {
+		t.Fatalf("FindByID failed: %v", err)
+	}
+
+	if got.rawQuery != "" {
+		t.Errorf("FindByID without options emitted query %q, want empty", got.rawQuery)
 	}
 }

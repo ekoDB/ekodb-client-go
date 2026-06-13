@@ -503,3 +503,53 @@ func TestClearTokenCache(t *testing.T) {
 		t.Errorf("Expected tokenExpiry=0 after ClearTokenCache, got %d", client.tokenExpiry)
 	}
 }
+
+// TestRefreshToken verifies RefreshToken eagerly fetches a fresh token and
+// returns it (parity with the other clients' refresh_token).
+func TestRefreshToken(t *testing.T) {
+	var count atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/token" {
+			n := count.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": fmt.Sprintf("token-%d", n)})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithConfig(ClientConfig{
+		BaseURL: server.URL,
+		APIKey:  "test-key",
+		Timeout: 5 * time.Second,
+		Format:  JSON,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	tok, err := client.RefreshToken()
+	if err != nil {
+		t.Fatalf("RefreshToken failed: %v", err)
+	}
+	if tok == "" {
+		t.Fatal("RefreshToken returned an empty token")
+	}
+
+	// A second refresh must eagerly fetch a NEW token and return it.
+	tok2, err := client.RefreshToken()
+	if err != nil {
+		t.Fatalf("RefreshToken (2nd) failed: %v", err)
+	}
+	if tok2 == tok {
+		t.Errorf("RefreshToken did not fetch a fresh token: both calls returned %q", tok2)
+	}
+
+	// The returned token must match what is stored.
+	client.tokenMu.RLock()
+	defer client.tokenMu.RUnlock()
+	if client.token != tok2 {
+		t.Errorf("RefreshToken returned %q but stored %q", tok2, client.token)
+	}
+}

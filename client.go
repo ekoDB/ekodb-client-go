@@ -313,6 +313,19 @@ func (c *Client) ClearTokenCache() {
 	c.tokenExpiry = 0
 }
 
+// RefreshToken forces a fresh authentication token to be fetched immediately
+// (bypassing any cached token) and returns it. Parity with the other clients'
+// refresh_token; unlike ClearTokenCache, which defers the fetch to the next
+// request, this fetches eagerly.
+func (c *Client) RefreshToken() (string, error) {
+	if err := c.refreshToken(); err != nil {
+		return "", err
+	}
+	c.tokenMu.RLock()
+	defer c.tokenMu.RUnlock()
+	return c.token, nil
+}
+
 // retryBackoffBase returns the deterministic, capped exponential backoff for a
 // (0-indexed) retry attempt: 200ms, 400ms, 800ms, ... clamped to 5s. It never
 // overflows regardless of attempt count.
@@ -553,7 +566,7 @@ func (c *Client) Insert(collection string, record Record, opts ...InsertOptions)
 	}
 
 	// Build query parameters
-	path := "/api/insert/" + collection
+	path := "/api/insert/" + url.PathEscape(collection)
 	if len(opts) > 0 {
 		params := url.Values{}
 		if opts[0].BypassRipple != nil {
@@ -582,7 +595,13 @@ func (c *Client) Insert(collection string, record Record, opts ...InsertOptions)
 	return result, nil
 }
 
-// FindOptions contains optional parameters for Find
+// FindOptions carries optional shaping for Find. Filter, Sort, Limit, Skip,
+// Join, BypassCache, SelectFields, and ExcludeFields are merged into the request
+// body (the server's FindBody); when one is set here it overrides the same field
+// carried in the query argument. TransactionId and BypassRipple are sent as
+// query parameters instead, not in the FindBody — TransactionId because the read
+// runs in the transaction's read-your-writes view, and BypassRipple to match how
+// every other method (Insert/Update/FindByID) carries it.
 type FindOptions struct {
 	Filter        interface{}
 	Sort          interface{}
@@ -593,12 +612,69 @@ type FindOptions struct {
 	BypassRipple  *bool
 	SelectFields  []string
 	ExcludeFields []string
+	// TransactionId reads within a transaction (read-your-writes): the read is
+	// served from the transaction's own view — its uncommitted staged writes,
+	// else the committed store — and recorded in its read set for commit-time
+	// conflict detection. Nil for an ordinary committed read.
+	TransactionId *string
 }
 
 // Find finds documents in a collection
 func (c *Client) Find(collection string, query interface{}, opts ...FindOptions) ([]Record, error) {
-	path := "/api/find/" + collection
-	respBody, err := c.makeRequest("POST", path, query)
+	path := "/api/find/" + url.PathEscape(collection)
+
+	// Default: send the caller's query unchanged, so a non-map query (e.g. a
+	// struct relying on msgpack tags — /api/find is MessagePack by default) keeps
+	// its serialization and we avoid a needless marshal/unmarshal round-trip. Only
+	// materialize a mutable body map when a FindOptions body field has to override
+	// the query.
+	body := query
+	if findOptionsHaveBodyFields(opts) {
+		merged, err := c.mergeFindOptions(path, query, opts)
+		if err != nil {
+			return nil, err
+		}
+		body = merged
+	}
+
+	// transaction_id and bypass_ripple are query parameters — the same way every
+	// other method (Insert/Update/FindByID) carries bypass_ripple — not part of
+	// the FindBody. When the query is a map (e.g. QueryBuilder.BypassRipple()
+	// output), hoist any bypass_ripple it carries out of the body so it is sent
+	// as a query param instead; an explicit FindOptions.BypassRipple wins.
+	var bypassRipple *bool
+	if len(opts) > 0 {
+		bypassRipple = opts[0].BypassRipple
+	}
+	if m, ok := body.(map[string]interface{}); ok {
+		if v, present := m["bypass_ripple"]; present {
+			stripped := make(map[string]interface{}, len(m))
+			for k, val := range m {
+				if k != "bypass_ripple" {
+					stripped[k] = val
+				}
+			}
+			body = stripped
+			if bypassRipple == nil {
+				if b, ok := v.(bool); ok {
+					bypassRipple = &b
+				}
+			}
+		}
+	}
+
+	params := url.Values{}
+	if len(opts) > 0 && opts[0].TransactionId != nil {
+		params.Add("transaction_id", *opts[0].TransactionId)
+	}
+	if bypassRipple != nil {
+		params.Add("bypass_ripple", fmt.Sprintf("%t", *bypassRipple))
+	}
+	if encoded := params.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+
+	respBody, err := c.makeRequest("POST", path, body)
 	if err != nil {
 		return nil, err
 	}
@@ -611,9 +687,140 @@ func (c *Client) Find(collection string, query interface{}, opts ...FindOptions)
 	return results, nil
 }
 
-// FindByID finds a document by ID
-func (c *Client) FindByID(collection, id string) (Record, error) {
-	path := fmt.Sprintf("/api/find/%s/%s", collection, id)
+// findOptionsHaveBodyFields reports whether opts sets any field that Find merges
+// into the request body (the server's FindBody). TransactionId is excluded — it
+// is a query parameter, not a body field — so a Find that only sets TransactionId
+// still passes its query through unchanged.
+func findOptionsHaveBodyFields(opts []FindOptions) bool {
+	if len(opts) == 0 {
+		return false
+	}
+	o := opts[0]
+	// BypassRipple is intentionally excluded — like TransactionId, it is sent as a
+	// query parameter by Find, not merged into the FindBody.
+	return o.Filter != nil || o.Sort != nil || o.Limit != nil || o.Skip != nil ||
+		o.Join != nil || o.BypassCache != nil ||
+		len(o.SelectFields) > 0 || len(o.ExcludeFields) > 0
+}
+
+// mergeFindOptions builds the POST /api/find request body (the server's
+// FindBody) from the caller's query object overlaid with any explicitly-set
+// FindOptions fields. A field set on FindOptions overrides the same field
+// carried in query. TransactionId and BypassRipple are intentionally excluded
+// here — they are query parameters, applied by the caller. path selects the codec
+// used to materialize a non-map query into a map, so it matches the request's
+// wire format.
+func (c *Client) mergeFindOptions(path string, query interface{}, opts []FindOptions) (map[string]interface{}, error) {
+	body, err := c.queryToBodyMap(path, query)
+	if err != nil {
+		return nil, err
+	}
+	if len(opts) == 0 {
+		return body, nil
+	}
+	o := opts[0]
+	if o.Filter != nil {
+		body["filter"] = o.Filter
+	}
+	if o.Sort != nil {
+		body["sort"] = o.Sort
+	}
+	if o.Limit != nil {
+		body["limit"] = *o.Limit
+	}
+	if o.Skip != nil {
+		body["skip"] = *o.Skip
+	}
+	if o.Join != nil {
+		body["join"] = o.Join
+	}
+	if o.BypassCache != nil {
+		body["bypass_cache"] = *o.BypassCache
+	}
+	// BypassRipple is not merged into the body — Find sends it as a query param.
+	if len(o.SelectFields) > 0 {
+		body["select_fields"] = o.SelectFields
+	}
+	if len(o.ExcludeFields) > 0 {
+		body["exclude_fields"] = o.ExcludeFields
+	}
+	return body, nil
+}
+
+// queryToBodyMap converts a find query object into a mutable FindBody-shaped map.
+// A nil query yields an empty body. A query that is already a map is copied so
+// the caller's map is not mutated; anything else is round-tripped into a map
+// using the SAME codec the request body will use (MessagePack vs JSON, decided by
+// path and the client format), so a struct's field names match the wire format —
+// e.g. its msgpack tags are honored on a MessagePack find rather than silently
+// replaced by its json tags.
+func (c *Client) queryToBodyMap(path string, query interface{}) (map[string]interface{}, error) {
+	if query == nil {
+		return map[string]interface{}{}, nil
+	}
+	if m, ok := query.(map[string]interface{}); ok {
+		out := make(map[string]interface{}, len(m))
+		for k, v := range m {
+			out[k] = v
+		}
+		return out, nil
+	}
+	out := map[string]interface{}{}
+	if !shouldUseJSON(path) && c.format == MessagePack {
+		raw, err := msgpack.Marshal(query)
+		if err != nil {
+			return nil, fmt.Errorf("invalid find query: %w", err)
+		}
+		if err := msgpack.Unmarshal(raw, &out); err != nil {
+			return nil, fmt.Errorf("find query must encode as a MessagePack map: %w", err)
+		}
+		return out, nil
+	}
+	raw, err := json.Marshal(query)
+	if err != nil {
+		return nil, fmt.Errorf("invalid find query: %w", err)
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("find query must encode as a JSON object: %w", err)
+	}
+	return out, nil
+}
+
+// FindByIDOptions contains optional parameters for FindByID, including
+// read-your-writes within a transaction (see FindOptions.TransactionId).
+type FindByIDOptions struct {
+	SelectFields  []string
+	ExcludeFields []string
+	// BypassRipple skips ripple propagation for this read. Sent as the
+	// bypass_ripple GET query param (the same way the non-transactional read
+	// carries it) and rides alongside transaction_id when both are set. Nil
+	// leaves it off.
+	BypassRipple  *bool
+	TransactionId *string
+}
+
+// FindByID finds a document by ID. Pass FindByIDOptions to project fields or to
+// read within a transaction (read-your-writes).
+func (c *Client) FindByID(collection, id string, opts ...FindByIDOptions) (Record, error) {
+	path := fmt.Sprintf("/api/find/%s/%s", url.PathEscape(collection), url.PathEscape(id))
+	if len(opts) > 0 {
+		params := url.Values{}
+		if len(opts[0].SelectFields) > 0 {
+			params.Add("select_fields", strings.Join(opts[0].SelectFields, ","))
+		}
+		if len(opts[0].ExcludeFields) > 0 {
+			params.Add("exclude_fields", strings.Join(opts[0].ExcludeFields, ","))
+		}
+		if opts[0].BypassRipple != nil {
+			params.Add("bypass_ripple", fmt.Sprintf("%t", *opts[0].BypassRipple))
+		}
+		if opts[0].TransactionId != nil {
+			params.Add("transaction_id", *opts[0].TransactionId)
+		}
+		if len(params) > 0 {
+			path += "?" + params.Encode()
+		}
+	}
 	respBody, err := c.makeRequest("GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -669,7 +876,7 @@ type UpdateOptions struct {
 // Update updates a document
 func (c *Client) Update(collection, id string, record Record, opts ...UpdateOptions) (Record, error) {
 	// Build query parameters
-	path := fmt.Sprintf("/api/update/%s/%s", collection, id)
+	path := fmt.Sprintf("/api/update/%s/%s", url.PathEscape(collection), url.PathEscape(id))
 	if len(opts) > 0 {
 		params := url.Values{}
 		if opts[0].BypassRipple != nil {
@@ -722,7 +929,7 @@ type UpdateWithActionBody struct {
 // Supported actions: increment, decrement, multiply, divide, modulo,
 // push, pop, shift, unshift, remove, append, clear.
 func (c *Client) UpdateWithAction(collection, id, action, field string, value interface{}) (Record, error) {
-	path := fmt.Sprintf("/api/update/%s/%s/action/%s", collection, id, action)
+	path := fmt.Sprintf("/api/update/%s/%s/action/%s", url.PathEscape(collection), url.PathEscape(id), url.PathEscape(action))
 	body := UpdateWithActionBody{Field: field, Value: value}
 	respBody, err := c.makeRequest("PUT", path, body)
 	if err != nil {
@@ -744,7 +951,7 @@ func (c *Client) UpdateWithAction(collection, id, action, field string, value in
 //
 // Each action is a 3-element slice: [action, field, value].
 func (c *Client) UpdateWithActionSequence(collection, id string, actions [][3]interface{}) (Record, error) {
-	path := fmt.Sprintf("/api/update/sequence/%s/%s", collection, id)
+	path := fmt.Sprintf("/api/update/sequence/%s/%s", url.PathEscape(collection), url.PathEscape(id))
 	respBody, err := c.makeRequest("PUT", path, actions)
 	if err != nil {
 		return nil, err
@@ -767,7 +974,7 @@ type DeleteOptions struct {
 // Delete deletes a document
 func (c *Client) Delete(collection, id string, opts ...DeleteOptions) error {
 	// Build query parameters
-	path := fmt.Sprintf("/api/delete/%s/%s", collection, id)
+	path := fmt.Sprintf("/api/delete/%s/%s", url.PathEscape(collection), url.PathEscape(id))
 	if len(opts) > 0 {
 		params := url.Values{}
 		if opts[0].BypassRipple != nil {
@@ -821,7 +1028,7 @@ func (c *Client) BatchInsert(collection string, records []Record, opts ...BatchI
 
 	query := batchInsertQuery{Inserts: inserts}
 
-	path := "/api/batch/insert/" + collection
+	path := "/api/batch/insert/" + url.PathEscape(collection)
 	respBody, err := c.makeRequest("POST", path, query)
 	if err != nil {
 		return nil, err
@@ -875,7 +1082,7 @@ func (c *Client) BatchUpdate(collection string, updates map[string]Record, opts 
 
 	query := batchUpdateQuery{Updates: items}
 
-	path := "/api/batch/update/" + collection
+	path := "/api/batch/update/" + url.PathEscape(collection)
 	respBody, err := c.makeRequest("PUT", path, query)
 	if err != nil {
 		return nil, err
@@ -928,7 +1135,7 @@ func (c *Client) BatchDelete(collection string, ids []string, opts ...BatchDelet
 
 	query := batchDeleteQuery{Deletes: deletes}
 
-	path := "/api/batch/delete/" + collection
+	path := "/api/batch/delete/" + url.PathEscape(collection)
 	respBody, err := c.makeRequest("DELETE", path, query)
 	if err != nil {
 		return 0, err
@@ -1074,6 +1281,12 @@ func (c *Client) KVGet(key string) (interface{}, error) {
 // KVDelete deletes a key
 func (c *Client) KVDelete(key string) error {
 	_, err := c.makeRequest("DELETE", "/api/kv/delete/"+url.PathEscape(key), nil)
+	return err
+}
+
+// KVClear removes every key-value entry from the store (clears the KV namespace).
+func (c *Client) KVClear() error {
+	_, err := c.makeRequest("DELETE", "/api/kv/clear", nil)
 	return err
 }
 
@@ -1251,7 +1464,7 @@ func (c *Client) BeginTransaction(isolationLevel string) (string, error) {
 
 // GetTransactionStatus gets the status of a transaction
 func (c *Client) GetTransactionStatus(transactionID string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("GET", "/api/transactions/"+transactionID, nil)
+	respBody, err := c.makeRequest("GET", "/api/transactions/"+url.PathEscape(transactionID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1264,21 +1477,71 @@ func (c *Client) GetTransactionStatus(transactionID string) (map[string]interfac
 	return result, nil
 }
 
-// CommitTransaction commits a transaction
+// CommitTransaction commits a transaction.
+//
+// Transactions are buffered: statements issued with this transaction ID (via
+// the TransactionId option on Insert/Update/Delete/Find/FindByID/…) are staged
+// and applied atomically here. They are invisible to others until commit, and
+// visible to this transaction's own reads (read-your-writes) only when those
+// reads also carry the transaction ID. Commit may fail with an HTTP 409 conflict
+// if a record this transaction read or wrote was changed by another committed
+// transaction — retry the transaction in that case.
 func (c *Client) CommitTransaction(transactionID string) error {
-	_, err := c.makeRequest("POST", "/api/transactions/"+transactionID+"/commit", nil)
+	_, err := c.makeRequest("POST", "/api/transactions/"+url.PathEscape(transactionID)+"/commit", nil)
 	return err
 }
 
-// RollbackTransaction rolls back a transaction
+// RollbackTransaction rolls back a transaction, discarding all staged writes
+// (nothing was applied).
 func (c *Client) RollbackTransaction(transactionID string) error {
-	_, err := c.makeRequest("POST", "/api/transactions/"+transactionID+"/rollback", nil)
+	_, err := c.makeRequest("POST", "/api/transactions/"+url.PathEscape(transactionID)+"/rollback", nil)
+	return err
+}
+
+// CreateSavepoint creates a named savepoint within a transaction. A later
+// RollbackToSavepoint discards everything staged after it.
+func (c *Client) CreateSavepoint(transactionID, name string) error {
+	data := map[string]interface{}{"name": name}
+	_, err := c.makeRequest("POST", "/api/transactions/"+url.PathEscape(transactionID)+"/savepoints", data)
+	return err
+}
+
+// RollbackToSavepoint rolls the transaction back to a savepoint, discarding
+// writes staged after it.
+func (c *Client) RollbackToSavepoint(transactionID, name string) error {
+	_, err := c.makeRequest("POST", "/api/transactions/"+url.PathEscape(transactionID)+"/savepoints/"+url.PathEscape(name)+"/rollback", nil)
+	return err
+}
+
+// ReleaseSavepoint releases (forgets) a savepoint. Staged work is unaffected.
+func (c *Client) ReleaseSavepoint(transactionID, name string) error {
+	_, err := c.makeRequest("DELETE", "/api/transactions/"+url.PathEscape(transactionID)+"/savepoints/"+url.PathEscape(name), nil)
 	return err
 }
 
 // ListCollections lists all collections
 func (c *Client) ListCollections() ([]string, error) {
 	respBody, err := c.makeRequest("GET", "/api/collections", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Collections []string `json:"collections"`
+	}
+	// Always use JSON for metadata endpoints
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return result.Collections, nil
+}
+
+// ListUserCollections lists only user-created collections, excluding internal
+// chat/system collections the server maintains. It mirrors the other clients'
+// list_user_collections by passing the server's exclude_internal=true filter.
+func (c *Client) ListUserCollections() ([]string, error) {
+	respBody, err := c.makeRequest("GET", "/api/collections?exclude_internal=true", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1330,7 +1593,7 @@ func (c *Client) CountDocuments(collection string) (int, error) {
 // RestoreRecord restores a deleted record from trash
 // Records remain in trash for 30 days before permanent deletion
 func (c *Client) RestoreRecord(collection, id string) error {
-	path := fmt.Sprintf("/api/trash/%s/%s", collection, id)
+	path := fmt.Sprintf("/api/trash/%s/%s", url.PathEscape(collection), url.PathEscape(id))
 	_, err := c.makeRequest("POST", path, nil)
 	return err
 }
@@ -1338,7 +1601,7 @@ func (c *Client) RestoreRecord(collection, id string) error {
 // RestoreCollection restores all deleted records in a collection from trash
 // Records remain in trash for 30 days before permanent deletion
 func (c *Client) RestoreCollection(collection string) (int, error) {
-	path := fmt.Sprintf("/api/trash/%s", collection)
+	path := fmt.Sprintf("/api/trash/%s", url.PathEscape(collection))
 	respBody, err := c.makeRequest("POST", path, nil)
 	if err != nil {
 		return 0, err

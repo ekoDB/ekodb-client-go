@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 )
 
 // ── Goal CRUD ──────────────────────────────────────────────────────────────
@@ -36,7 +37,7 @@ func (c *Client) GoalList() (map[string]interface{}, error) {
 
 // GoalGet retrieves a goal by ID.
 func (c *Client) GoalGet(id string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/goals/%s", id), nil)
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/goals/%s", url.PathEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +50,7 @@ func (c *Client) GoalGet(id string) (map[string]interface{}, error) {
 
 // GoalUpdate updates a goal by ID.
 func (c *Client) GoalUpdate(id string, data map[string]interface{}) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("PUT", fmt.Sprintf("/api/chat/goals/%s", id), data)
+	respBody, err := c.makeRequest("PUT", fmt.Sprintf("/api/chat/goals/%s", url.PathEscape(id)), data)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +63,7 @@ func (c *Client) GoalUpdate(id string, data map[string]interface{}) (map[string]
 
 // GoalDelete deletes a goal by ID.
 func (c *Client) GoalDelete(id string) error {
-	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/chat/goals/%s", id), nil)
+	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/chat/goals/%s", url.PathEscape(id)), nil)
 	return err
 }
 
@@ -83,7 +84,7 @@ func (c *Client) GoalSearch(query string) (map[string]interface{}, error) {
 
 // GoalComplete atomically marks a goal as complete (status → pending_review).
 func (c *Client) GoalComplete(id string, data map[string]interface{}) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/goals/%s/complete", id), data)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/goals/%s/complete", url.PathEscape(id)), data)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +97,7 @@ func (c *Client) GoalComplete(id string, data map[string]interface{}) (map[strin
 
 // GoalApprove atomically approves a goal (status → in_progress).
 func (c *Client) GoalApprove(id string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/goals/%s/approve", id), nil)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/goals/%s/approve", url.PathEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +110,7 @@ func (c *Client) GoalApprove(id string) (map[string]interface{}, error) {
 
 // GoalReject atomically rejects a goal (status → failed).
 func (c *Client) GoalReject(id string, data map[string]interface{}) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/goals/%s/reject", id), data)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/goals/%s/reject", url.PathEscape(id)), data)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +125,7 @@ func (c *Client) GoalReject(id string, data map[string]interface{}) (map[string]
 
 // GoalStepStart atomically marks a goal step as in_progress.
 func (c *Client) GoalStepStart(id string, stepIndex int) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/goals/%s/steps/%d/start", id, stepIndex), nil)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/goals/%s/steps/%s/start", url.PathEscape(id), url.PathEscape(strconv.Itoa(stepIndex))), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +138,7 @@ func (c *Client) GoalStepStart(id string, stepIndex int) (map[string]interface{}
 
 // GoalStepComplete atomically marks a goal step as completed.
 func (c *Client) GoalStepComplete(id string, stepIndex int, data map[string]interface{}) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/goals/%s/steps/%d/complete", id, stepIndex), data)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/goals/%s/steps/%s/complete", url.PathEscape(id), url.PathEscape(strconv.Itoa(stepIndex))), data)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +151,7 @@ func (c *Client) GoalStepComplete(id string, stepIndex int, data map[string]inte
 
 // GoalStepFail atomically marks a goal step as failed.
 func (c *Client) GoalStepFail(id string, stepIndex int, data map[string]interface{}) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/goals/%s/steps/%d/fail", id, stepIndex), data)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/goals/%s/steps/%s/fail", url.PathEscape(id), url.PathEscape(strconv.Itoa(stepIndex))), data)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +192,7 @@ func (c *Client) GoalTemplateList() (map[string]interface{}, error) {
 
 // GoalTemplateGet retrieves a goal template by ID.
 func (c *Client) GoalTemplateGet(id string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/goal-templates/%s", id), nil)
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/goal-templates/%s", url.PathEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +205,7 @@ func (c *Client) GoalTemplateGet(id string) (map[string]interface{}, error) {
 
 // GoalTemplateUpdate updates a goal template by ID.
 func (c *Client) GoalTemplateUpdate(id string, data map[string]interface{}) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("PUT", fmt.Sprintf("/api/chat/goal-templates/%s", id), data)
+	respBody, err := c.makeRequest("PUT", fmt.Sprintf("/api/chat/goal-templates/%s", url.PathEscape(id)), data)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +218,7 @@ func (c *Client) GoalTemplateUpdate(id string, data map[string]interface{}) (map
 
 // GoalTemplateDelete deletes a goal template by ID.
 func (c *Client) GoalTemplateDelete(id string) error {
-	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/chat/goal-templates/%s", id), nil)
+	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/chat/goal-templates/%s", url.PathEscape(id)), nil)
 	return err
 }
 
@@ -251,7 +252,7 @@ func (c *Client) TaskList() (map[string]interface{}, error) {
 
 // TaskGet retrieves a task by ID.
 func (c *Client) TaskGet(id string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/tasks/%s", id), nil)
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/tasks/%s", url.PathEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +265,7 @@ func (c *Client) TaskGet(id string) (map[string]interface{}, error) {
 
 // TaskUpdate updates a task by ID.
 func (c *Client) TaskUpdate(id string, data map[string]interface{}) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("PUT", fmt.Sprintf("/api/chat/tasks/%s", id), data)
+	respBody, err := c.makeRequest("PUT", fmt.Sprintf("/api/chat/tasks/%s", url.PathEscape(id)), data)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +278,7 @@ func (c *Client) TaskUpdate(id string, data map[string]interface{}) (map[string]
 
 // TaskDelete deletes a task by ID.
 func (c *Client) TaskDelete(id string) error {
-	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/chat/tasks/%s", id), nil)
+	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/chat/tasks/%s", url.PathEscape(id)), nil)
 	return err
 }
 
@@ -298,7 +299,7 @@ func (c *Client) TaskDue(now string) (map[string]interface{}, error) {
 
 // TaskStart atomically marks a task as running.
 func (c *Client) TaskStart(id string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/tasks/%s/start", id), nil)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/tasks/%s/start", url.PathEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +312,7 @@ func (c *Client) TaskStart(id string) (map[string]interface{}, error) {
 
 // TaskSucceed atomically marks a task as succeeded.
 func (c *Client) TaskSucceed(id string, data map[string]interface{}) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/tasks/%s/succeed", id), data)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/tasks/%s/succeed", url.PathEscape(id)), data)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +325,7 @@ func (c *Client) TaskSucceed(id string, data map[string]interface{}) (map[string
 
 // TaskFail atomically marks a task as failed.
 func (c *Client) TaskFail(id string, data map[string]interface{}) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/tasks/%s/fail", id), data)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/tasks/%s/fail", url.PathEscape(id)), data)
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +338,7 @@ func (c *Client) TaskFail(id string, data map[string]interface{}) (map[string]in
 
 // TaskPause atomically pauses a task.
 func (c *Client) TaskPause(id string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/tasks/%s/pause", id), nil)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/tasks/%s/pause", url.PathEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -350,7 +351,7 @@ func (c *Client) TaskPause(id string) (map[string]interface{}, error) {
 
 // TaskResume atomically resumes a paused task.
 func (c *Client) TaskResume(id string, data map[string]interface{}) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/tasks/%s/resume", id), data)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/tasks/%s/resume", url.PathEscape(id)), data)
 	if err != nil {
 		return nil, err
 	}
@@ -391,7 +392,7 @@ func (c *Client) AgentList() (map[string]interface{}, error) {
 
 // AgentGet retrieves an agent by ID.
 func (c *Client) AgentGet(id string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/agents/%s", id), nil)
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/agents/%s", url.PathEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -404,7 +405,7 @@ func (c *Client) AgentGet(id string) (map[string]interface{}, error) {
 
 // AgentGetByName retrieves an agent by name.
 func (c *Client) AgentGetByName(name string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/agents/by-name/%s", name), nil)
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/agents/by-name/%s", url.PathEscape(name)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +418,7 @@ func (c *Client) AgentGetByName(name string) (map[string]interface{}, error) {
 
 // AgentUpdate updates an agent by ID.
 func (c *Client) AgentUpdate(id string, data map[string]interface{}) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("PUT", fmt.Sprintf("/api/chat/agents/%s", id), data)
+	respBody, err := c.makeRequest("PUT", fmt.Sprintf("/api/chat/agents/%s", url.PathEscape(id)), data)
 	if err != nil {
 		return nil, err
 	}
@@ -430,13 +431,13 @@ func (c *Client) AgentUpdate(id string, data map[string]interface{}) (map[string
 
 // AgentDelete deletes an agent by ID.
 func (c *Client) AgentDelete(id string) error {
-	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/chat/agents/%s", id), nil)
+	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/chat/agents/%s", url.PathEscape(id)), nil)
 	return err
 }
 
 // AgentsByDeployment retrieves agents associated with a deployment ID.
 func (c *Client) AgentsByDeployment(deploymentId string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/agents/by-deployment/%s", deploymentId), nil)
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/agents/by-deployment/%s", url.PathEscape(deploymentId)), nil)
 	if err != nil {
 		return nil, err
 	}
