@@ -6,6 +6,99 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-06-09
+
+### Added
+
+- **Buffered-transaction read-your-writes + savepoints.** ekoDB transactions are
+  now enforced and buffered server-side: writes carrying a `transaction_id` are
+  staged and applied atomically at commit. `Find`/`FindByID` now accept a
+  transaction id so reads see the transaction's own staged writes
+  (read-your-writes):
+  `FindByID(collection, id, FindByIDOptions{ TransactionId, SelectFields, ExcludeFields })`
+  and `Find(collection, query, FindOptions{ TransactionId })`. Added savepoint
+  methods `CreateSavepoint`, `RollbackToSavepoint`, and `ReleaseSavepoint`.
+  `CommitTransaction` may return an HTTP 409 conflict (retry the transaction)
+  when a record it read or wrote was changed by another committed transaction;
+  documented on the method.
+
+- **`Client.KVClear()`** — clears the entire KV store via
+  `DELETE /api/kv/clear`, filling a client-parity gap (the endpoint was
+  previously unreachable from the Go client).
+
+- **`Client.ListUserCollections()`** — lists only user-created collections
+  (passing the server's `exclude_internal=true` filter), excluding internal
+  chat/system collections. Closes a parity gap: the other clients
+  (Rust/TypeScript/Python/Kotlin) already exposed `list_user_collections`.
+
+- **`Client.RefreshToken()`** — eagerly fetches a fresh auth token (bypassing
+  the cached one) and returns it. Closes a parity gap: the other clients expose
+  a public `refresh_token`, while Go previously only had `ClearTokenCache()`
+  (which defers the fetch to the next request).
+
+- **WebSocket msgpack negotiation (transparent binary transport).** On every WS
+  (re)connect the client now performs an additive `Hello`/`Welcome` handshake:
+  it offers msgpack and, if the server welcomes it, transparently switches that
+  connection to binary msgpack frames for both requests and responses; otherwise
+  it stays on JSON text. The negotiation is internal, so there are no public API
+  changes. Fully back-compatible — a server that does not welcome msgpack (or an
+  older server that never answers) leaves the connection on JSON. Incoming
+  binary frames are decoded value-identically to JSON (including binary fields,
+  which stay number arrays, not base64), so the decoded data is the same
+  regardless of negotiated transport.
+
+### Fixed
+
+- **Percent-encode all URL path segments.** `client.go` already escaped its
+  CRUD/KV paths, but the chat, functions, goals/tasks/agents, schedules, schema,
+  and search endpoints interpolated caller-supplied segments (ids, function
+  labels, chat model names like `anthropic/claude-3`, agent names, …) into the
+  path without escaping — so a reserved character (`/`, space, `#`, `?`)
+  produced a malformed URL the server 404'd. All 60 caller-segment sites now use
+  `url.PathEscape`. Behavior is unchanged for segments without reserved
+  characters. Covered by new encoding tests (`path_escape_test.go`). Part of the
+  cross-client parity fix (ekodb-client #153).
+
+- **`connect()` initializes `ctx`/`cancel` whenever EITHER is nil.** A manually
+  constructed `WebSocketClient` that set only one of the pair would panic:
+  `cancel` nil → `Close()`/`reconnect()` (which call `ws.cancel()`
+  unconditionally); `ctx` nil → `sendRequest()`/subscribe loops (which deref
+  `ws.ctx` via `context.WithTimeout` / `ws.ctx.Done()`). `connect()` now derives
+  a cancelable context whenever either field is unset, covering all manual-
+  construction combinations. Regression tests
+  `TestWebSocketConnectInitsCancelWhenCtxSetWithoutCancel` and
+  `TestWebSocketConnectInitsCtxWhenCancelSetWithoutCtx`.
+
+- **WebSocket response routing no longer risks misrouting an unmatched ack.**
+  The single-pending-request fallback in `routeRequestResponse` keyed off "no
+  top-level message-id field" — but a messageId extracted from the payload did
+  not set that flag, so a present-but-unmatched id (e.g. a best-effort
+  `Unsubscribe` ack, or a late response for an already-settled request) could be
+  delivered to whatever single request was still pending. It now suppresses the
+  fallback whenever a message-id field is present anywhere (top level or
+  payload) with a usable value — including a present-but-unparseable id —
+  matching the TypeScript client's truthiness check. Only a response with no
+  usable id at all falls through to the sequential-request heuristic.
+- **WebSocket dial is now cancelable.** `connect()` uses
+  `DialContext(ws.ctx, …)` instead of `DefaultDialer.Dial`, so `Close()`/context
+  cancellation can abort an in-flight dial (a reconnect-loop dial no longer
+  blocks a clean shutdown until the handshake timeout).
+- **Reconnect no longer revives a zombie connection.** If every subscription is
+  removed while the reconnect loop is backing off (e.g. an in-flight `Subscribe`
+  failed and deleted its subscription after the drop spawned the loop),
+  `reconnect()` now exits before dialing instead of reconnecting with nothing to
+  replay.
+- **`Unsubscribe` now tells the server to stop streaming.** It sends a
+  best-effort WebSocket `Unsubscribe` frame (the server already handles it) in
+  addition to the local teardown, so the server stops pushing mutations for the
+  collection instead of streaming until the connection drops.
+
+### Documentation
+
+- Clarified the `QueryBuilder.Page` doc comment: values below 1 clamp to page 1,
+  unlike `Client.Paginate`, which returns an error for `page < 1` (only the
+  offset calculation matches).
+
 ## [0.20.0] - 2026-06-04
 
 ### Removed
