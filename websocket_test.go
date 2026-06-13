@@ -2507,3 +2507,58 @@ func TestMsgpackToJSONTranscode(t *testing.T) {
 		t.Fatalf("binary field bytes wrong: %v", photo)
 	}
 }
+
+// TestWebSocketCloseAbortsStuckDial is the #42 acceptance test (a). The fix
+// switched connect() from websocket.DefaultDialer.Dial (which dials on
+// context.Background and is therefore unabortable) to DialContext(ws.ctx)
+// (websocket.go:237), and Close() cancels that context (websocket.go:1582). So
+// a dial blocked in the TCP-connect phase — here a non-routable TEST-NET-1
+// address (RFC 5737) whose SYN is never answered — must be aborted promptly by
+// Close(), instead of blocking for the multi-minute OS TCP-connect timeout.
+//
+// Scope note: gorilla v1.5.3 honors ctx cancellation only during the
+// net.Dialer connect; a dial that has ALREADY connected and is hung in the
+// WebSocket upgrade handshake is bounded by DefaultDialer.HandshakeTimeout
+// (45s), which gorilla applies as a static read deadline rather than watching
+// ctx.Done(). That phase is timeout-bounded, not Close-abortable — which is the
+// behavior both before and after this fix.
+func TestWebSocketCloseAbortsStuckDial(t *testing.T) {
+	// RFC 5737 TEST-NET-1: guaranteed non-routable, so the TCP connect hangs
+	// (SYN goes unanswered) rather than failing fast or succeeding.
+	const unroutable = "ws://192.0.2.1:9"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ws := &WebSocketClient{
+		wsURL:         unroutable,
+		tokenProvider: func() string { return "test-token" },
+		ctx:           ctx,
+		cancel:        cancel,
+	}
+
+	dialDone := make(chan error, 1)
+	go func() { dialDone <- ws.connect() }()
+
+	// The dial must be genuinely blocked in-flight (not fail fast or connect).
+	select {
+	case e := <-dialDone:
+		t.Skipf("environment resolved the non-routable dial too fast (%v); cannot exercise in-flight cancellation here", e)
+	case <-time.After(300 * time.Millisecond):
+		// Expected: dial is in-flight, blocked in connect()'s DialContext.
+	}
+
+	// Close() must abort the in-flight dial promptly via ws.cancel().
+	start := time.Now()
+	_ = ws.Close()
+
+	select {
+	case e := <-dialDone:
+		if e == nil {
+			t.Fatal("connect() should fail when its dial is aborted, got nil error")
+		}
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Fatalf("Close() took %v to abort the in-flight dial; expected a prompt abort well under the 45s handshake timeout", elapsed)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close() did not abort the stuck dial; it blocked past prompt cancellation")
+	}
+}
