@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Tests
+
+- **Regression test for cancelable WebSocket dial (#42, acceptance a).** Added
+  `TestWebSocketCloseAbortsStuckDial`, asserting that a dial blocked in the TCP
+  connect phase (a non-routable RFC 5737 address) is aborted promptly by
+  `Close()` via context cancellation, rather than blocking for the OS connect
+  timeout. The test documents the scope boundary: a dial hung in the WebSocket
+  upgrade handshake remains bounded by `DefaultDialer.HandshakeTimeout` (45s),
+  which gorilla applies as a static read deadline (no `ctx.Done()` watcher in
+  that phase) — unchanged before and after the dial fix.
+
 ## [0.21.0] - 2026-06-09
 
 ### Added
