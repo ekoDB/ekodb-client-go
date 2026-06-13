@@ -4,6 +4,7 @@ package ekodb
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 )
 
 // SearchQuery represents a search query for full-text and vector search
@@ -203,7 +204,7 @@ func (sb *SearchQueryBuilder) Build() SearchQuery {
 
 // Search performs a search query on a collection
 func (c *Client) Search(collection string, searchQuery SearchQuery) (*SearchResponse, error) {
-	endpoint := fmt.Sprintf("/api/search/%s", collection)
+	endpoint := fmt.Sprintf("/api/search/%s", url.PathEscape(collection))
 
 	data, err := c.makeRequest("POST", endpoint, searchQuery)
 	if err != nil {
@@ -265,7 +266,7 @@ type DistinctValuesResponse struct {
 //	    },
 //	})
 func (c *Client) DistinctValues(collection, field string, query DistinctValuesQuery) (*DistinctValuesResponse, error) {
-	endpoint := fmt.Sprintf("/api/distinct/%s/%s", collection, field)
+	endpoint := fmt.Sprintf("/api/distinct/%s/%s", url.PathEscape(collection), url.PathEscape(field))
 
 	data, err := c.makeRequest("POST", endpoint, query)
 	if err != nil {

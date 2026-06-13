@@ -4,6 +4,7 @@ package ekodb
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 )
 
 // VectorIndexAlgorithm represents the vector index algorithm
@@ -205,14 +206,14 @@ func (sb *SchemaBuilder) Build() Schema {
 
 // CreateCollection creates a collection with schema
 func (c *Client) CreateCollection(collection string, schema Schema) error {
-	endpoint := fmt.Sprintf("/api/collections/%s", collection)
+	endpoint := fmt.Sprintf("/api/collections/%s", url.PathEscape(collection))
 	_, err := c.makeRequest("POST", endpoint, schema)
 	return err
 }
 
 // GetCollection gets collection metadata and schema
 func (c *Client) GetCollection(collection string) (*CollectionMetadata, error) {
-	endpoint := fmt.Sprintf("/api/collections/%s", collection)
+	endpoint := fmt.Sprintf("/api/collections/%s", url.PathEscape(collection))
 
 	data, err := c.makeRequest("GET", endpoint, nil)
 	if err != nil {

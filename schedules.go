@@ -3,6 +3,7 @@ package ekodb
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 )
 
 // CreateSchedule creates a new schedule.
@@ -33,7 +34,7 @@ func (c *Client) ListSchedules() (map[string]interface{}, error) {
 
 // GetSchedule retrieves a schedule by ID.
 func (c *Client) GetSchedule(id string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/schedules/%s", id), nil)
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/schedules/%s", url.PathEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +47,7 @@ func (c *Client) GetSchedule(id string) (map[string]interface{}, error) {
 
 // UpdateSchedule updates a schedule by ID.
 func (c *Client) UpdateSchedule(id string, data map[string]interface{}) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("PUT", fmt.Sprintf("/api/schedules/%s", id), data)
+	respBody, err := c.makeRequest("PUT", fmt.Sprintf("/api/schedules/%s", url.PathEscape(id)), data)
 	if err != nil {
 		return nil, err
 	}
@@ -59,13 +60,13 @@ func (c *Client) UpdateSchedule(id string, data map[string]interface{}) (map[str
 
 // DeleteSchedule deletes a schedule by ID.
 func (c *Client) DeleteSchedule(id string) error {
-	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/schedules/%s", id), nil)
+	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/schedules/%s", url.PathEscape(id)), nil)
 	return err
 }
 
 // PauseSchedule pauses a schedule by ID.
 func (c *Client) PauseSchedule(id string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/schedules/%s/pause", id), nil)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/schedules/%s/pause", url.PathEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +79,7 @@ func (c *Client) PauseSchedule(id string) (map[string]interface{}, error) {
 
 // ResumeSchedule resumes a schedule by ID.
 func (c *Client) ResumeSchedule(id string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/schedules/%s/resume", id), nil)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/schedules/%s/resume", url.PathEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}

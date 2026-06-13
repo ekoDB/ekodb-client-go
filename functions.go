@@ -3,6 +3,7 @@ package ekodb
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"time"
 )
 
@@ -1294,7 +1295,7 @@ func (c *Client) SaveFunction(function UserFunction) (string, error) {
 
 // GetFunction retrieves a function by ID
 func (c *Client) GetFunction(id string) (*UserFunction, error) {
-	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/functions/%s", id), nil)
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/functions/%s", url.PathEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1329,13 +1330,13 @@ func (c *Client) ListFunctions(tags []string) ([]UserFunction, error) {
 
 // UpdateFunction updates an existing function by ID
 func (c *Client) UpdateFunction(id string, function UserFunction) error {
-	_, err := c.makeRequest("PUT", fmt.Sprintf("/api/functions/%s", id), function)
+	_, err := c.makeRequest("PUT", fmt.Sprintf("/api/functions/%s", url.PathEscape(id)), function)
 	return err
 }
 
 // DeleteFunction deletes a function by ID
 func (c *Client) DeleteFunction(id string) error {
-	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/functions/%s", id), nil)
+	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/functions/%s", url.PathEscape(id)), nil)
 	return err
 }
 
@@ -1346,7 +1347,7 @@ func (c *Client) CallFunction(labelOrID string, params map[string]interface{}) (
 		params = make(map[string]interface{})
 	}
 
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/functions/%s", labelOrID), params)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/functions/%s", url.PathEscape(labelOrID)), params)
 	if err != nil {
 		return nil, err
 	}
@@ -1395,7 +1396,7 @@ func (c *Client) SaveUserFunction(userFunction UserFunction) (string, error) {
 
 // GetUserFunction retrieves a user function by label
 func (c *Client) GetUserFunction(label string) (*UserFunction, error) {
-	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/functions/%s", label), nil)
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/functions/%s", url.PathEscape(label)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1430,12 +1431,12 @@ func (c *Client) ListUserFunctions(tags []string) ([]UserFunction, error) {
 
 // UpdateUserFunction updates an existing user function by label
 func (c *Client) UpdateUserFunction(label string, userFunction UserFunction) error {
-	_, err := c.makeRequest("PUT", fmt.Sprintf("/api/functions/%s", label), userFunction)
+	_, err := c.makeRequest("PUT", fmt.Sprintf("/api/functions/%s", url.PathEscape(label)), userFunction)
 	return err
 }
 
 // DeleteUserFunction deletes a user function by label
 func (c *Client) DeleteUserFunction(label string) error {
-	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/functions/%s", label), nil)
+	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/functions/%s", url.PathEscape(label)), nil)
 	return err
 }

@@ -450,7 +450,7 @@ func (c *Client) SubmitChatToolResult(sessionID, callID string, success bool, re
 		body["error"] = errMsg
 	}
 
-	_, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/%s/tool-result", sessionID), body)
+	_, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/%s/tool-result", url.PathEscape(sessionID)), body)
 	return err
 }
 
@@ -547,7 +547,7 @@ func (c *Client) GetChatModels() (*ChatModels, error) {
 
 // GetChatModel retrieves available models for a specific provider
 func (c *Client) GetChatModel(providerName string) ([]string, error) {
-	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat_models/%s", providerName), nil)
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat_models/%s", url.PathEscape(providerName)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -577,7 +577,7 @@ func (c *Client) CreateChatSession(request CreateChatSessionRequest) (*ChatRespo
 
 // ChatMessage sends a message in an existing chat session
 func (c *Client) ChatMessage(sessionID string, request ChatMessageRequest) (*ChatResponse, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/%s/messages", sessionID), request)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/%s/messages", url.PathEscape(sessionID)), request)
 	if err != nil {
 		return nil, err
 	}
@@ -592,7 +592,7 @@ func (c *Client) ChatMessage(sessionID string, request ChatMessageRequest) (*Cha
 
 // GetChatSession gets a chat session by ID
 func (c *Client) GetChatSession(sessionID string) (*ChatSessionResponse, error) {
-	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/%s", sessionID), nil)
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/%s", url.PathEscape(sessionID)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -640,7 +640,7 @@ func (c *Client) ListChatSessions(query *ListSessionsQuery) (*ListSessionsRespon
 
 // GetChatSessionMessages gets messages from a chat session
 func (c *Client) GetChatSessionMessages(sessionID string, query *GetMessagesQuery) (*GetMessagesResponse, error) {
-	path := fmt.Sprintf("/api/chat/%s/messages", sessionID)
+	path := fmt.Sprintf("/api/chat/%s/messages", url.PathEscape(sessionID))
 
 	if query != nil {
 		params := url.Values{}
@@ -673,7 +673,7 @@ func (c *Client) GetChatSessionMessages(sessionID string, query *GetMessagesQuer
 
 // UpdateChatSession updates a chat session
 func (c *Client) UpdateChatSession(sessionID string, request UpdateSessionRequest) (*ChatSessionResponse, error) {
-	respBody, err := c.makeRequest("PUT", fmt.Sprintf("/api/chat/%s", sessionID), request)
+	respBody, err := c.makeRequest("PUT", fmt.Sprintf("/api/chat/%s", url.PathEscape(sessionID)), request)
 	if err != nil {
 		return nil, err
 	}
@@ -703,13 +703,13 @@ func (c *Client) BranchChatSession(request CreateChatSessionRequest) (*ChatRespo
 
 // DeleteChatSession deletes a chat session
 func (c *Client) DeleteChatSession(sessionID string) error {
-	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/chat/%s", sessionID), nil)
+	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/chat/%s", url.PathEscape(sessionID)), nil)
 	return err
 }
 
 // RegenerateChatMessage regenerates an AI response message
 func (c *Client) RegenerateChatMessage(sessionID, messageID string) (*ChatResponse, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/%s/messages/%s/regenerate", sessionID, messageID), nil)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/%s/messages/%s/regenerate", url.PathEscape(sessionID), url.PathEscape(messageID)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -725,13 +725,13 @@ func (c *Client) RegenerateChatMessage(sessionID, messageID string) (*ChatRespon
 // UpdateChatMessage updates a specific message
 func (c *Client) UpdateChatMessage(sessionID, messageID, content string) error {
 	request := map[string]string{"content": content}
-	_, err := c.makeRequest("PUT", fmt.Sprintf("/api/chat/%s/messages/%s", sessionID, messageID), request)
+	_, err := c.makeRequest("PUT", fmt.Sprintf("/api/chat/%s/messages/%s", url.PathEscape(sessionID), url.PathEscape(messageID)), request)
 	return err
 }
 
 // GetChatMessage gets a specific message by ID
 func (c *Client) GetChatMessage(sessionID, messageID string) (Record, error) {
-	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/%s/messages/%s", sessionID, messageID), nil)
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/chat/%s/messages/%s", url.PathEscape(sessionID), url.PathEscape(messageID)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -746,14 +746,14 @@ func (c *Client) GetChatMessage(sessionID, messageID string) (Record, error) {
 
 // DeleteChatMessage deletes a specific message
 func (c *Client) DeleteChatMessage(sessionID, messageID string) error {
-	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/chat/%s/messages/%s", sessionID, messageID), nil)
+	_, err := c.makeRequest("DELETE", fmt.Sprintf("/api/chat/%s/messages/%s", url.PathEscape(sessionID), url.PathEscape(messageID)), nil)
 	return err
 }
 
 // ToggleForgottenMessage toggles the "forgotten" status of a message
 func (c *Client) ToggleForgottenMessage(sessionID, messageID string, forgotten bool) error {
 	request := map[string]bool{"forgotten": forgotten}
-	_, err := c.makeRequest("PATCH", fmt.Sprintf("/api/chat/%s/messages/%s/forgotten", sessionID, messageID), request)
+	_, err := c.makeRequest("PATCH", fmt.Sprintf("/api/chat/%s/messages/%s/forgotten", url.PathEscape(sessionID), url.PathEscape(messageID)), request)
 	return err
 }
 
@@ -780,7 +780,7 @@ func (c *Client) MergeChatSessions(request MergeSessionsRequest) (*ChatSessionRe
 // pass nil to use the server default.
 func (c *Client) CompactChat(sessionID string, keepRecent *int) (*CompactChatResponse, error) {
 	request := CompactChatRequest{KeepRecent: keepRecent}
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/%s/compact", sessionID), request)
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/%s/compact", url.PathEscape(sessionID)), request)
 	if err != nil {
 		return nil, err
 	}
@@ -833,7 +833,7 @@ func (c *Client) ChatMessageStream(ctx context.Context, sessionID string, reques
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+fmt.Sprintf("/api/chat/%s/messages/stream", sessionID), bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+fmt.Sprintf("/api/chat/%s/messages/stream", url.PathEscape(sessionID)), bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
