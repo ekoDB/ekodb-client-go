@@ -42,10 +42,11 @@ type SearchQuery struct {
 	SelectFields  []string `json:"select_fields,omitempty"`
 	ExcludeFields []string `json:"exclude_fields,omitempty"`
 
-	// Metadata pre-filter for vector/hybrid search: a canonical QueryExpression
-	// (same shape as the value under QueryBuilder.Build()'s "filter" key). Only
-	// records matching the filter are considered candidates before similarity
-	// ranking.
+	// Metadata pre-filter for text, vector, and hybrid search. Carries a
+	// canonical QueryExpression whose shape matches the value under
+	// QueryBuilder.Build()'s "filter" key; note this struct serializes it under
+	// the JSON key "filters". Only records matching the filter are considered
+	// candidates before ranking.
 	Filters interface{} `json:"filters,omitempty"`
 }
 
@@ -203,10 +204,11 @@ func (sb *SearchQueryBuilder) ExcludeFields(fields []string) *SearchQueryBuilder
 	return sb
 }
 
-// Filters sets a metadata pre-filter for vector/hybrid search. Accepts a
-// canonical QueryExpression (e.g. the value under the "filter" key produced by
-// QueryBuilder.Build()); only records matching the filter are considered as
-// candidates before similarity ranking.
+// Filters sets a metadata pre-filter for text, vector, and hybrid search.
+// Accepts a canonical QueryExpression whose shape matches the value under the
+// "filter" key produced by QueryBuilder.Build() (the request serializes it
+// under the "filters" key); only records matching the filter are considered as
+// candidates before ranking.
 func (sb *SearchQueryBuilder) Filters(filter interface{}) *SearchQueryBuilder {
 	sb.query.Filters = filter
 	return sb
