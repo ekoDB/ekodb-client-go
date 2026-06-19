@@ -1561,7 +1561,14 @@ func TestSearchQueryBuilderFiltersOmittedWhenUnset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
 	}
-	if strings.Contains(string(encoded), "filters") {
+	// Unmarshal and assert the key is absent rather than scanning the raw JSON
+	// string, which would false-positive if another field's value contained
+	// the substring "filters".
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if _, present := decoded["filters"]; present {
 		t.Errorf("filters should be omitted when unset, got: %s", encoded)
 	}
 }
