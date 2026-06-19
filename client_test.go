@@ -1519,6 +1519,53 @@ func TestSearchQueryBuilderExcludeFields(t *testing.T) {
 	}
 }
 
+func TestSearchQueryBuilderFilters(t *testing.T) {
+	filter := map[string]interface{}{
+		"type": "Condition",
+		"content": map[string]interface{}{
+			"field":    "category",
+			"operator": "Eq",
+			"value":    "ml",
+		},
+	}
+	query := NewSearchQueryBuilder("test query").
+		Vector([]float64{0.1, 0.2, 0.3}).
+		Filters(filter).
+		Build()
+
+	if query.Filters == nil {
+		t.Fatal("Filters not set")
+	}
+
+	// Filters must serialize under the "filters" key as the canonical shape.
+	encoded, err := json.Marshal(query)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	filtersOut, ok := decoded["filters"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("filters not present as object, got: %v", decoded["filters"])
+	}
+	if filtersOut["type"] != "Condition" {
+		t.Errorf("filters.type = %v, want Condition", filtersOut["type"])
+	}
+}
+
+func TestSearchQueryBuilderFiltersOmittedWhenUnset(t *testing.T) {
+	query := NewSearchQueryBuilder("test query").Build()
+	encoded, err := json.Marshal(query)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	if strings.Contains(string(encoded), "filters") {
+		t.Errorf("filters should be omitted when unset, got: %s", encoded)
+	}
+}
+
 // ============================================================================
 // KV Find/Query Tests
 // ============================================================================
