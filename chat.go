@@ -454,6 +454,22 @@ func (c *Client) SubmitChatToolResult(sessionID, callID string, success bool, re
 	return err
 }
 
+// SubmitChatToolKeepalive sends a liveness ping for an in-flight client tool. It is
+// NOT a result: it resets the server's per-tool wait deadline (config
+// client_tool_timeout_secs, default 60s) so a slow confirmation or a long-running
+// tool doesn't get the turn timed out mid-response. Send it periodically while the
+// tool is still working, then call SubmitChatToolResult once when it completes
+// (pairs with ekoDB#530).
+func (c *Client) SubmitChatToolKeepalive(sessionID, callID string) error {
+	body := map[string]interface{}{
+		"call_id":   callID,
+		"keepalive": true,
+	}
+
+	_, err := c.makeRequest("POST", fmt.Sprintf("/api/chat/%s/tool-result", url.PathEscape(sessionID)), body)
+	return err
+}
+
 // ExecuteToolRequest is the request body for POST /api/chat/tools/execute.
 type ExecuteToolRequest struct {
 	Tool   string                 `json:"tool"`

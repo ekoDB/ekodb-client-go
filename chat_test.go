@@ -844,6 +844,37 @@ func TestSubmitChatToolResultError(t *testing.T) {
 	}
 }
 
+func TestSubmitChatToolKeepalive(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/chat-123/tool-result": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("Failed to decode request body: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if body["call_id"] != "call-456" {
+				t.Errorf("Expected call_id=call-456, got %v", body["call_id"])
+			}
+			if body["keepalive"] != true {
+				t.Errorf("Expected keepalive=true, got %v", body["keepalive"])
+			}
+			if _, ok := body["success"]; ok {
+				t.Errorf("Expected no success field on keepalive, got %v", body["success"])
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	err := client.SubmitChatToolKeepalive("chat-123", "call-456")
+	if err != nil {
+		t.Fatalf("SubmitChatToolKeepalive failed: %v", err)
+	}
+}
+
 // ============================================================================
 // CompactChat Tests
 // ============================================================================
