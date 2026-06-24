@@ -6,7 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.22.0] - 2026-06-23
+
+### Added
+
+- **`SubmitChatToolKeepalive` for in-flight client tools (resets the server-side
+  per-tool wait deadline; pairs with ekoDB#530).**
+- **Metadata pre-filter for text, vector, and hybrid search (#475).**
+  `SearchQuery` gained a `Filters` field and `SearchQueryBuilder` a
+  `Filters(filter interface{})` method carrying a canonical `QueryExpression`
+  (the same shape produced under `QueryBuilder.Build()`'s `"filter"` key). Only
+  records matching the filter are considered as candidates before ranking;
+  serialized as `filters` and omitted when unset. The `examples/` search example
+  now demonstrates a filtered search. Tests: `TestSearchQueryBuilderFilters`,
+  `TestSearchQueryBuilderFiltersOmittedWhenUnset`.
 
 ### Tests
 
