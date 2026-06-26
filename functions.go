@@ -1310,12 +1310,14 @@ func (c *Client) GetFunction(id string) (*UserFunction, error) {
 
 // ListFunctions lists all functions, optionally filtered by tags
 func (c *Client) ListFunctions(tags []string) ([]UserFunction, error) {
-	url := "/api/functions"
+	reqURL := "/api/functions"
 	if len(tags) > 0 {
-		url += "?tags=" + joinStrings(tags, ",")
+		// QueryEscape encodes the value (`&`/`=`/`,`), so a tag containing
+		// query-reserved characters can't smuggle extra query params.
+		reqURL += "?tags=" + url.QueryEscape(joinStrings(tags, ","))
 	}
 
-	respBody, err := c.makeRequest("GET", url, nil)
+	respBody, err := c.makeRequest("GET", reqURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1411,12 +1413,14 @@ func (c *Client) GetUserFunction(label string) (*UserFunction, error) {
 
 // ListUserFunctions lists all user functions, optionally filtered by tags
 func (c *Client) ListUserFunctions(tags []string) ([]UserFunction, error) {
-	url := "/api/functions"
+	reqURL := "/api/functions"
 	if len(tags) > 0 {
-		url += "?tags=" + joinStrings(tags, ",")
+		// QueryEscape encodes the value (`&`/`=`/`,`), so a tag containing
+		// query-reserved characters can't smuggle extra query params.
+		reqURL += "?tags=" + url.QueryEscape(joinStrings(tags, ","))
 	}
 
-	respBody, err := c.makeRequest("GET", url, nil)
+	respBody, err := c.makeRequest("GET", reqURL, nil)
 	if err != nil {
 		return nil, err
 	}
