@@ -1029,6 +1029,11 @@ func (c *Client) BatchInsert(collection string, records []Record, opts ...BatchI
 	query := batchInsertQuery{Inserts: inserts}
 
 	path := "/api/batch/insert/" + url.PathEscape(collection)
+	if len(opts) > 0 && opts[0].TransactionId != nil {
+		params := url.Values{}
+		params.Add("transaction_id", *opts[0].TransactionId)
+		path = fmt.Sprintf("%s?%s", path, params.Encode())
+	}
 	respBody, err := c.makeRequest("POST", path, query)
 	if err != nil {
 		return nil, err
@@ -1083,6 +1088,11 @@ func (c *Client) BatchUpdate(collection string, updates map[string]Record, opts 
 	query := batchUpdateQuery{Updates: items}
 
 	path := "/api/batch/update/" + url.PathEscape(collection)
+	if len(opts) > 0 && opts[0].TransactionId != nil {
+		params := url.Values{}
+		params.Add("transaction_id", *opts[0].TransactionId)
+		path = fmt.Sprintf("%s?%s", path, params.Encode())
+	}
 	respBody, err := c.makeRequest("PUT", path, query)
 	if err != nil {
 		return nil, err
@@ -1136,6 +1146,11 @@ func (c *Client) BatchDelete(collection string, ids []string, opts ...BatchDelet
 	query := batchDeleteQuery{Deletes: deletes}
 
 	path := "/api/batch/delete/" + url.PathEscape(collection)
+	if len(opts) > 0 && opts[0].TransactionId != nil {
+		params := url.Values{}
+		params.Add("transaction_id", *opts[0].TransactionId)
+		path = fmt.Sprintf("%s?%s", path, params.Encode())
+	}
 	respBody, err := c.makeRequest("DELETE", path, query)
 	if err != nil {
 		return 0, err

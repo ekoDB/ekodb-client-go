@@ -2853,6 +2853,65 @@ func TestFindWithTransactionIDQueryParam(t *testing.T) {
 	}
 }
 
+// Batch ops must forward transaction_id as a query param so a caller can stage
+// batch writes into an MVCC transaction (server batch handlers read
+// query_params.transaction_id). Previously the field was declared on the
+// Batch*Options structs but never sent — a silent no-op.
+func TestBatchOpsWithTransactionIDQueryParam(t *testing.T) {
+	txID := "tx_batch"
+
+	t.Run("BatchInsert", func(t *testing.T) {
+		var got capturedRequest
+		server := newCapturingServer(t, &got)
+		defer server.Close()
+		client := createTestClient(t, server)
+		if _, err := client.BatchInsert("users", []Record{{"name": "a"}},
+			BatchInsertOptions{TransactionId: &txID}); err != nil {
+			t.Fatalf("BatchInsert failed: %v", err)
+		}
+		if got.escapedPath != "/api/batch/insert/users" {
+			t.Errorf("path = %q", got.escapedPath)
+		}
+		if v := got.queryValues.Get("transaction_id"); v != txID {
+			t.Errorf("transaction_id = %q, want %q", v, txID)
+		}
+	})
+
+	t.Run("BatchUpdate", func(t *testing.T) {
+		var got capturedRequest
+		server := newCapturingServer(t, &got)
+		defer server.Close()
+		client := createTestClient(t, server)
+		if _, err := client.BatchUpdate("users", map[string]Record{"id1": {"name": "b"}},
+			BatchUpdateOptions{TransactionId: &txID}); err != nil {
+			t.Fatalf("BatchUpdate failed: %v", err)
+		}
+		if got.escapedPath != "/api/batch/update/users" {
+			t.Errorf("path = %q", got.escapedPath)
+		}
+		if v := got.queryValues.Get("transaction_id"); v != txID {
+			t.Errorf("transaction_id = %q, want %q", v, txID)
+		}
+	})
+
+	t.Run("BatchDelete", func(t *testing.T) {
+		var got capturedRequest
+		server := newCapturingServer(t, &got)
+		defer server.Close()
+		client := createTestClient(t, server)
+		if _, err := client.BatchDelete("users", []string{"id1"},
+			BatchDeleteOptions{TransactionId: &txID}); err != nil {
+			t.Fatalf("BatchDelete failed: %v", err)
+		}
+		if got.escapedPath != "/api/batch/delete/users" {
+			t.Errorf("path = %q", got.escapedPath)
+		}
+		if v := got.queryValues.Get("transaction_id"); v != txID {
+			t.Errorf("transaction_id = %q, want %q", v, txID)
+		}
+	})
+}
+
 func TestFindWithoutTransactionIDHasNoQueryParam(t *testing.T) {
 	var got capturedRequest
 	server := newCapturingServer(t, &got)
