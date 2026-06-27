@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2026-06-27
+
+### Added
+
+- **Batch insert/update/delete now forward `transaction_id` to support
+  transactional batch writes.** `BatchInsertOptions` / `BatchUpdateOptions` /
+  `BatchDeleteOptions` already declared a `TransactionId` field, but the three
+  batch methods never sent it — so batch writes staged into an MVCC transaction
+  silently executed outside it. The field is now appended as the
+  `transaction_id` query parameter to `/api/batch/{insert,update,delete}/…` (the
+  server batch handlers already honor it), mirroring the single-record ops.
+  Additive/opt-in — callers that don't set `TransactionId` are unaffected.
+  Covered by `TestBatchOpsWithTransactionIDQueryParam`. Brings batch-transaction
+  parity with the Rust/Python/TypeScript/Kotlin clients.
+
+### Security
+
+- **`ListFunctions` / `ListUserFunctions` now percent-encode the `tags` query
+  value.** The tag list was concatenated raw into `?tags=…`, so a tag containing
+  query-reserved characters (`&`, `=`) could split into extra query parameters
+  (e.g. `a&injected=1` smuggling an `injected=1` param) and produce a malformed
+  URL. Both methods now wrap the joined value in `url.QueryEscape`. Defense in
+  depth and cross-client consistency with the matching `tags` fix in the other
+  `ekodb-client` SDKs. Covered by
+  `TestListUserFunctionsEncodesReservedCharsInTags` and
+  `TestListFunctionsEncodesReservedCharsInTags`, which assert the value
+  round-trips intact and no smuggled param leaks.
+
 ## [0.22.0] - 2026-06-23
 
 ### Added
