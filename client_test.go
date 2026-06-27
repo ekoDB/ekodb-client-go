@@ -2637,6 +2637,30 @@ func TestListUserFunctionsEncodesReservedCharsInTags(t *testing.T) {
 	}
 }
 
+func TestListFunctionsEncodesReservedCharsInTags(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	// ListFunctions applies the same tags QueryEscape as ListUserFunctions, so
+	// a tag containing query-reserved characters must round-trip intact and not
+	// smuggle an extra query param. The capturing server's "{}" body won't
+	// unmarshal into []UserFunction, so we ignore the result and assert only on
+	// the captured query.
+	_, _ = client.ListFunctions([]string{"a&injected=1", "b"})
+
+	if got.escapedPath != "/api/functions" {
+		t.Errorf("path = %q, want /api/functions", got.escapedPath)
+	}
+	if v := got.queryValues.Get("tags"); v != "a&injected=1,b" {
+		t.Errorf("tags = %q, want %q", v, "a&injected=1,b")
+	}
+	if got.queryValues.Has("injected") {
+		t.Errorf("reserved chars leaked a smuggled query param: injected=%q", got.queryValues.Get("injected"))
+	}
+}
+
 func TestRollbackToSavepointRequestShape(t *testing.T) {
 	var got capturedRequest
 	server := newCapturingServer(t, &got)
