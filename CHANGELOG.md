@@ -240,8 +240,8 @@ and this project adheres to
 ### Changed
 
 - **Bumped Go toolchain pin from 1.24.0 to 1.25.0** in `go.mod` and dropped the
-  separate `toolchain go1.24.2` directive. Aligns with wavescd and currentcs,
-  which both already require Go 1.25. No code changes — 355 unit tests still
+  separate `toolchain go1.24.2` directive. Aligns with the Go 1.25 requirement
+  used across the rest of the platform. No code changes — 355 unit tests still
   pass.
 
 ## [0.18.1] - 2026-04-29
