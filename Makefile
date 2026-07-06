@@ -183,7 +183,7 @@ GOLANGCI_FLAGS := run --timeout=5m --tests=false --max-issues-per-linter=0 --max
 
 ensure-golangci-lint: ## Install the pinned golangci-lint if missing or a different version
 	@BIN=$$(go env GOPATH)/bin; VER="$(patsubst v%,%,$(GOLANGCI_VERSION))"; \
-	if ! "$$BIN/golangci-lint" version 2>/dev/null | grep -qwF "$$VER"; then \
+	if [ ! -x "$$BIN/golangci-lint" ] || ! "$$BIN/golangci-lint" version 2>/dev/null | grep -qwF "$$VER"; then \
 		echo "📦 $(YELLOW)Installing golangci-lint $(GOLANGCI_VERSION)...$(RESET)"; \
 		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$$BIN" $(GOLANGCI_VERSION); \
 	fi
