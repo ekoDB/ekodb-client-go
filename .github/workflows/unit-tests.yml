@@ -22,7 +22,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version-file: go.mod
       # Runs the exact same target developers run locally (`make lint`), which
       # installs the pinned golangci-lint (GOLANGCI_VERSION in the Makefile) and
       # runs it gating. Single source of truth = no local/CI drift.
@@ -38,7 +38,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version-file: go.mod
 
       # -race matches the local `make test` target so a data race can't pass
       # locally and fail (or vice versa) in CI.
