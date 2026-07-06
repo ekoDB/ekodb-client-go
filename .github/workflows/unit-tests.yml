@@ -14,6 +14,21 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      # Runs the exact same target developers run locally (`make lint`), which
+      # installs the pinned golangci-lint (GOLANGCI_VERSION in the Makefile) and
+      # runs it gating. Single source of truth = no local/CI drift.
+      - name: Lint
+        run: make lint
+
   go-tests:
     name: Go Client Tests
     runs-on: ubuntu-latest
@@ -25,8 +40,10 @@ jobs:
         with:
           go-version: '1.22'
 
+      # -race matches the local `make test` target so a data race can't pass
+      # locally and fail (or vice versa) in CI.
       - name: Run tests
-        run: go test -v ./...
+        run: go test -v -race ./...
 
       - name: Test summary
         if: always()
