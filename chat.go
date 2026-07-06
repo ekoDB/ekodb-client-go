@@ -318,7 +318,7 @@ func (c *Client) RawCompletionStream(request RawCompletionRequest) (*RawCompleti
 	if err != nil {
 		return nil, fmt.Errorf("SSE request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -391,7 +391,7 @@ func (c *Client) RawCompletionStreamWithProgress(request RawCompletionRequest, o
 	if err != nil {
 		return nil, fmt.Errorf("SSE request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -871,14 +871,14 @@ func (c *Client) ChatMessageStream(ctx context.Context, sessionID string, reques
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, fmt.Errorf("SSE chat message stream failed (%d): %s", resp.StatusCode, string(respBody))
 	}
 
 	ch := make(chan ChatStreamEvent, 128)
 
 	go func() {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		defer close(ch)
 
 		// send delivers an event but never blocks forever: if the consumer stops
@@ -1014,7 +1014,7 @@ func (c *Client) SubscribeSSE(ctx context.Context, collection string, opts *Subs
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, fmt.Errorf("SSE subscribe failed (%d): %s", resp.StatusCode, string(respBody))
 	}
 
@@ -1022,7 +1022,7 @@ func (c *Client) SubscribeSSE(ctx context.Context, collection string, opts *Subs
 	errCh := make(chan error, 1)
 
 	go func() {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		defer close(ch)
 		defer close(errCh)
 

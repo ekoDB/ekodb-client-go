@@ -24,7 +24,7 @@ JET := "                    $(MAGENTA)●$(RESET)\n                    $(PURPLE)
 # ASCII Banner for ekoDB (matches CLI banner)
 BANNER := "$(BOLD) ██████═╗ ██╗  ██╗  ██████╗  ████████╗ ████████╗$(RESET)\n$(BOLD)██╔═══██╝ ██║ ██╔╝ ██╔═══██╗  ██╔═══██║ ██╔═══██╗$(RESET)\n$(BOLD)████████╗ █████╔╝  ██║   ██║  ██║   ██║████████╔╝$(RESET)\n$(BOLD)██╔═════╝ ██╔═██╗  ██║   ██║  ██║   ██║ ██╔═══██╗$(RESET)\n$(BOLD)████████╗ ██║  ██╗ ╚██████╔╝ ████████║ ████████╔╝$(RESET)\n$(BOLD)╚═══════╝ ╚═╝  ╚═╝  ╚═════╝  ╚═══════╝ ╚═══════╝$(RESET)"
 
-.PHONY: all build test test-verbose test-coverage clean fmt fmt-go fmt-md fmt-check format lint vet mod-tidy mod-verify mod-download install help setup deps-check deps-update publish bump-version check-ready examples pre-commit ensure-hooks version info
+.PHONY: all build test test-verbose test-coverage clean fmt fmt-go fmt-md fmt-check format lint lint-fix ensure-golangci-lint vet mod-tidy mod-verify mod-download install help setup deps-check deps-update publish bump-version check-ready examples pre-commit ensure-hooks version info
 
 # Language Sub-Banner
 GO_BANNER := \
@@ -175,18 +175,23 @@ fmt-check:
 	@echo "✅ $(GREEN)All files are properly formatted!$(RESET)"
 
 # Run golangci-lint
-GOLANGCI_LINT := $(shell command -v golangci-lint 2>/dev/null || echo "$(shell go env GOPATH)/bin/golangci-lint")
+# golangci-lint version — pinned so local `make lint` and CI run the EXACT same
+# linter. CI (unit-tests.yml) calls `make lint`, so this is the single source of
+# truth. Keep flags identical to the other Go repos (currentcs, wavescd).
+GOLANGCI_VERSION ?= v2.11.4
+GOLANGCI_FLAGS := run --timeout=5m --tests=false --max-issues-per-linter=0 --max-same-issues=0
 
-lint:
-	@echo "🔬 $(CYAN)Running golangci-lint...$(RESET)"
-	@if [ -x "$(GOLANGCI_LINT)" ]; then \
-		$(GOLANGCI_LINT) run ./...; \
-		echo "✅ $(GREEN)Linting complete!$(RESET)"; \
-	else \
-		echo "$(YELLOW)⚠️  golangci-lint not found$(RESET)"; \
-		echo "$(YELLOW)Install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest$(RESET)"; \
-		echo "$(YELLOW)Or visit: https://golangci-lint.run/usage/install/$(RESET)"; \
+ensure-golangci-lint: ## Install the pinned golangci-lint if missing or a different version
+	@BIN=$$(go env GOPATH)/bin; VER="$(patsubst v%,%,$(GOLANGCI_VERSION))"; \
+	if ! "$$BIN/golangci-lint" version 2>/dev/null | grep -q "$$VER"; then \
+		echo "📦 $(YELLOW)Installing golangci-lint $(GOLANGCI_VERSION)...$(RESET)"; \
+		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$$BIN" $(GOLANGCI_VERSION); \
 	fi
+
+lint: ensure-golangci-lint ## Run linter (gating; pinned version, identical to CI)
+	@echo "🔬 $(CYAN)Running golangci-lint $(GOLANGCI_VERSION)...$(RESET)"
+	@$$(go env GOPATH)/bin/golangci-lint $(GOLANGCI_FLAGS) ./...
+	@echo "✅ $(GREEN)Lint passed!$(RESET)"
 
 # Run go vet
 vet:
