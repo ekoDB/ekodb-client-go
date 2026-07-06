@@ -180,22 +180,27 @@ fmt-check:
 # truth. Keep flags identical to the other Go repos (currentcs, wavescd).
 GOLANGCI_VERSION ?= v2.11.4
 GOLANGCI_FLAGS := run --timeout=5m --tests=false --max-issues-per-linter=0 --max-same-issues=0
+# golangci-lint install dir: honor GOBIN, else the FIRST GOPATH entry's bin (a
+# multi-entry GOPATH like /a:/b would otherwise expand to an invalid /a:/b/bin).
+GOLANGCI_BIN_DIR := $(or $(shell go env GOBIN),$(firstword $(subst :, ,$(shell go env GOPATH)))/bin)
+GOLANGCI_BIN := $(GOLANGCI_BIN_DIR)/golangci-lint
 
 ensure-golangci-lint: ## Install the pinned golangci-lint if missing or a different version
-	@BIN=$$(go env GOPATH)/bin; VER="$(patsubst v%,%,$(GOLANGCI_VERSION))"; \
+	@BIN="$(GOLANGCI_BIN_DIR)"; VER="$(patsubst v%,%,$(GOLANGCI_VERSION))"; \
 	if [ ! -x "$$BIN/golangci-lint" ] || ! "$$BIN/golangci-lint" version 2>/dev/null | grep -qwF "$$VER"; then \
 		echo "📦 $(YELLOW)Installing golangci-lint $(GOLANGCI_VERSION)...$(RESET)"; \
-		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$$BIN" $(GOLANGCI_VERSION); \
+		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/$(GOLANGCI_VERSION)/install.sh | sh -s -- -b "$$BIN" $(GOLANGCI_VERSION); \
+		[ -x "$$BIN/golangci-lint" ] || { echo "❌ $(RED)golangci-lint install failed$(RESET)"; exit 1; }; \
 	fi
 
 lint: ensure-golangci-lint ## Run linter (gating; pinned version, identical to CI)
 	@echo "🔬 $(CYAN)Running golangci-lint $(GOLANGCI_VERSION)...$(RESET)"
-	@$$(go env GOPATH)/bin/golangci-lint $(GOLANGCI_FLAGS) ./...
+	@$(GOLANGCI_BIN) $(GOLANGCI_FLAGS) ./...
 	@echo "✅ $(GREEN)Lint passed!$(RESET)"
 
 lint-fix: ensure-golangci-lint ## Run linter with autofix (same pinned version as lint)
 	@echo "🔬 $(CYAN)Running golangci-lint --fix $(GOLANGCI_VERSION)...$(RESET)"
-	@$$(go env GOPATH)/bin/golangci-lint $(GOLANGCI_FLAGS) --fix ./...
+	@$(GOLANGCI_BIN) $(GOLANGCI_FLAGS) --fix ./...
 	@echo "✅ $(GREEN)Lint fixes applied!$(RESET)"
 
 # Run go vet
