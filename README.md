@@ -582,7 +582,8 @@ go run client_simple_crud.go
 - **[API Reference](https://pkg.go.dev/github.com/ekoDB/ekodb-client-go)** - Go
   package documentation
 - **[Examples Repository](https://github.com/ekoDB/ekodb-client/tree/main/examples)** -
-  308 examples across all 6 languages (257 client library + 51 direct API)
+  runnable client-library and direct-API examples across every supported
+  language (Rust, Python, Go, TypeScript, JavaScript, Kotlin)
 
 ## 🗺️ Roadmap
 
