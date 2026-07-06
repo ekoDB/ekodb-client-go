@@ -48,9 +48,12 @@ jobs:
       - name: Test summary
         if: always()
         run: |
+          # Count test functions from source so the number is never hardcoded /
+          # stale (a `go test` run of *_test.go).
+          count=$(grep -rhE '^func Test[A-Z]' --include='*_test.go' . | wc -l | tr -d ' ')
           echo "## Go Client Unit Tests" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "72 tests covering:" >> $GITHUB_STEP_SUMMARY
+          echo "$count tests covering:" >> $GITHUB_STEP_SUMMARY
           echo "- Client configuration and operations" >> $GITHUB_STEP_SUMMARY
           echo "- QueryBuilder fluent API" >> $GITHUB_STEP_SUMMARY
           echo "- HTTP mocking and error handling" >> $GITHUB_STEP_SUMMARY
