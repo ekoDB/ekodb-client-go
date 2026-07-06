@@ -193,6 +193,11 @@ lint: ensure-golangci-lint ## Run linter (gating; pinned version, identical to C
 	@$$(go env GOPATH)/bin/golangci-lint $(GOLANGCI_FLAGS) ./...
 	@echo "✅ $(GREEN)Lint passed!$(RESET)"
 
+lint-fix: ensure-golangci-lint ## Run linter with autofix (same pinned version as lint)
+	@echo "🔬 $(CYAN)Running golangci-lint --fix $(GOLANGCI_VERSION)...$(RESET)"
+	@$$(go env GOPATH)/bin/golangci-lint $(GOLANGCI_FLAGS) --fix ./...
+	@echo "✅ $(GREEN)Lint fixes applied!$(RESET)"
+
 # Run go vet
 vet:
 	@echo "🔬 $(CYAN)Running go vet...$(RESET)"
