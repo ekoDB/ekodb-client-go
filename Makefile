@@ -177,7 +177,7 @@ fmt-check:
 # Run golangci-lint
 # golangci-lint version — pinned so local `make lint` and CI run the EXACT same
 # linter. CI (unit-tests.yml) calls `make lint`, so this is the single source of
-# truth. Keep flags identical to the other Go repos (currentcs, wavescd).
+# truth. Keep the flags identical across our Go repos.
 GOLANGCI_VERSION ?= v2.11.4
 GOLANGCI_FLAGS := run --timeout=5m --tests=false --max-issues-per-linter=0 --max-same-issues=0
 # golangci-lint install dir: honor GOBIN, else the FIRST GOPATH entry's bin (a
