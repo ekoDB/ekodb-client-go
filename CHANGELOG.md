@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-07-07
+
+### Infrastructure
+
+- **golangci-lint bootstrap hardened.** The install directory is now derived
+  honoring `GOBIN`, falling back to the first `GOPATH` entry, so a multi-entry
+  `GOPATH` no longer expands to an invalid `/a:/b/bin` path. `install.sh` is
+  fetched from the pinned `$(GOLANGCI_VERSION)` tag instead of `master` for a
+  reproducible bootstrap, and a post-install check fails the target if
+  `curl | sh` silently produced no binary.
+
+- **CI now lints, and local/CI lint run identical commands.** CI
+  (`unit-tests.yml`) previously ran only `go test` with no lint job, and local
+  `make lint` used an unpinned golangci-lint (`@latest`) that silently no-op'd
+  if it wasn't installed. Added a gating `lint` job that runs `make lint`,
+  pinned golangci-lint to `v2.11.4` in the Makefile (installed on demand), and
+  made `make lint` gate with the same flags as the other Go repos. This surfaced
+  (and fixed) 5 previously uncaught `errcheck` findings in production code
+  (`chat.go`, `client.go`: unchecked `resp.Body.Close()`). The test job now runs
+  with `-race` to match the local `make test` target.
+
+- **Test and example counts are no longer hardcoded.** The CI "Test summary"
+  step hardcoded `72 tests` (the suite had grown to 417); it now counts
+  `func Test` from source at run time. The README's "Examples Repository" line
+  hardcoded
+  `308 examples across all 6 languages (257 client library + 51 direct API)` — a
+  mirror of the ekodb-client example inventory that this standalone repo cannot
+  see and so drifts silently. That line now describes the examples by language
+  and relies on the link to carry the reader to the live source, with no copied
+  numbers.
+
 ## [0.23.1] - 2026-07-05
 
 ### Infrastructure
