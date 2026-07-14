@@ -1642,6 +1642,11 @@ type HealthState string
 const (
 	HealthOK       HealthState = "ok"
 	HealthDegraded HealthState = "degraded"
+	// HealthUnknown is the Status of a snapshot returned when the server is
+	// unreachable or its response is unparseable (always paired with a non-nil
+	// error), so the serialized snapshot carries a meaningful status rather than
+	// an empty string.
+	HealthUnknown HealthState = "unknown"
 )
 
 // HealthStatus is a snapshot of an ekoDB /api/health probe. It is safe to
@@ -1677,7 +1682,7 @@ func ParseHealthStatus(body []byte) (*HealthStatus, error) {
 	var result map[string]interface{}
 	// Always use JSON for the health endpoint.
 	if err := json.Unmarshal(body, &result); err != nil {
-		return &HealthStatus{Reachable: false}, fmt.Errorf("health check: unparseable response: %w", err)
+		return &HealthStatus{Reachable: false, Status: HealthUnknown}, fmt.Errorf("health check: unparseable response: %w", err)
 	}
 
 	// Reachable. Default Status to degraded so a missing/odd status field fails
@@ -1705,7 +1710,7 @@ func ParseHealthStatus(body []byte) (*HealthStatus, error) {
 func (c *Client) HealthStatus() (*HealthStatus, error) {
 	respBody, err := c.makeRequest("GET", "/api/health", nil)
 	if err != nil {
-		return &HealthStatus{Reachable: false}, err
+		return &HealthStatus{Reachable: false, Status: HealthUnknown}, err
 	}
 	return ParseHealthStatus(respBody)
 }
