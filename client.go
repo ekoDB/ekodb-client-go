@@ -1649,14 +1649,15 @@ const (
 	HealthUnknown HealthState = "unknown"
 )
 
-// HealthStatus is a snapshot of an ekoDB /api/health probe. It is safe to
-// serialize (all fields carry JSON tags) so a consumer can surface it directly.
+// HealthStatus is a snapshot of an ekoDB /api/health probe. Its JSON form is a
+// safe summary (reachable/status/integrity_ok); Detail is excluded (json:"-")
+// so a consumer can surface the snapshot without leaking the internal body.
 //
 // It is degraded-tolerant: a reachable server that reports degraded is a
 // successful result (err == nil) with Status == HealthDegraded, NOT an error.
 // When the server is unreachable (connection refused, timeout, non-2xx, or an
-// unparseable body) a non-nil snapshot with Reachable == false is returned
-// alongside the error.
+// unparseable body) a non-nil snapshot with Reachable == false and
+// Status == HealthUnknown is returned alongside the error.
 //
 // Consumers MUST base connection/liveness decisions on Reachable (or err == nil)
 // and treat degraded as a warning, never as a fatal or reconnect trigger. The
@@ -1664,7 +1665,7 @@ const (
 // probes do not restart a degraded-but-recoverable instance.
 type HealthStatus struct {
 	Reachable   bool        `json:"reachable"`    // a valid /api/health response came back
-	Status      HealthState `json:"status"`       // HealthOK | HealthDegraded (unknown/missing -> HealthDegraded)
+	Status      HealthState `json:"status"`       // HealthOK | HealthDegraded | HealthUnknown; a missing/odd status on a reachable body -> HealthDegraded
 	IntegrityOK bool        `json:"integrity_ok"` // body integrity_ok (public) or integrity.healthy (admin)
 	// Detail is the full parsed body (admin responses include internal metrics
 	// and collection names). It is NOT serialized (json:"-") so surfacing the
