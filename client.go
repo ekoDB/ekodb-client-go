@@ -1634,6 +1634,13 @@ func (c *Client) RestoreCollection(collection string) (int, error) {
 	return result.RecordsRestored, nil
 }
 
+// HealthOK and HealthDegraded are the possible HealthStatus.Status values.
+// Consumers should compare against these constants rather than bare literals.
+const (
+	HealthOK       = "ok"
+	HealthDegraded = "degraded"
+)
+
 // HealthStatus describes the result of an ekoDB /api/health probe.
 //
 // It is degraded-tolerant: a reachable server that reports "degraded" is a
@@ -1648,7 +1655,7 @@ func (c *Client) RestoreCollection(collection string) (int, error) {
 type HealthStatus struct {
 	Reachable   bool                   // a valid /api/health response came back
 	Status      string                 // "ok" | "degraded" (unknown/missing -> "degraded")
-	IntegrityOK bool                   // body.integrity_ok
+	IntegrityOK bool                   // body integrity_ok (public) or integrity.healthy (admin)
 	Detail      map[string]interface{} // full parsed body (admin fields when present)
 }
 
@@ -1668,14 +1675,22 @@ func ParseHealthStatus(body []byte) (*HealthStatus, error) {
 		return nil, fmt.Errorf("health check: unparseable response: %w", err)
 	}
 
-	// Reachable. Default Status to "degraded" so a missing/odd status field
-	// fails safe (readiness withheld) rather than falsely reading as "ok".
-	hs := &HealthStatus{Reachable: true, Status: "degraded", Detail: result}
+	// Reachable. Default Status to degraded so a missing/odd status field fails
+	// safe (readiness withheld) rather than falsely reading as ok.
+	hs := &HealthStatus{Reachable: true, Status: HealthDegraded, Detail: result}
 	if s, ok := result["status"].(string); ok && s != "" {
 		hs.Status = s
 	}
+	// Integrity is reported two ways: the public response uses a top-level
+	// integrity_ok bool; the admin response nests it as integrity.healthy (and
+	// omits integrity_ok). Read whichever is present so IntegrityOK is correct
+	// for both.
 	if b, ok := result["integrity_ok"].(bool); ok {
 		hs.IntegrityOK = b
+	} else if integ, ok := result["integrity"].(map[string]interface{}); ok {
+		if healthy, ok := integ["healthy"].(bool); ok {
+			hs.IntegrityOK = healthy
+		}
 	}
 	return hs, nil
 }
