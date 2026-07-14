@@ -290,20 +290,29 @@ func TestHealthSuccess(t *testing.T) {
 	}
 }
 
+// Health() reports reachability, not readiness. A reachable server never errors,
+// even when it reports a non-ok status (use HealthStatus for the ok/degraded
+// distinction). Health() errors only when the server is unreachable.
 func TestHealthFailure(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/health": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]string{"status": "unhealthy"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "degraded"})
 		},
 	}
 	server := createTestServer(t, handlers)
-	defer server.Close()
 
 	client := createTestClient(t, server)
-	err := client.Health()
-	if err == nil {
-		t.Error("Expected Health() to fail for unhealthy status")
+
+	// Reachable but degraded -> tolerated, no error.
+	if err := client.Health(); err != nil {
+		t.Errorf("Health() must tolerate a reachable degraded server, got: %v", err)
+	}
+
+	// Unreachable -> error.
+	server.Close()
+	if err := client.Health(); err == nil {
+		t.Error("Expected Health() to fail when the server is unreachable")
 	}
 }
 

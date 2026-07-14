@@ -1634,23 +1634,71 @@ func (c *Client) RestoreCollection(collection string) (int, error) {
 	return result.RecordsRestored, nil
 }
 
-// Health checks if the ekoDB server is healthy
-func (c *Client) Health() error {
+// HealthStatus describes the result of an ekoDB /api/health probe.
+//
+// It is degraded-tolerant: a reachable server that reports "degraded" is a
+// successful result (err == nil) with Status == "degraded", NOT an error. An
+// error is returned only when the server is unreachable (connection refused,
+// timeout, non-2xx, or an unparseable body).
+//
+// Consumers MUST base connection/liveness decisions on Reachable (err == nil)
+// and treat "degraded" as a warning — never as a fatal or reconnect trigger.
+// The ekoDB server intentionally returns HTTP 200 while degraded so that
+// liveness probes do not restart a degraded-but-recoverable instance.
+type HealthStatus struct {
+	Reachable   bool                   // a valid /api/health response came back
+	Status      string                 // "ok" | "degraded" (unknown/missing -> "degraded")
+	IntegrityOK bool                   // body.integrity_ok
+	Detail      map[string]interface{} // full parsed body (admin fields when present)
+}
+
+// ParseHealthStatus interprets a raw /api/health response body per the health
+// contract. It is the single source of truth for that interpretation, reused by
+// Client.HealthStatus and by non-client probes (e.g. a service that GETs
+// /api/health with its own HTTP client for circuit-breaking) so every consumer
+// reads health identically.
+//
+// A parseable body is Reachable with its reported Status (a missing/odd status
+// fails safe to "degraded"). An unparseable body returns an error and
+// Reachable=false.
+func ParseHealthStatus(body []byte) (*HealthStatus, error) {
+	var result map[string]interface{}
+	// Always use JSON for the health endpoint.
+	if err := json.Unmarshal(body, &result); err != nil {
+		return &HealthStatus{Reachable: false}, fmt.Errorf("health check: unparseable response: %w", err)
+	}
+
+	// Reachable. Default Status to "degraded" so a missing/odd status field
+	// fails safe (readiness withheld) rather than falsely reading as "ok".
+	hs := &HealthStatus{Reachable: true, Status: "degraded", Detail: result}
+	if s, ok := result["status"].(string); ok && s != "" {
+		hs.Status = s
+	}
+	if b, ok := result["integrity_ok"].(bool); ok {
+		hs.IntegrityOK = b
+	}
+	return hs, nil
+}
+
+// HealthStatus probes /api/health and returns structured, degraded-tolerant
+// state. See the HealthStatus type for the contract.
+func (c *Client) HealthStatus() (*HealthStatus, error) {
 	respBody, err := c.makeRequest("GET", "/api/health", nil)
 	if err != nil {
-		return err
+		return &HealthStatus{Reachable: false}, err
 	}
+	return ParseHealthStatus(respBody)
+}
 
-	var result map[string]interface{}
-	// Always use JSON for health endpoint
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return err
-	}
-
-	// Check if status is "ok"
-	if status, ok := result["status"].(string); ok && status == "ok" {
-		return nil
-	}
-
-	return fmt.Errorf("health check failed: unexpected response")
+// Health reports whether the ekoDB server is reachable.
+//
+// It returns nil whenever the server answers /api/health — including when the
+// server reports "degraded" — and returns an error only when the server is
+// unreachable. Use HealthStatus for the "ok" vs "degraded" distinction. This
+// is intentionally reachable-only: gating a connection on "status == ok"
+// conflates readiness with liveness and blocks startup against a
+// degraded-but-serving instance.
+func (c *Client) Health() error {
+	_, err := c.HealthStatus()
+	return err
 }
