@@ -1638,11 +1638,11 @@ func (c *Client) RestoreCollection(collection string) (int, error) {
 //
 // It is degraded-tolerant: a reachable server that reports "degraded" is a
 // successful result (err == nil) with Status == "degraded", NOT an error. An
-// error is returned only when the server is unreachable (connection refused,
-// timeout, non-2xx, or an unparseable body).
+// error (with a nil *HealthStatus) is returned only when the server is
+// unreachable (connection refused, timeout, non-2xx, or an unparseable body).
 //
-// Consumers MUST base connection/liveness decisions on Reachable (err == nil)
-// and treat "degraded" as a warning — never as a fatal or reconnect trigger.
+// Consumers MUST base connection/liveness decisions on err == nil and treat
+// "degraded" as a warning, never as a fatal or reconnect trigger.
 // The ekoDB server intentionally returns HTTP 200 while degraded so that
 // liveness probes do not restart a degraded-but-recoverable instance.
 type HealthStatus struct {
@@ -1658,14 +1658,14 @@ type HealthStatus struct {
 // /api/health with its own HTTP client for circuit-breaking) so every consumer
 // reads health identically.
 //
-// A parseable body is Reachable with its reported Status (a missing/odd status
-// fails safe to "degraded"). An unparseable body returns an error and
-// Reachable=false.
+// A parseable body yields a non-nil, Reachable HealthStatus with its reported
+// Status (a missing/odd status fails safe to "degraded"). An unparseable body
+// yields (nil, error).
 func ParseHealthStatus(body []byte) (*HealthStatus, error) {
 	var result map[string]interface{}
 	// Always use JSON for the health endpoint.
 	if err := json.Unmarshal(body, &result); err != nil {
-		return &HealthStatus{Reachable: false}, fmt.Errorf("health check: unparseable response: %w", err)
+		return nil, fmt.Errorf("health check: unparseable response: %w", err)
 	}
 
 	// Reachable. Default Status to "degraded" so a missing/odd status field
@@ -1685,7 +1685,7 @@ func ParseHealthStatus(body []byte) (*HealthStatus, error) {
 func (c *Client) HealthStatus() (*HealthStatus, error) {
 	respBody, err := c.makeRequest("GET", "/api/health", nil)
 	if err != nil {
-		return &HealthStatus{Reachable: false}, err
+		return nil, err
 	}
 	return ParseHealthStatus(respBody)
 }

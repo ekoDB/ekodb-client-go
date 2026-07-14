@@ -74,8 +74,31 @@ func TestHealthStatus_UnreachableErrors(t *testing.T) {
 	if err == nil {
 		t.Fatalf("HealthStatus against a down server must error")
 	}
-	if hs != nil && hs.Reachable {
-		t.Errorf("expected Reachable=false when unreachable")
+	if hs != nil {
+		t.Errorf("expected nil HealthStatus on unreachable, got %+v", hs)
+	}
+}
+
+// A reachable server returning a non-2xx status is unreachable for the contract:
+// error, nil HealthStatus (guards the "non-2xx -> error" branch wavescd's
+// liveness gate relies on).
+func TestHealthStatus_Non2xxErrors(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/health": func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"degraded"}`))
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+	client := createTestClient(t, server)
+
+	hs, err := client.HealthStatus()
+	if err == nil {
+		t.Fatalf("a 503 from /api/health must error (non-2xx is not reachable)")
+	}
+	if hs != nil {
+		t.Errorf("expected nil HealthStatus on a non-2xx response, got %+v", hs)
 	}
 }
 
@@ -120,7 +143,7 @@ func TestParseHealthStatus_GarbageIsUnreachable(t *testing.T) {
 	if err == nil {
 		t.Fatal("unparseable body must error")
 	}
-	if hs.Reachable {
-		t.Error("unparseable body must not be Reachable")
+	if hs != nil {
+		t.Errorf("expected nil HealthStatus on an unparseable body, got %+v", hs)
 	}
 }
