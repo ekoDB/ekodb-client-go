@@ -186,10 +186,16 @@ func TestHealthStatusConstants(t *testing.T) {
 	}
 }
 
-// The snapshot is JSON-serializable with stable field names, so a consumer can
-// surface it directly (e.g. on a status page).
+// The snapshot serializes to a safe summary (reachable/status/integrity_ok) that
+// a consumer can surface directly. Detail carries the full, possibly sensitive
+// admin body and MUST NOT be serialized.
 func TestHealthStatus_JSONShape(t *testing.T) {
-	hs := &HealthStatus{Reachable: true, Status: HealthDegraded, IntegrityOK: false, Detail: map[string]interface{}{"x": 1}}
+	hs := &HealthStatus{
+		Reachable:   true,
+		Status:      HealthDegraded,
+		IntegrityOK: false,
+		Detail:      map[string]interface{}{"manifest_load_failed": []string{"secret_collection"}},
+	}
 	b, err := json.Marshal(hs)
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
@@ -198,7 +204,7 @@ func TestHealthStatus_JSONShape(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
-	for _, k := range []string{"reachable", "status", "integrity_ok", "detail"} {
+	for _, k := range []string{"reachable", "status", "integrity_ok"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("missing key %q in %s", k, b)
 		}
@@ -209,10 +215,13 @@ func TestHealthStatus_JSONShape(t *testing.T) {
 	if m["reachable"] != true {
 		t.Errorf("reachable = %v, want true", m["reachable"])
 	}
-	// detail is omitempty: absent on an empty snapshot
-	b2, _ := json.Marshal(&HealthStatus{Reachable: false, Status: HealthUnknown})
-	if strings.Contains(string(b2), "detail") {
-		t.Errorf("empty detail should be omitted, got %s", b2)
+	// Detail must not be serialized (even when populated), so the internal admin
+	// body is never leaked when the snapshot is surfaced.
+	if _, ok := m["detail"]; ok {
+		t.Errorf("detail must not be serialized, got %s", b)
+	}
+	if strings.Contains(string(b), "secret_collection") {
+		t.Errorf("internal detail leaked into the serialized snapshot: %s", b)
 	}
 }
 

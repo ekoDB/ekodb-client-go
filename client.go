@@ -1663,10 +1663,14 @@ const (
 // ekoDB server intentionally returns HTTP 200 while degraded so that liveness
 // probes do not restart a degraded-but-recoverable instance.
 type HealthStatus struct {
-	Reachable   bool                   `json:"reachable"`        // a valid /api/health response came back
-	Status      HealthState            `json:"status"`           // HealthOK | HealthDegraded (unknown/missing -> HealthDegraded)
-	IntegrityOK bool                   `json:"integrity_ok"`     // body integrity_ok (public) or integrity.healthy (admin)
-	Detail      map[string]interface{} `json:"detail,omitempty"` // full parsed body (admin fields when present)
+	Reachable   bool        `json:"reachable"`    // a valid /api/health response came back
+	Status      HealthState `json:"status"`       // HealthOK | HealthDegraded (unknown/missing -> HealthDegraded)
+	IntegrityOK bool        `json:"integrity_ok"` // body integrity_ok (public) or integrity.healthy (admin)
+	// Detail is the full parsed body (admin responses include internal metrics
+	// and collection names). It is NOT serialized (json:"-") so surfacing the
+	// snapshot can't leak internals; read it in-process when you need the raw
+	// body.
+	Detail map[string]interface{} `json:"-"`
 }
 
 // ParseHealthStatus interprets a raw /api/health response body per the health
