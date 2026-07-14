@@ -147,3 +147,40 @@ func TestParseHealthStatus_GarbageIsUnreachable(t *testing.T) {
 		t.Errorf("expected nil HealthStatus on an unparseable body, got %+v", hs)
 	}
 }
+
+// The admin /api/health response nests integrity as integrity.healthy (there is
+// NO top-level integrity_ok); the clients authenticate as admin, so IntegrityOK
+// must read that nested shape. A healthy admin body is the discriminating case:
+// the old code read the absent top-level key and defaulted IntegrityOK to false.
+func TestParseHealthStatus_AdminShapeHealthy(t *testing.T) {
+	hs, err := ParseHealthStatus([]byte(`{"status":"ok","integrity":{"healthy":true,"manifest_load_failed":[]}}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hs.Status != "ok" {
+		t.Errorf("expected Status=ok, got %q", hs.Status)
+	}
+	if !hs.IntegrityOK {
+		t.Errorf("admin shape: IntegrityOK must come from integrity.healthy (got false)")
+	}
+}
+
+func TestParseHealthStatus_AdminShapeDegraded(t *testing.T) {
+	hs, err := ParseHealthStatus([]byte(`{"status":"degraded","integrity":{"healthy":false,"manifest_load_failed":["deployment_operations"]}}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hs.Status != "degraded" {
+		t.Errorf("expected Status=degraded, got %q", hs.Status)
+	}
+	if hs.IntegrityOK {
+		t.Errorf("admin shape: IntegrityOK must be false when integrity.healthy is false")
+	}
+}
+
+// Constants exist for the Status values so consumers compare against a symbol.
+func TestHealthStatusConstants(t *testing.T) {
+	if HealthOK != "ok" || HealthDegraded != "degraded" {
+		t.Errorf("unexpected status constants: %q / %q", HealthOK, HealthDegraded)
+	}
+}
