@@ -1634,29 +1634,34 @@ func (c *Client) RestoreCollection(collection string) (int, error) {
 	return result.RecordsRestored, nil
 }
 
+// HealthState is a health status value reported by ekoDB's /api/health.
+type HealthState string
+
 // HealthOK and HealthDegraded are the possible HealthStatus.Status values.
 // Consumers should compare against these constants rather than bare literals.
 const (
-	HealthOK       = "ok"
-	HealthDegraded = "degraded"
+	HealthOK       HealthState = "ok"
+	HealthDegraded HealthState = "degraded"
 )
 
-// HealthStatus describes the result of an ekoDB /api/health probe.
+// HealthStatus is a snapshot of an ekoDB /api/health probe. It is safe to
+// serialize (all fields carry JSON tags) so a consumer can surface it directly.
 //
-// It is degraded-tolerant: a reachable server that reports "degraded" is a
-// successful result (err == nil) with Status == "degraded", NOT an error. An
-// error (with a nil *HealthStatus) is returned only when the server is
-// unreachable (connection refused, timeout, non-2xx, or an unparseable body).
+// It is degraded-tolerant: a reachable server that reports degraded is a
+// successful result (err == nil) with Status == HealthDegraded, NOT an error.
+// When the server is unreachable (connection refused, timeout, non-2xx, or an
+// unparseable body) a non-nil snapshot with Reachable == false is returned
+// alongside the error.
 //
-// Consumers MUST base connection/liveness decisions on err == nil and treat
-// "degraded" as a warning, never as a fatal or reconnect trigger.
-// The ekoDB server intentionally returns HTTP 200 while degraded so that
-// liveness probes do not restart a degraded-but-recoverable instance.
+// Consumers MUST base connection/liveness decisions on Reachable (or err == nil)
+// and treat degraded as a warning, never as a fatal or reconnect trigger. The
+// ekoDB server intentionally returns HTTP 200 while degraded so that liveness
+// probes do not restart a degraded-but-recoverable instance.
 type HealthStatus struct {
-	Reachable   bool                   // a valid /api/health response came back
-	Status      string                 // "ok" | "degraded" (unknown/missing -> "degraded")
-	IntegrityOK bool                   // body integrity_ok (public) or integrity.healthy (admin)
-	Detail      map[string]interface{} // full parsed body (admin fields when present)
+	Reachable   bool                   `json:"reachable"`        // a valid /api/health response came back
+	Status      HealthState            `json:"status"`           // HealthOK | HealthDegraded (unknown/missing -> HealthDegraded)
+	IntegrityOK bool                   `json:"integrity_ok"`     // body integrity_ok (public) or integrity.healthy (admin)
+	Detail      map[string]interface{} `json:"detail,omitempty"` // full parsed body (admin fields when present)
 }
 
 // ParseHealthStatus interprets a raw /api/health response body per the health
@@ -1666,20 +1671,20 @@ type HealthStatus struct {
 // reads health identically.
 //
 // A parseable body yields a non-nil, Reachable HealthStatus with its reported
-// Status (a missing/odd status fails safe to "degraded"). An unparseable body
-// yields (nil, error).
+// Status (a missing/odd status fails safe to HealthDegraded). An unparseable
+// body yields a non-nil snapshot with Reachable == false plus an error.
 func ParseHealthStatus(body []byte) (*HealthStatus, error) {
 	var result map[string]interface{}
 	// Always use JSON for the health endpoint.
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("health check: unparseable response: %w", err)
+		return &HealthStatus{Reachable: false}, fmt.Errorf("health check: unparseable response: %w", err)
 	}
 
 	// Reachable. Default Status to degraded so a missing/odd status field fails
 	// safe (readiness withheld) rather than falsely reading as ok.
 	hs := &HealthStatus{Reachable: true, Status: HealthDegraded, Detail: result}
 	if s, ok := result["status"].(string); ok && s != "" {
-		hs.Status = s
+		hs.Status = HealthState(s)
 	}
 	// Integrity is reported two ways: the public response uses a top-level
 	// integrity_ok bool; the admin response nests it as integrity.healthy (and
@@ -1700,7 +1705,7 @@ func ParseHealthStatus(body []byte) (*HealthStatus, error) {
 func (c *Client) HealthStatus() (*HealthStatus, error) {
 	respBody, err := c.makeRequest("GET", "/api/health", nil)
 	if err != nil {
-		return nil, err
+		return &HealthStatus{Reachable: false}, err
 	}
 	return ParseHealthStatus(respBody)
 }

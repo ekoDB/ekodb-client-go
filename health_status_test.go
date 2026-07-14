@@ -74,8 +74,8 @@ func TestHealthStatus_UnreachableErrors(t *testing.T) {
 	if err == nil {
 		t.Fatalf("HealthStatus against a down server must error")
 	}
-	if hs != nil {
-		t.Errorf("expected nil HealthStatus on unreachable, got %+v", hs)
+	if hs == nil || hs.Reachable {
+		t.Errorf("expected a non-nil, unreachable snapshot, got %+v", hs)
 	}
 }
 
@@ -97,8 +97,8 @@ func TestHealthStatus_Non2xxErrors(t *testing.T) {
 	if err == nil {
 		t.Fatalf("a 503 from /api/health must error (non-2xx is not reachable)")
 	}
-	if hs != nil {
-		t.Errorf("expected nil HealthStatus on a non-2xx response, got %+v", hs)
+	if hs == nil || hs.Reachable {
+		t.Errorf("expected a non-nil, unreachable snapshot on a non-2xx response, got %+v", hs)
 	}
 }
 
@@ -143,8 +143,8 @@ func TestParseHealthStatus_GarbageIsUnreachable(t *testing.T) {
 	if err == nil {
 		t.Fatal("unparseable body must error")
 	}
-	if hs != nil {
-		t.Errorf("expected nil HealthStatus on an unparseable body, got %+v", hs)
+	if hs == nil || hs.Reachable {
+		t.Errorf("expected a non-nil, unreachable snapshot on an unparseable body, got %+v", hs)
 	}
 }
 
