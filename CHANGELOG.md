@@ -6,6 +6,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-07-14
+
+### Added
+
+- **`Client.HealthStatus() (*HealthStatus, error)`: structured,
+  degraded-tolerant health.** Returns a snapshot
+  `{Reachable, Status, IntegrityOK, Detail}` parsed from `/api/health`, where
+  `Status` is a typed `HealthState` (`HealthOK` / `HealthDegraded`). Its JSON
+  form is a safe summary (`reachable` / `status` / `integrity_ok`); `Detail`
+  (the full admin body, including internal metrics and collection names) is
+  excluded from JSON (`json:"-"`) so surfacing the snapshot cannot leak
+  internals, and is read in-process when the raw body is needed. An error is
+  returned **only** when the server is unreachable (connection refused, timeout,
+  non-2xx, unparseable body); a `degraded` HTTP-200 response is a successful
+  result with `Status == HealthDegraded`, not an error. This is the canonical
+  way for consumers to distinguish _reachable_ (liveness) from _ok vs degraded_
+  (readiness). A missing/odd `status` field fails safe to `HealthDegraded` so
+  readiness is never falsely reported as ok. When unreachable it returns a
+  **non-nil** snapshot with `Reachable == false` and `Status == HealthUnknown`
+  alongside the error, so the value is always safe to read and serializes
+  coherently (no empty status). `IntegrityOK` is read from either the public
+  `integrity_ok` field or the admin `integrity.healthy` field, so it is correct
+  for both response shapes.
+
+- **`HealthState` typed enum with `HealthOK` / `HealthDegraded` /
+  `HealthUnknown` constants** for comparing `HealthStatus.Status` type-safely
+  instead of against bare literals. `HealthUnknown` is the status of an
+  unreachable/unparseable snapshot.
+
+- **`ParseHealthStatus(body []byte) (*HealthStatus, error)`**: the exported,
+  standalone interpreter of an `/api/health` body, reused by `HealthStatus()`
+  and by non-client probes (e.g. a service that GETs `/api/health` with its own
+  HTTP client for circuit-breaking) so every consumer reads health through the
+  exact same contract. A parseable body yields a `Reachable` snapshot; an
+  unparseable body yields a non-nil snapshot with `Reachable == false` plus an
+  error.
+
+### Changed
+
+- **`Client.Health()` is now reachable-only (behavior change).** It previously
+  returned an error whenever the server's `/api/health` body was not
+  `status == "ok"`, which conflated liveness with readiness and caused callers
+  to treat a _degraded-but-serving_ ekoDB as down (blocking startup). `Health()`
+  now returns nil whenever the server responds (including when it reports
+  `degraded`) and errors only when unreachable. Use `HealthStatus()` for the
+  `ok` vs `degraded` distinction. The ekoDB server intentionally returns HTTP
+  200 while degraded so liveness probes don't restart a recoverable instance.
+
 ## [0.24.0] - 2026-07-07
 
 ### Infrastructure
