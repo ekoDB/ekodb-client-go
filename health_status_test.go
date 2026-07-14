@@ -3,6 +3,7 @@ package ekodb
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -182,5 +183,58 @@ func TestParseHealthStatus_AdminShapeDegraded(t *testing.T) {
 func TestHealthStatusConstants(t *testing.T) {
 	if HealthOK != "ok" || HealthDegraded != "degraded" {
 		t.Errorf("unexpected status constants: %q / %q", HealthOK, HealthDegraded)
+	}
+}
+
+// The snapshot is JSON-serializable with stable field names, so a consumer can
+// surface it directly (e.g. on a status page).
+func TestHealthStatus_JSONShape(t *testing.T) {
+	hs := &HealthStatus{Reachable: true, Status: HealthDegraded, IntegrityOK: false, Detail: map[string]interface{}{"x": 1}}
+	b, err := json.Marshal(hs)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	for _, k := range []string{"reachable", "status", "integrity_ok", "detail"} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("missing key %q in %s", k, b)
+		}
+	}
+	if m["status"] != "degraded" {
+		t.Errorf("status = %v, want degraded", m["status"])
+	}
+	if m["reachable"] != true {
+		t.Errorf("reachable = %v, want true", m["reachable"])
+	}
+	// detail is omitempty: absent on an empty snapshot
+	b2, _ := json.Marshal(&HealthStatus{Reachable: false, Status: HealthUnknown})
+	if strings.Contains(string(b2), "detail") {
+		t.Errorf("empty detail should be omitted, got %s", b2)
+	}
+}
+
+// An unreachable/unparseable snapshot reports Status HealthUnknown (not an empty
+// string) so the serialized DTO is coherent.
+func TestHealthStatus_UnreachableSnapshotIsUnknown(t *testing.T) {
+	client, closeFn := healthTestServer(t, map[string]interface{}{"status": "ok"})
+	closeFn() // unreachable
+
+	hs, err := client.HealthStatus()
+	if err == nil {
+		t.Fatalf("expected an error for an unreachable server")
+	}
+	if hs == nil || hs.Reachable || hs.Status != HealthUnknown {
+		t.Errorf("unreachable snapshot should be {Reachable:false, Status:HealthUnknown}, got %+v", hs)
+	}
+
+	hs2, err2 := ParseHealthStatus([]byte("not json"))
+	if err2 == nil {
+		t.Fatal("expected an error for an unparseable body")
+	}
+	if hs2 == nil || hs2.Status != HealthUnknown {
+		t.Errorf("unparseable snapshot should have Status HealthUnknown, got %+v", hs2)
 	}
 }
