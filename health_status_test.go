@@ -81,8 +81,8 @@ func TestHealthStatus_UnreachableErrors(t *testing.T) {
 }
 
 // A reachable server returning a non-2xx status is unreachable for the contract:
-// error, nil HealthStatus (guards the "non-2xx -> error" branch wavescd's
-// liveness gate relies on).
+// error, nil HealthStatus (guards the "non-2xx -> error" branch that downstream
+// liveness gates rely on).
 func TestHealthStatus_Non2xxErrors(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/health": func(w http.ResponseWriter, _ *http.Request) {
@@ -103,8 +103,8 @@ func TestHealthStatus_Non2xxErrors(t *testing.T) {
 	}
 }
 
-// Health() is now reachable-only: degraded must NOT error (regression guard for the
-// currentcs boot bug where degraded made Health() fail and blocked startup).
+// Health() is now reachable-only: degraded must NOT error (regression guard: treating
+// degraded as a hard failure previously blocked consumer startup).
 func TestHealth_ReachableOnlyToleratesDegraded(t *testing.T) {
 	client, closeFn := healthTestServer(t, map[string]interface{}{
 		"status": "degraded", "integrity_ok": false,
@@ -117,8 +117,8 @@ func TestHealth_ReachableOnlyToleratesDegraded(t *testing.T) {
 }
 
 // ParseHealthStatus is the shared contract parser reused by non-client probes
-// (e.g. wavescd's circuit-breaker health check) so every consumer interprets
-// /api/health identically.
+// (e.g. circuit-breaker health checks in downstream services) so every consumer
+// interprets /api/health identically.
 func TestParseHealthStatus_DegradedIsReachable(t *testing.T) {
 	hs, err := ParseHealthStatus([]byte(`{"status":"degraded","integrity_ok":false}`))
 	if err != nil {
