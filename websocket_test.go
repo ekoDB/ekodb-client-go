@@ -479,6 +479,51 @@ func TestWebSocketChatStreamErrorCarriesTheClassification(t *testing.T) {
 	}
 }
 
+// Without `error_kind` the WebSocket route carries no classification either.
+func TestWebSocketChatStreamErrorWithoutKindCarriesNoClassification(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	eventCh, err := ws.ChatSend("chat-5", "test")
+	if err != nil {
+		t.Fatalf("failed to send chat: %v", err)
+	}
+	readMessage(t, serverConn)
+
+	mustWriteJSON(t, serverConn, map[string]interface{}{
+		"type": "ChatStreamError",
+		"payload": map[string]interface{}{
+			"chat_id":          "chat-5",
+			"error":            "Model unavailable",
+			"provider":         "openai",
+			"provider_status":  503,
+			"retry_after_secs": 5,
+		},
+	})
+
+	var events []ChatStreamEvent
+	for event := range eventCh {
+		events = append(events, event)
+	}
+	if len(events) != 1 || events[0].Type != "error" || events[0].Error != "Model unavailable" {
+		t.Fatalf("expected one plain error event, got %+v", events)
+	}
+	ev := events[0]
+	if ev.ErrorKind != "" || ev.Provider != "" || ev.ProviderStatus != nil || ev.RetryAfterSecs != nil || ev.IsProviderFailure() {
+		t.Fatalf("a payload without error_kind must carry no classification: %+v", ev)
+	}
+}
+
 // A payload that says `message` instead of `error` is still the error.
 func TestWebSocketChatStreamErrorFallsBackToMessage(t *testing.T) {
 	wsURL, connCh, server := setupTestWSServer(t)

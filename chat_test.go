@@ -266,6 +266,38 @@ func TestChatMessageStreamError(t *testing.T) {
 	}
 }
 
+// The classification travels as one unit: without `error_kind` there is no
+// provider failure, so `Provider` / `ProviderStatus` / `RetryAfterSecs` stay
+// empty even if the frame happened to carry them.
+func TestChatMessageStreamErrorWithoutKindCarriesNoClassification(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/session_1/messages/stream": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher, _ := w.(http.Flusher)
+			fmt.Fprintf(w, "data: {\"error\":\"Model unavailable\",\"provider\":\"openai\",\"provider_status\":503,\"retry_after_secs\":5}\n\n")
+			flusher.Flush()
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	ch, err := client.ChatMessageStream(context.Background(), "session_1", ChatMessageRequest{Message: "Hi"})
+	if err != nil {
+		t.Fatalf("ChatMessageStream failed: %v", err)
+	}
+	var events []ChatStreamEvent
+	for event := range ch {
+		events = append(events, event)
+	}
+	if len(events) != 1 || events[0].Type != "error" || events[0].Error != "Model unavailable" {
+		t.Fatalf("expected one plain error event, got %+v", events)
+	}
+	ev := events[0]
+	if ev.ErrorKind != "" || ev.Provider != "" || ev.ProviderStatus != nil || ev.RetryAfterSecs != nil || ev.IsProviderFailure() {
+		t.Fatalf("a frame without error_kind must carry no classification: %+v", ev)
+	}
+}
+
 // A single SSE data line can carry a large token or tool payload; the
 // scanner's default 64 KiB line limit must not truncate the stream silently.
 func TestChatMessageStreamCarriesALongDataLine(t *testing.T) {
