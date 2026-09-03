@@ -352,7 +352,10 @@ within the transaction.
 ### Chat Models
 
 - `GetChatModels() (*ChatModels, error)` - Get all available chat models by
-  provider
+  provider (`OpenAI`, `Anthropic`, `Perplexity`, `Gemini`), plus `Providers`: a
+  per-provider `ChatProviderStatus` (`ok`, `not_configured`, `auth_failed`,
+  `permission_denied`, `billing`, `rate_limited`, `unavailable`, `unreachable`,
+  `request_error`) so a rejected key is distinguishable from a missing one
 - `GetChatModel(provider string) ([]string, error)` - Get models for a specific
   provider
 
