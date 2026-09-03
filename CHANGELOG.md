@@ -37,7 +37,7 @@ and this project adheres to
   lines up to 1 MiB (the scanner's default 64 KiB limit truncated a large token
   or tool payload silently, as `SubscribeSSE` already avoided) and reports a
   stream the scanner could not read to its end as an `error` event
-  (`stream read failed: …`) instead of a clean close.
+  (`stream read failed: …`) instead of a clean close. The classification travels as one unit: without an `error_kind` an event carries no `Provider` / `ProviderStatus` / `RetryAfterSecs`, on either route.
 
 ## [0.25.0] - 2026-07-14
 
