@@ -266,6 +266,42 @@ func TestChatMessageStreamError(t *testing.T) {
 	}
 }
 
+// A frame the server names `error` is an error whatever its payload calls
+// the message, so a `message`-only payload is an error event rather than a
+// frame to skip.
+func TestChatMessageStreamEventNamedErrorWithMessageOnly(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/session_1/messages/stream": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher, _ := w.(http.Flusher)
+			fmt.Fprintf(w, "event: token\ndata: {\"token\":\"Hel\"}\n\n")
+			fmt.Fprintf(w, "event: error\ndata: {\"message\":\"boom\"}\n\n")
+			flusher.Flush()
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	ch, err := client.ChatMessageStream(context.Background(), "session_1", ChatMessageRequest{Message: "Hi"})
+	if err != nil {
+		t.Fatalf("ChatMessageStream failed: %v", err)
+	}
+
+	var events []ChatStreamEvent
+	for event := range ch {
+		events = append(events, event)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected a chunk and an error, got %+v", events)
+	}
+	if events[0].Type != "chunk" || events[0].Content != "Hel" {
+		t.Fatalf("unexpected first event: %+v", events[0])
+	}
+	if events[1].Type != "error" || events[1].Error != "boom" || events[1].IsProviderFailure() {
+		t.Fatalf("unexpected error event: %+v", events[1])
+	}
+}
+
 // The deployment classifies a provider failure (error_kind, provider,
 // provider_status, retry_after_secs); the event carries every field so a
 // consumer can act on it without string-matching. A plain error stays bare.

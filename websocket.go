@@ -65,11 +65,16 @@ func (e ChatStreamEvent) IsProviderFailure() bool {
 }
 
 // chatStreamErrorEvent builds the error event for an SSE frame, carrying the
-// provider-failure classification when the frame has it.
+// provider-failure classification when the frame has it. A payload that says
+// `message` instead of `error` is still the error, as on the WebSocket route.
 func chatStreamErrorEvent(eventData map[string]interface{}) ChatStreamEvent {
 	ev := ChatStreamEvent{Type: "error"}
-	if e, ok := eventData["error"].(string); ok {
+	if e, ok := eventData["error"].(string); ok && e != "" {
 		ev.Error = e
+	} else if m, ok := eventData["message"].(string); ok && m != "" {
+		ev.Error = m
+	} else {
+		ev.Error = "unknown error"
 	}
 	if k, ok := eventData["error_kind"].(string); ok {
 		ev.ErrorKind = k
