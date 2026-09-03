@@ -26,10 +26,11 @@ and this project adheres to
   the `error` event now carries `ErrorKind` (`provider_auth_failed`,
   `provider_permission_denied`, `provider_billing`, `provider_rate_limited`,
   `provider_unavailable`, `provider_unreachable`, `provider_not_configured`,
-  `provider_request_error`), `Provider`, the provider's own `ProviderStatus` and
-  `RetryAfterSecs` (pointers, present when sent), on both SSE and WebSocket
-  streams, and `IsProviderFailure()` reports whether they are there. A transport
-  failure or a plain server error stays a bare `Error`.
+  `provider_request_error`) and `Provider` — strings, empty when not sent, like
+  the event's other optional strings — plus the provider's own `ProviderStatus`
+  and `RetryAfterSecs` (pointers, since 0 is a value there), on both SSE and
+  WebSocket streams, and `IsProviderFailure()` reports whether they are there. A
+  transport failure or a plain server error stays a bare `Error`.
 
 ## [0.25.0] - 2026-07-14
 
