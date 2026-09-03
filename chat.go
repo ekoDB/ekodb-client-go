@@ -948,6 +948,10 @@ func (c *Client) ChatMessageStream(ctx context.Context, sessionID string, reques
 		}
 
 		scanner := bufio.NewScanner(resp.Body)
+		// A single data line can carry a large token or tool payload; the
+		// scanner's default 64 KiB line limit would truncate the stream
+		// silently. Same sizing as SubscribeSSE.
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		// The `event:` name applies to the data lines that follow it, until
 		// the blank line that ends the frame.
 		eventName := ""
@@ -1013,6 +1017,12 @@ func (c *Client) ChatMessageStream(ctx context.Context, sessionID string, reques
 				send(chatStreamErrorEvent(eventData))
 				return
 			}
+		}
+		// A stream the scanner could not read to its end (a broken
+		// connection, a line past the limit above) is a failure the consumer
+		// can distinguish from a clean end, never a silent close.
+		if err := scanner.Err(); err != nil {
+			send(ChatStreamEvent{Type: "error", Error: "stream read failed: " + err.Error()})
 		}
 	}()
 

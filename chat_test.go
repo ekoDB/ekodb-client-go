@@ -266,6 +266,67 @@ func TestChatMessageStreamError(t *testing.T) {
 	}
 }
 
+// A single SSE data line can carry a large token or tool payload; the
+// scanner's default 64 KiB line limit must not truncate the stream silently.
+func TestChatMessageStreamCarriesALongDataLine(t *testing.T) {
+	long := strings.Repeat("x", 200*1024)
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/session_1/messages/stream": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher, _ := w.(http.Flusher)
+			fmt.Fprintf(w, "data: {\"token\":\"%s\"}\n\n", long)
+			fmt.Fprintf(w, "data: {\"content\":\"done\",\"message_id\":\"m1\"}\n\n")
+			flusher.Flush()
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	ch, err := client.ChatMessageStream(context.Background(), "session_1", ChatMessageRequest{Message: "Hi"})
+	if err != nil {
+		t.Fatalf("ChatMessageStream failed: %v", err)
+	}
+	var events []ChatStreamEvent
+	for event := range ch {
+		events = append(events, event)
+	}
+	if len(events) != 2 || events[0].Type != "chunk" || len(events[0].Content) != len(long) || events[1].Type != "end" {
+		types := make([]string, 0, len(events))
+		for _, e := range events {
+			types = append(types, e.Type)
+		}
+		t.Fatalf("expected a %d-byte chunk then end, got %v", len(long), types)
+	}
+}
+
+// A stream the scanner cannot read to the end (here: a line past the 1 MiB
+// limit) is reported as an error event, never as a clean end.
+func TestChatMessageStreamReportsAScannerFailure(t *testing.T) {
+	huge := strings.Repeat("x", 2*1024*1024)
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/session_1/messages/stream": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher, _ := w.(http.Flusher)
+			fmt.Fprintf(w, "data: {\"token\":\"%s\"}\n\n", huge)
+			flusher.Flush()
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	ch, err := client.ChatMessageStream(context.Background(), "session_1", ChatMessageRequest{Message: "Hi"})
+	if err != nil {
+		t.Fatalf("ChatMessageStream failed: %v", err)
+	}
+	var events []ChatStreamEvent
+	for event := range ch {
+		events = append(events, event)
+	}
+	if len(events) != 1 || events[0].Type != "error" || !strings.Contains(events[0].Error, "token too long") || events[0].IsProviderFailure() {
+		t.Fatalf("expected one read-failure error event, got %+v", events)
+	}
+}
+
 // A frame the server names `error` is an error whatever its payload calls
 // the message, so a `message`-only payload is an error event rather than a
 // frame to skip.
