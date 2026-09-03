@@ -1056,6 +1056,77 @@ func TestGetChatModels(t *testing.T) {
 	if len(models.Anthropic) != 2 {
 		t.Errorf("Expected 2 Anthropic models, got %d", len(models.Anthropic))
 	}
+	if models.Providers != nil {
+		t.Errorf("a server without a providers map must leave Providers nil, got %v", models.Providers)
+	}
+}
+
+// GET /api/chat_models carries a gemini list and a per-provider status map
+// beside the three original lists, so a rejected key is distinguishable from
+// a missing one. The raw JSON below is the server's actual shape; encoding a
+// ChatModels literal would only prove the struct round-trips with itself.
+func TestGetChatModelsCarriesGeminiAndProviderStatus(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/chat_models": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"openai": [],
+				"anthropic": ["claude-sonnet-4-5"],
+				"perplexity": ["sonar"],
+				"gemini": ["gemini-2.5-flash"],
+				"providers": {
+					"anthropic": {"status": "ok", "verified": true, "model_count": 1},
+					"openai": {"status": "auth_failed", "verified": true, "http_status": 401,
+					           "message": "Failed to fetch OpenAI models: 401 Unauthorized"},
+					"perplexity": {"status": "ok", "verified": false,
+					               "message": "static model list; key not verified"}
+				}
+			}`))
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	models, err := client.GetChatModels()
+	if err != nil {
+		t.Fatalf("GetChatModels failed: %v", err)
+	}
+	if len(models.Gemini) != 1 || models.Gemini[0] != "gemini-2.5-flash" {
+		t.Errorf("Gemini = %v, want [gemini-2.5-flash]", models.Gemini)
+	}
+	openai, ok := models.Providers["openai"]
+	if !ok {
+		t.Fatalf("no openai row in Providers: %v", models.Providers)
+	}
+	if openai.Status != ChatProviderAuthFailed {
+		t.Errorf("openai.Status = %q, want %q", openai.Status, ChatProviderAuthFailed)
+	}
+	if !openai.Verified {
+		t.Errorf("a 401 is the provider's answer about this key: Verified must be true")
+	}
+	if openai.HTTPStatus == nil || *openai.HTTPStatus != 401 {
+		t.Errorf("openai.HTTPStatus = %v, want 401", openai.HTTPStatus)
+	}
+	if openai.Message == nil || *openai.Message != "Failed to fetch OpenAI models: 401 Unauthorized" {
+		t.Errorf("openai.Message = %v", openai.Message)
+	}
+	if openai.ModelCount != nil {
+		t.Errorf("openai.ModelCount = %v, want nil on a failure", openai.ModelCount)
+	}
+	if openai.IsUsable() {
+		t.Errorf("a rejected key is not usable")
+	}
+	anthropic := models.Providers["anthropic"]
+	if anthropic.Status != ChatProviderOK || anthropic.ModelCount == nil || *anthropic.ModelCount != 1 {
+		t.Errorf("anthropic = %+v, want ok with model_count 1", anthropic)
+	}
+	if !anthropic.IsUsable() {
+		t.Errorf("an ok provider is usable")
+	}
+	if models.Providers["perplexity"].Verified {
+		t.Errorf("perplexity is presence-checked only: Verified must be false")
+	}
 }
 
 func TestGetChatTools(t *testing.T) {

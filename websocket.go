@@ -38,6 +38,47 @@ type ChatStreamEvent struct {
 	ToolName        string          `json:"tool_name,omitempty"`
 	Arguments       json.RawMessage `json:"arguments,omitempty"`
 	Error           string          `json:"error,omitempty"`
+	// ErrorKind is the provider-failure classification ("provider_auth_failed",
+	// "provider_permission_denied", "provider_billing", "provider_rate_limited",
+	// "provider_unavailable", "provider_unreachable", "provider_not_configured",
+	// "provider_request_error") when the failure was the LLM provider's answer.
+	// Empty for a transport failure or a plain server error.
+	ErrorKind string `json:"error_kind,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	// ProviderStatus is the provider's own HTTP status, when it answered.
+	ProviderStatus *int   `json:"provider_status,omitempty"`
+	RetryAfterSecs *int64 `json:"retry_after_secs,omitempty"`
+}
+
+// IsProviderFailure reports whether an error event carries the server's
+// provider-failure classification — the case a caller can act on (fix the key,
+// wait, add credit).
+func (e ChatStreamEvent) IsProviderFailure() bool {
+	return e.Type == "error" && e.ErrorKind != ""
+}
+
+// chatStreamErrorEvent builds the error event for an SSE frame, carrying the
+// provider-failure classification when the frame has it.
+func chatStreamErrorEvent(eventData map[string]interface{}) ChatStreamEvent {
+	ev := ChatStreamEvent{Type: "error"}
+	if e, ok := eventData["error"].(string); ok {
+		ev.Error = e
+	}
+	if k, ok := eventData["error_kind"].(string); ok {
+		ev.ErrorKind = k
+	}
+	if p, ok := eventData["provider"].(string); ok {
+		ev.Provider = p
+	}
+	if s, ok := eventData["provider_status"].(float64); ok {
+		status := int(s)
+		ev.ProviderStatus = &status
+	}
+	if r, ok := eventData["retry_after_secs"].(float64); ok {
+		secs := int64(r)
+		ev.RetryAfterSecs = &secs
+	}
+	return ev
 }
 
 // ClientToolDefinition defines a client-side tool the LLM can call.
@@ -894,8 +935,12 @@ func (ws *WebSocketClient) routeChatStreamError(msg map[string]json.RawMessage) 
 	}
 
 	var payload struct {
-		Error   string `json:"error"`
-		Message string `json:"message"`
+		Error          string `json:"error"`
+		Message        string `json:"message"`
+		ErrorKind      string `json:"error_kind"`
+		Provider       string `json:"provider"`
+		ProviderStatus *int   `json:"provider_status"`
+		RetryAfterSecs *int64 `json:"retry_after_secs"`
 	}
 	if raw, ok := msg["payload"]; ok {
 		if err := json.Unmarshal(raw, &payload); err != nil {
@@ -921,7 +966,14 @@ func (ws *WebSocketClient) routeChatStreamError(msg map[string]json.RawMessage) 
 
 	if ok {
 		select {
-		case ch <- ChatStreamEvent{Type: "error", Error: errMsg}:
+		case ch <- ChatStreamEvent{
+			Type:           "error",
+			Error:          errMsg,
+			ErrorKind:      payload.ErrorKind,
+			Provider:       payload.Provider,
+			ProviderStatus: payload.ProviderStatus,
+			RetryAfterSecs: payload.RetryAfterSecs,
+		}:
 		default:
 		}
 		close(ch)

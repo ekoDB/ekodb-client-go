@@ -256,10 +256,63 @@ func TestChatMessageStreamError(t *testing.T) {
 			if event.Error != "Model unavailable" {
 				t.Errorf("Expected error 'Model unavailable', got '%s'", event.Error)
 			}
+			if event.ErrorKind != "" || event.Provider != "" || event.ProviderStatus != nil || event.IsProviderFailure() {
+				t.Errorf("a plain error must carry no classification: %+v", event)
+			}
 		}
 	}
 	if !gotError {
 		t.Fatal("Expected error event")
+	}
+}
+
+// The deployment classifies a provider failure (error_kind, provider,
+// provider_status, retry_after_secs); the event carries every field so a
+// consumer can act on it without string-matching. A plain error stays bare.
+func TestChatMessageStreamProviderFailure(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/chat/session_1/messages/stream": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher, _ := w.(http.Flusher)
+			fmt.Fprintf(w, "data:{\"error\":\"OpenAI API error 429 Too Many Requests\",\"error_kind\":\"provider_rate_limited\",\"provider\":\"openai\",\"provider_status\":429,\"retry_after_secs\":7}\n\n")
+			flusher.Flush()
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	ch, err := client.ChatMessageStream(context.Background(), "session_1", ChatMessageRequest{Message: "Hi"})
+	if err != nil {
+		t.Fatalf("ChatMessageStream failed: %v", err)
+	}
+
+	var got *ChatStreamEvent
+	for event := range ch {
+		if event.Type == "error" {
+			e := event
+			got = &e
+		}
+	}
+	if got == nil {
+		t.Fatal("Expected error event")
+	}
+	if got.Error != "OpenAI API error 429 Too Many Requests" {
+		t.Errorf("Error = %q", got.Error)
+	}
+	if got.ErrorKind != "provider_rate_limited" {
+		t.Errorf("ErrorKind = %q, want provider_rate_limited", got.ErrorKind)
+	}
+	if got.Provider != "openai" {
+		t.Errorf("Provider = %q, want openai", got.Provider)
+	}
+	if got.ProviderStatus == nil || *got.ProviderStatus != 429 {
+		t.Errorf("ProviderStatus = %v, want 429", got.ProviderStatus)
+	}
+	if got.RetryAfterSecs == nil || *got.RetryAfterSecs != 7 {
+		t.Errorf("RetryAfterSecs = %v, want 7", got.RetryAfterSecs)
+	}
+	if !got.IsProviderFailure() {
+		t.Errorf("a classified error is a provider failure")
 	}
 }
 

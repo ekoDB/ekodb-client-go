@@ -225,11 +225,65 @@ type CompactChatResponse struct {
 	AlreadyCompact   bool    `json:"already_compact"`
 }
 
-// ChatModels contains available models for each provider
+// ChatModels contains available models for each provider, and why each list
+// looks the way it does.
 type ChatModels struct {
 	OpenAI     []string `json:"openai"`
 	Anthropic  []string `json:"anthropic"`
 	Perplexity []string `json:"perplexity"`
+	// Gemini is empty from a server that predates the field.
+	Gemini []string `json:"gemini,omitempty"`
+	// Providers is keyed by provider name ("openai", "anthropic", "perplexity",
+	// "gemini"). A rejected key reports auth_failed where a missing one reports
+	// not_configured, so an empty list is never ambiguous. Nil from a server
+	// that predates the map.
+	Providers map[string]ChatProviderStatus `json:"providers,omitempty"`
+}
+
+// ChatProviderState is a provider's state on GET /api/chat_models. A status
+// this client version does not know decodes as its raw string, so a newer
+// server cannot break the client.
+type ChatProviderState string
+
+const (
+	// ChatProviderOK: the provider listed its models with the configured key.
+	ChatProviderOK ChatProviderState = "ok"
+	// ChatProviderNotConfigured: no key (for an OpenAI-compatible endpoint: no key and no URL).
+	ChatProviderNotConfigured ChatProviderState = "not_configured"
+	// ChatProviderAuthFailed: the provider rejected the key (401).
+	ChatProviderAuthFailed ChatProviderState = "auth_failed"
+	// ChatProviderPermissionDenied: the key may not use this resource or region (403).
+	ChatProviderPermissionDenied ChatProviderState = "permission_denied"
+	// ChatProviderBilling: the account cannot pay (402, or a quota / spend-limit code).
+	ChatProviderBilling ChatProviderState = "billing"
+	// ChatProviderRateLimited: the provider is rate limiting the server (429).
+	ChatProviderRateLimited ChatProviderState = "rate_limited"
+	// ChatProviderUnavailable: the provider answered 5xx or an unusable body.
+	ChatProviderUnavailable ChatProviderState = "unavailable"
+	// ChatProviderUnreachable: nothing answered — DNS, connect, TLS, or a timeout.
+	ChatProviderUnreachable ChatProviderState = "unreachable"
+	// ChatProviderRequestError: the provider refused the request itself (any other 4xx).
+	ChatProviderRequestError ChatProviderState = "request_error"
+)
+
+// ChatProviderStatus is one provider's row in ChatModels.Providers.
+type ChatProviderStatus struct {
+	Status ChatProviderState `json:"status"`
+	// Verified is true when the status is the provider's own answer about the
+	// configured key. A 5xx, a refused connection, or a missing key says
+	// nothing about it.
+	Verified bool `json:"verified"`
+	// HTTPStatus is the provider's own status, when it answered.
+	HTTPStatus *int `json:"http_status,omitempty"`
+	// Message is the provider's own message, when it answered.
+	Message *string `json:"message,omitempty"`
+	// ModelCount is how many models were listed, when the status is ok.
+	ModelCount *int `json:"model_count,omitempty"`
+}
+
+// IsUsable reports whether the provider listed its models with the configured key.
+func (s ChatProviderStatus) IsUsable() bool {
+	return s.Status == ChatProviderOK
 }
 
 // EmbedRequest is the request body for POST /api/embed
@@ -941,9 +995,9 @@ func (c *Client) ChatMessageStream(ctx context.Context, sessionID string, reques
 				return
 			}
 
-			// Error event
-			if errMsg, ok := eventData["error"].(string); ok {
-				send(ChatStreamEvent{Type: "error", Error: errMsg})
+			// Error event, with the provider-failure classification when present
+			if _, ok := eventData["error"].(string); ok {
+				send(chatStreamErrorEvent(eventData))
 				return
 			}
 		}
