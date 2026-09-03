@@ -30,7 +30,10 @@ and this project adheres to
   the event's other optional strings — plus the provider's own `ProviderStatus`
   and `RetryAfterSecs` (pointers, since 0 is a value there), on both SSE and
   WebSocket streams, and `IsProviderFailure()` reports whether they are there. A
-  transport failure or a plain server error stays a bare `Error`.
+  transport failure or a plain server error stays a bare `Error`. The SSE loop
+  recognises an error frame by its `event: error` name as well as by an `error`
+  key, and on both routes a payload that says `message` instead of `error` is
+  still the error rather than a frame to skip.
 
 ## [0.25.0] - 2026-07-14
 
