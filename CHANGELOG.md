@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`ChatModels` carries `Gemini` and a per-provider `Providers` status map
+  (#61).** `GET /api/chat_models` now says _why_ each provider's list looks the
+  way it does, so a rejected key is distinguishable from a missing one — both
+  were an empty list before. `ChatModels.Gemini []string` and
+  `ChatModels.Providers map[string]ChatProviderStatus`, where
+  `ChatProviderStatus { Status ChatProviderState; Verified bool; HTTPStatus, Message, ModelCount (pointers, present when the provider answered) }`
+  and `IsUsable()` reports `Status == ChatProviderOK`. `ChatProviderState` is a
+  string type with constants for the nine documented states; an unknown state
+  decodes as its raw string, so a newer server cannot break the client. Both
+  fields are `omitempty` and nil from a server that predates them. Pairs with
+  the server-side change, tracked internally.
+- **`ChatStreamEvent` carries the provider-failure classification.** When a chat
+  stream fails because of the LLM provider, the server classifies the failure;
+  the `error` event now carries `ErrorKind` (`provider_auth_failed`,
+  `provider_permission_denied`, `provider_billing`, `provider_rate_limited`,
+  `provider_unavailable`, `provider_unreachable`, `provider_not_configured`,
+  `provider_request_error`), `Provider`, the provider's own `ProviderStatus` and
+  `RetryAfterSecs` (pointers, present when sent), on both SSE and WebSocket
+  streams, and `IsProviderFailure()` reports whether they are there. A transport
+  failure or a plain server error stays a bare `Error`.
+
 ## [0.25.0] - 2026-07-14
 
 ### Added
