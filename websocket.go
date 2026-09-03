@@ -42,11 +42,18 @@ type ChatStreamEvent struct {
 	// "provider_permission_denied", "provider_billing", "provider_rate_limited",
 	// "provider_unavailable", "provider_unreachable", "provider_not_configured",
 	// "provider_request_error") when the failure was the LLM provider's answer.
-	// Empty for a transport failure or a plain server error.
+	// Empty when the server did not send one — a transport failure or a plain
+	// server error. The server never sends an empty kind, so like the other
+	// optional strings on this event (Content, ChatID, Error) the empty string
+	// is the absence marker; only the numeric fields below need a pointer,
+	// because 0 is a value there.
 	ErrorKind string `json:"error_kind,omitempty"`
-	Provider  string `json:"provider,omitempty"`
+	// Provider names the provider that answered ("openai", "anthropic",
+	// "perplexity", "gemini"); empty whenever ErrorKind is.
+	Provider string `json:"provider,omitempty"`
 	// ProviderStatus is the provider's own HTTP status, when it answered.
-	ProviderStatus *int   `json:"provider_status,omitempty"`
+	ProviderStatus *int `json:"provider_status,omitempty"`
+	// RetryAfterSecs is the provider's wait on a rate limit, when it gave one.
 	RetryAfterSecs *int64 `json:"retry_after_secs,omitempty"`
 }
 
