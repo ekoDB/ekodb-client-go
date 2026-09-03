@@ -231,7 +231,7 @@ type ChatModels struct {
 	OpenAI     []string `json:"openai"`
 	Anthropic  []string `json:"anthropic"`
 	Perplexity []string `json:"perplexity"`
-	// Gemini is empty from a server that predates the field.
+	// Gemini is nil (len 0) from a server that predates the field.
 	Gemini []string `json:"gemini,omitempty"`
 	// Providers is keyed by provider name ("openai", "anthropic", "perplexity",
 	// "gemini"). A rejected key reports auth_failed where a missing one reports
@@ -948,8 +948,19 @@ func (c *Client) ChatMessageStream(ctx context.Context, sessionID string, reques
 		}
 
 		scanner := bufio.NewScanner(resp.Body)
+		// The `event:` name applies to the data lines that follow it, until
+		// the blank line that ends the frame.
+		eventName := ""
 		for scanner.Scan() {
 			line := scanner.Text()
+			if strings.HasPrefix(line, "event:") {
+				eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+				continue
+			}
+			if strings.TrimSpace(line) == "" {
+				eventName = ""
+				continue
+			}
 			if !strings.HasPrefix(line, "data:") {
 				continue
 			}
@@ -995,8 +1006,10 @@ func (c *Client) ChatMessageStream(ctx context.Context, sessionID string, reques
 				return
 			}
 
-			// Error event, with the provider-failure classification when present
-			if _, ok := eventData["error"].(string); ok {
+			// Error event — one the server names `error`, or whose payload
+			// carries an `error` — with the provider-failure classification
+			// when present.
+			if _, ok := eventData["error"].(string); ok || eventName == "error" {
 				send(chatStreamErrorEvent(eventData))
 				return
 			}

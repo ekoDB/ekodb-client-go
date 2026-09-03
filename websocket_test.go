@@ -420,6 +420,100 @@ func TestWebSocketChatStreamError(t *testing.T) {
 	}
 }
 
+// The WebSocket ChatStreamError payload carries the same classification as
+// the SSE error frame, and the event carries every field of it.
+func TestWebSocketChatStreamErrorCarriesTheClassification(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	eventCh, err := ws.ChatSend("chat-3", "test")
+	if err != nil {
+		t.Fatalf("failed to send chat: %v", err)
+	}
+	readMessage(t, serverConn)
+
+	mustWriteJSON(t, serverConn, map[string]interface{}{
+		"type": "ChatStreamError",
+		"payload": map[string]interface{}{
+			"chat_id":          "chat-3",
+			"error":            "OpenAI API error 429 Too Many Requests",
+			"error_kind":       "provider_rate_limited",
+			"provider":         "openai",
+			"provider_status":  429,
+			"retry_after_secs": 7,
+		},
+	})
+
+	var events []ChatStreamEvent
+	for event := range eventCh {
+		events = append(events, event)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	ev := events[0]
+	if ev.Type != "error" || ev.Error != "OpenAI API error 429 Too Many Requests" {
+		t.Fatalf("unexpected error event: %+v", ev)
+	}
+	if ev.ErrorKind != "provider_rate_limited" || ev.Provider != "openai" {
+		t.Fatalf("classification not carried: %+v", ev)
+	}
+	if ev.ProviderStatus == nil || *ev.ProviderStatus != 429 {
+		t.Fatalf("provider_status not carried: %+v", ev)
+	}
+	if ev.RetryAfterSecs == nil || *ev.RetryAfterSecs != 7 {
+		t.Fatalf("retry_after_secs not carried: %+v", ev)
+	}
+	if !ev.IsProviderFailure() {
+		t.Fatalf("a classified error is a provider failure: %+v", ev)
+	}
+}
+
+// A payload that says `message` instead of `error` is still the error.
+func TestWebSocketChatStreamErrorFallsBackToMessage(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	eventCh, err := ws.ChatSend("chat-4", "test")
+	if err != nil {
+		t.Fatalf("failed to send chat: %v", err)
+	}
+	readMessage(t, serverConn)
+
+	mustWriteJSON(t, serverConn, map[string]interface{}{
+		"type":    "ChatStreamError",
+		"payload": map[string]interface{}{"chat_id": "chat-4", "message": "boom"},
+	})
+
+	var events []ChatStreamEvent
+	for event := range eventCh {
+		events = append(events, event)
+	}
+	if len(events) != 1 || events[0].Type != "error" || events[0].Error != "boom" || events[0].IsProviderFailure() {
+		t.Fatalf("unexpected events: %+v", events)
+	}
+}
+
 func TestWebSocketRegisterClientTools(t *testing.T) {
 	wsURL, connCh, server := setupTestWSServer(t)
 	defer server.Close()
