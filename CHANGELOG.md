@@ -33,7 +33,11 @@ and this project adheres to
   transport failure or a plain server error stays a bare `Error`. The SSE loop
   recognises an error frame by its `event: error` name as well as by an `error`
   key, and on both routes a payload that says `message` instead of `error` is
-  still the error rather than a frame to skip.
+  still the error rather than a frame to skip. `ChatMessageStream` reads SSE
+  lines up to 1 MiB (the scanner's default 64 KiB limit truncated a large token
+  or tool payload silently, as `SubscribeSSE` already avoided) and reports a
+  stream the scanner could not read to its end as an `error` event
+  (`stream read failed: …`) instead of a clean close.
 
 ## [0.25.0] - 2026-07-14
 
