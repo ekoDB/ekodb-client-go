@@ -76,9 +76,14 @@ func chatStreamErrorEvent(eventData map[string]interface{}) ChatStreamEvent {
 	} else {
 		ev.Error = "unknown error"
 	}
-	if k, ok := eventData["error_kind"].(string); ok {
-		ev.ErrorKind = k
+	// The classification travels as one unit: without an error_kind there
+	// is no provider failure, and the other fields stay empty even if the
+	// frame happened to carry them, so the struct matches its contract.
+	k, ok := eventData["error_kind"].(string)
+	if !ok || k == "" {
+		return ev
 	}
+	ev.ErrorKind = k
 	if p, ok := eventData["provider"].(string); ok {
 		ev.Provider = p
 	}
@@ -977,15 +982,17 @@ func (ws *WebSocketClient) routeChatStreamError(msg map[string]json.RawMessage) 
 	ws.mu.Unlock()
 
 	if ok {
+		event := ChatStreamEvent{Type: "error", Error: errMsg}
+		// As on the SSE route: the classification travels as one unit, and
+		// without an error_kind none of it is carried.
+		if payload.ErrorKind != "" {
+			event.ErrorKind = payload.ErrorKind
+			event.Provider = payload.Provider
+			event.ProviderStatus = payload.ProviderStatus
+			event.RetryAfterSecs = payload.RetryAfterSecs
+		}
 		select {
-		case ch <- ChatStreamEvent{
-			Type:           "error",
-			Error:          errMsg,
-			ErrorKind:      payload.ErrorKind,
-			Provider:       payload.Provider,
-			ProviderStatus: payload.ProviderStatus,
-			RetryAfterSecs: payload.RetryAfterSecs,
-		}:
+		case ch <- event:
 		default:
 		}
 		close(ch)
