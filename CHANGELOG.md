@@ -28,11 +28,43 @@ and this project adheres to
   round-trips fine, so the defect was only reachable on data that came back from
   the server.
 
-  `FunctionCondition` had the identical defect — a `MarshalJSON` with no
-  counterpart, and no struct tags at all — so an `If` stage's condition was lost
-  the same way. Both now have explicit `UnmarshalJSON`, and both structs' tags
-  say `"-"` to state plainly that the codec owns the translation rather than
-  naming wire keys that do not exist.
+  `FunctionCondition` had the identical asymmetry — a `MarshalJSON` with no
+  counterpart, and no struct tags at all. To be precise about the blast radius,
+  because this was first written too broadly: an `If` stage's condition was
+  **not** lost through that method. Nested conditions ride inside the stage's
+  `Data` as generic maps and never reach it, so they were lost by the missing
+  STAGE decoder. What the new `FunctionCondition.UnmarshalJSON` fixes is an
+  API-surface asymmetry — any caller decoding a condition on its own got an
+  empty value. Both structs' tags now say `"-"`, stating that the codec owns the
+  translation rather than naming wire keys that do not exist.
+
+- **Integers past 2^53 were silently corrupted on every round trip.** A stage's
+  payload decoded through `interface{}`, so JSON numbers became `float64`:
+  `1234567890123456789` came back as `1234567890123456800`, and
+  `-9007199254740993` as `-9007199254740992`. Reachable through `Insert.record`,
+  `Update.updates`, `Return.fields` and `JwtSign.claims` — and epoch-NANOSECOND
+  timestamps (~1.7e18) sit squarely in the broken range.
+
+  This is the same silent-corruption-on-round-trip failure as the missing
+  decoder, one layer down, and it is fixed in the same release deliberately:
+  `Data` was never populated before, so no caller can yet be asserting
+  `.(float64)` on its contents. This is the only release in which decoding to
+  `json.Number` is not a breaking change.
+
+  The original round-trip test could not see this — it compared two generically
+  decoded maps, so the corrupted value appeared identically on both sides. The
+  new test compares the re-marshalled bytes.
+
+- **`FieldGreaterThan`, `FieldLessThan`, `FieldGreaterThanOrEqual` and
+  `FieldLessThanOrEqual` conditions dropped their payload.** All four exist on
+  the server and are used by shipped app templates, but `MarshalJSON` had no arm
+  for them, so they fell through to the default and emitted only
+  `{"type": ...}` — a condition the server rejects, from a client that reported
+  success. Builders for all four are now exported.
+
+- **A `"type"` key inside a stage's `Data` could displace the stage
+  discriminator**, because `MarshalJSON` wrote the discriminator before copying
+  `Data` over it. The discriminator is now written last.
 
   A stage with no `"type"` is now an error rather than an empty stage. Decoding
   a malformed stage to a valid-looking empty one is how this stayed silent.

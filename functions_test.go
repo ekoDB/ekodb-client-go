@@ -10,6 +10,7 @@ package ekodb
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -942,6 +943,107 @@ func TestFunctionConditionRoundTrip(t *testing.T) {
 		}
 		if !reflect.DeepEqual(before, after) {
 			t.Errorf("condition not preserved:\n before: %s\n after:  %s", in, out)
+		}
+	}
+}
+
+// The reviewer's finding: `TestUserFunctionRoundTripPreservesPipeline` compares
+// two GENERICALLY decoded maps, so a corrupted big integer appears identically
+// on both sides and the test passes. This one compares the re-marshalled BYTES
+// against the input bytes, which is the only comparison that can see it.
+func TestRoundTripPreservesIntegerPrecision(t *testing.T) {
+	// 1234567890123456789 exceeds 2^53; an epoch-NANOSECOND timestamp (~1.7e18)
+	// sits in the same range, so this is an everyday value, not a corner case.
+	const in = `{"label":"f","name":"F","parameters":{},"functions":[` +
+		`{"type":"Insert","collection":"events","record":` +
+		`{"neg":-9007199254740993,"ratio":0.5,"ts":1234567890123456789}}]}`
+
+	var fn UserFunction
+	if err := json.Unmarshal([]byte(in), &fn); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	rec, ok := fn.Functions[0].Data["record"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("record did not decode to an object: %T", fn.Functions[0].Data["record"])
+	}
+	if got, ok := rec["ts"].(json.Number); !ok || got.String() != "1234567890123456789" {
+		t.Errorf("ts should decode as json.Number holding the literal, got %T %v", rec["ts"], rec["ts"])
+	}
+
+	out, err := json.Marshal(fn)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	// Byte comparison of the functions array. Decoding both sides generically
+	// would hide exactly the corruption being tested for.
+	for _, want := range []string{"1234567890123456789", "-9007199254740993", "0.5"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("value %s did not survive the round trip.\n got: %s", want, out)
+		}
+	}
+	for _, bad := range []string{"1234567890123456800", "-9007199254740992", "1.2345678901234568e+18"} {
+		if strings.Contains(string(out), bad) {
+			t.Errorf("round trip corrupted a number into %s.\n got: %s", bad, out)
+		}
+	}
+}
+
+// A "type" key inside Data must never displace the stage discriminator.
+func TestStageTypeIsNotOverriddenByData(t *testing.T) {
+	s := FunctionStageConfig{
+		Stage: "Insert",
+		Data:  map[string]interface{}{"type": "Delete", "collection": "orders"},
+	}
+	out, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["type"] != "Insert" {
+		t.Errorf("Data must not displace the discriminator: got type=%v, want Insert", got["type"])
+	}
+}
+
+// The four comparison conditions the server has and MarshalJSON used to drop.
+func TestComparisonConditionsCarryTheirPayload(t *testing.T) {
+	cases := []struct {
+		cond FunctionCondition
+		want string
+	}{
+		{ConditionFieldGreaterThan("stock", 0), "FieldGreaterThan"},
+		{ConditionFieldLessThan("age", 18), "FieldLessThan"},
+		{ConditionFieldGreaterThanOrEqual("stock", "{{qty}}"), "FieldGreaterThanOrEqual"},
+		{ConditionFieldLessThanOrEqual("used", 100), "FieldLessThanOrEqual"},
+	}
+	for _, c := range cases {
+		out, err := json.Marshal(c.cond)
+		if err != nil {
+			t.Fatalf("%s: %v", c.want, err)
+		}
+		var got struct {
+			Type  string `json:"type"`
+			Value *struct {
+				Field string      `json:"field"`
+				Value interface{} `json:"value"`
+			} `json:"value"`
+		}
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("%s: %v", c.want, err)
+		}
+		if got.Type != c.want {
+			t.Errorf("type: got %s want %s", got.Type, c.want)
+		}
+		// The defect: the default arm emitted only {"type":...}, dropping this.
+		if got.Value == nil {
+			t.Errorf("%s dropped its payload entirely: %s", c.want, out)
+			continue
+		}
+		if got.Value.Field != c.cond.Field {
+			t.Errorf("%s field: got %q want %q", c.want, got.Value.Field, c.cond.Field)
 		}
 	}
 }
