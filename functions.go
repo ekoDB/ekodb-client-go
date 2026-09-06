@@ -49,8 +49,12 @@ type ParameterDefinition struct {
 // is not a real option — encoding/json has no inline support, so Data was
 // silently looked up as a key named "Data" that the server never sends.
 type FunctionStageConfig struct {
-	Stage string                 `json:"-"`
-	Data  map[string]interface{} `json:"-"`
+	Stage string `json:"-"`
+	// Data holds the stage's remaining fields. Numbers decoded from the wire
+	// are json.Number, NOT float64, so an integer past 2^53 survives a round
+	// trip intact -- type-switch on json.Number when reading them back. Values
+	// you assign yourself keep whatever type you give them.
+	Data map[string]interface{} `json:"-"`
 }
 
 // MarshalJSON custom marshaling for FunctionStageConfig
@@ -510,6 +514,18 @@ type FunctionCondition struct {
 	Count      int                 `json:"-"` // Count threshold for count-based conditions
 	Conditions []FunctionCondition `json:"-"` // Child conditions for And/Or operators
 	Condition  *FunctionCondition  `json:"-"` // Single child condition for Not operator
+
+	// Raw holds the "value" payload of a condition type this client does not
+	// model, so it can be re-emitted unchanged. Nil for every modelled type.
+	//
+	// This exists so an unknown condition is PRESERVED rather than dropped. An
+	// earlier version kept the type and discarded the payload, which is silent
+	// data loss: a caller could read a function, write it back, and destroy a
+	// condition the client simply had not heard of, with no error at any step.
+	// Erroring instead would have been loud but would have broken the case
+	// this is meant to protect — a client one version behind the server must
+	// still be able to read a function using a newer condition type.
+	Raw json.RawMessage `json:"-"`
 }
 
 // MarshalJSON implements adjacently-tagged serialization for FunctionCondition.
@@ -570,8 +586,35 @@ func (c FunctionCondition) MarshalJSON() ([]byte, error) {
 			},
 		})
 	default:
+		// Re-emit a preserved payload verbatim. Without this the default arm
+		// silently strips any condition type this client does not model.
+		if len(c.Raw) > 0 {
+			return json.Marshal(map[string]interface{}{
+				"type":  c.Type,
+				"value": c.Raw,
+			})
+		}
 		return json.Marshal(map[string]string{"type": c.Type})
 	}
+}
+
+// modelledConditionTypes are the condition types this client marshals through
+// an explicit arm. Anything absent here round-trips through Raw instead of
+// being reduced to a bare {"type": ...}.
+var modelledConditionTypes = map[string]bool{
+	"HasRecords":              true,
+	"FieldEquals":             true,
+	"FieldExists":             true,
+	"FieldGreaterThan":        true,
+	"FieldLessThan":           true,
+	"FieldGreaterThanOrEqual": true,
+	"FieldLessThanOrEqual":    true,
+	"CountEquals":             true,
+	"CountGreaterThan":        true,
+	"CountLessThan":           true,
+	"And":                     true,
+	"Or":                      true,
+	"Not":                     true,
 }
 
 // UnmarshalJSON is the inverse of MarshalJSON, reading the adjacently-tagged
@@ -600,13 +643,17 @@ func (c *FunctionCondition) UnmarshalJSON(b []byte) error {
 	}
 	c.Type = envelope.Type
 
-	// Unit variants carry no value. Anything unrecognised is also treated as a
-	// unit variant rather than rejected, matching MarshalJSON's default arm --
-	// a client one version behind the server must not fail to READ a condition
-	// type it does not know about. It round-trips the type and drops the
-	// payload, which is lossy but recoverable; refusing to decode would make
-	// the whole function unreadable.
+	// Unit variants carry no value.
 	if len(envelope.Value) == 0 || string(envelope.Value) == "null" {
+		return nil
+	}
+
+	// A condition type this client does not model keeps its payload VERBATIM
+	// so the round trip is lossless. Dropping it was silent data loss;
+	// rejecting it would break a client one version behind the server, which
+	// is the case worth protecting. Preserving does both.
+	if !modelledConditionTypes[c.Type] {
+		c.Raw = append(json.RawMessage(nil), envelope.Value...)
 		return nil
 	}
 
@@ -617,7 +664,12 @@ func (c *FunctionCondition) UnmarshalJSON(b []byte) error {
 		Conditions []FunctionCondition `json:"conditions"`
 		Condition  *FunctionCondition  `json:"condition"`
 	}
-	if err := json.Unmarshal(envelope.Value, &v); err != nil {
+	// UseNumber for the same reason the stage decoder needs it: a comparison
+	// operand is caller data and may be an integer past 2^53. Decoding it
+	// through float64 rewrites 1700000000000000001 as 1.7e+18.
+	dec := json.NewDecoder(bytes.NewReader(envelope.Value))
+	dec.UseNumber()
+	if err := dec.Decode(&v); err != nil {
 		return fmt.Errorf("condition %q value: %w", c.Type, err)
 	}
 	c.Field = v.Field
