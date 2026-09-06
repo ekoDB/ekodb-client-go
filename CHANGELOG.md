@@ -59,20 +59,39 @@ and this project adheres to
   `FieldLessThanOrEqual` conditions dropped their payload.** All four exist on
   the server and are used by shipped app templates, but `MarshalJSON` had no arm
   for them, so they fell through to the default and emitted only
-  `{"type": ...}` — a condition the server rejects, from a client that reported
-  success. Builders for all four are now exported.
+  `{"type": ...}`. An earlier draft of this entry called that "a client that
+  reported success"; that was wrong, and a reviewer corrected it. Both
+  `POST` and `PUT /api/functions` deserialize into the typed `UserFunction`,
+  so a payload-less condition fails at the request boundary and returns a 4xx.
+  The bug is real — the client emitted an invalid condition — but the failure
+  was loud, not silent. Builders for all four are now exported.
 
 - **A `"type"` key inside a stage's `Data` could displace the stage
   discriminator**, because `MarshalJSON` wrote the discriminator before copying
   `Data` over it. The discriminator is now written last.
 
-  A stage with no `"type"` is now an error rather than an empty stage. Decoding
-  a malformed stage to a valid-looking empty one is how this stayed silent.
+- **A stage with no `"type"` is now an error** rather than an empty stage.
+  Decoding a malformed stage into a valid-looking empty one is how the original
+  defect stayed silent.
 
-  An unknown condition type still decodes, keeping its type and dropping its
-  payload, so a client one version behind the server can still READ a function
-  using a condition it does not know about. Refusing would make the whole
-  function unreadable to fix a lossy case.
+- **An unknown condition type is now preserved verbatim instead of being
+  stripped.** An earlier version of this change kept the type and DROPPED the
+  payload, defending it as tolerance for a client one version behind the
+  server. That defence does not survive scrutiny: it is silent data loss, and
+  the same failure this release exists to fix. A caller could read a function,
+  write it back, and destroy a condition the client had simply never heard of,
+  with no error at any step.
+
+  Erroring instead would have been loud but would have broken the very case the
+  drop was meant to protect. The payload is now carried through unchanged, so
+  the round trip is lossless for condition types this client does not model,
+  with no version coupling. There are exactly two acceptable behaviours for
+  unmodelled data — fail loudly, or preserve it — and dropping it is not one.
+
+- **The condition decoder had the same integer-precision defect as the stage
+  decoder.** A comparison operand is caller data and may be an integer past
+  2^53; `1700000000000000001` was re-emitted as `1.7e+18`. It now decodes with
+  `UseNumber` like the stage payload.
 
 ## [0.26.0] - 2026-09-04
 

@@ -9,6 +9,7 @@ package ekodb
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -1045,5 +1046,80 @@ func TestComparisonConditionsCarryTheirPayload(t *testing.T) {
 		if got.Value.Field != c.cond.Field {
 			t.Errorf("%s field: got %q want %q", c.want, got.Value.Field, c.cond.Field)
 		}
+		// The OPERAND, not just the field name. A reviewer showed that dropping
+		// the operand while keeping `field` survived this test with zero
+		// failures — half the bug it exists to catch would have shipped green.
+		if fmt.Sprint(got.Value.Value) != fmt.Sprint(c.cond.FieldValue) {
+			t.Errorf("%s operand: got %v want %v", c.want, got.Value.Value, c.cond.FieldValue)
+		}
+	}
+}
+
+// An unknown condition type must round-trip LOSSLESSLY, not be reduced to a
+// bare {"type": ...}. Dropping the payload was silent data loss: read a
+// function, write it back, and a condition this client had not heard of is
+// destroyed with no error at any step.
+func TestUnknownConditionTypeRoundTripsVerbatim(t *testing.T) {
+	const in = `{"type":"FieldMatchesRegex","value":{"field":"sku","pattern":"^A-[0-9]{4}$","flags":"i"}}`
+
+	var c FunctionCondition
+	if err := json.Unmarshal([]byte(in), &c); err != nil {
+		t.Fatalf("an unknown condition must still decode: %v", err)
+	}
+	if c.Type != "FieldMatchesRegex" {
+		t.Errorf("type: got %q", c.Type)
+	}
+	if len(c.Raw) == 0 {
+		t.Fatal("payload was not preserved")
+	}
+
+	out, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before, after interface{}
+	if err := json.Unmarshal([]byte(in), &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out, &after); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Errorf("unknown condition not preserved:\n before: %s\n after:  %s", in, out)
+	}
+}
+
+// A MODELLED condition must go through its explicit arm, not the Raw path —
+// otherwise the passthrough would quietly become the only codec.
+func TestModelledConditionDoesNotUseRaw(t *testing.T) {
+	var c FunctionCondition
+	in := `{"type":"FieldEquals","value":{"field":"status","value":"open"}}`
+	if err := json.Unmarshal([]byte(in), &c); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Raw) != 0 {
+		t.Errorf("a modelled condition must not populate Raw, got %s", c.Raw)
+	}
+	if c.Field != "status" {
+		t.Errorf("field: got %q want status", c.Field)
+	}
+}
+
+// The sibling decoder had the same int64 defect as the stage decoder.
+func TestConditionOperandPreservesIntegerPrecision(t *testing.T) {
+	const in = `{"type":"FieldGreaterThan","value":{"field":"ts","value":1700000000000000001}}`
+	var c FunctionCondition
+	if err := json.Unmarshal([]byte(in), &c); err != nil {
+		t.Fatal(err)
+	}
+	out, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "1700000000000000001") {
+		t.Errorf("operand lost precision.\n got: %s", out)
+	}
+	if strings.Contains(string(out), "e+18") {
+		t.Errorf("operand was rewritten in exponent form.\n got: %s", out)
 	}
 }
