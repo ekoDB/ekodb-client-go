@@ -831,3 +831,117 @@ func TestUserFunction_jsonOmitsHTTPFieldsWhenNil(t *testing.T) {
 		t.Fatalf("http_path must be absent when nil (omitempty), got %v", got["http_path"])
 	}
 }
+
+// --- ekodb-client-go#63: round-trip through a SERVER-shaped payload ---------
+//
+// These tests decode the exact JSON ekoDB returns and assert the pipeline
+// survives. That direction is the one that was broken: a function CONSTRUCTED
+// in Go and marshalled has always been fine, which is why the defect survived
+// — a marshal-then-unmarshal test of a Go-built value passes even with no
+// UnmarshalJSON defined at all.
+
+const serverUserFunctionJSON = `{
+  "label": "sync_partner",
+  "name": "Sync partner",
+  "parameters": {},
+  "functions": [
+    {"type": "Insert", "collection": "orders", "record": {"a": 1}},
+    {"type": "HttpRequest", "url": "https://p.example.com/v1", "method": "POST"},
+    {"type": "Count"}
+  ]
+}`
+
+func TestUserFunctionRoundTripPreservesPipeline(t *testing.T) {
+	var fn UserFunction
+	if err := json.Unmarshal([]byte(serverUserFunctionJSON), &fn); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if got := len(fn.Functions); got != 3 {
+		t.Fatalf("stage count: got %d want 3", got)
+	}
+
+	if got := fn.Functions[0].Stage; got != "Insert" {
+		t.Errorf("stage[0] type: got %q want Insert", got)
+	}
+	if got := fn.Functions[0].Data["collection"]; got != "orders" {
+		t.Errorf("stage[0] collection: got %v want orders", got)
+	}
+	if got := fn.Functions[1].Stage; got != "HttpRequest" {
+		t.Errorf("stage[1] type: got %q want HttpRequest", got)
+	}
+	if got := fn.Functions[1].Data["url"]; got != "https://p.example.com/v1" {
+		t.Errorf("stage[1] url: got %v", got)
+	}
+
+	// A stage with no fields of its own must still decode to a usable,
+	// non-nil map rather than something the caller cannot write into.
+	if fn.Functions[2].Data == nil {
+		t.Error("stage[2] Data is nil; a fieldless stage should decode to an empty map")
+	}
+
+	// The whole point: what we would send back on an update must match what
+	// the server gave us. This is the assertion that fails on the old code.
+	out, err := json.Marshal(fn)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var before, after map[string]interface{}
+	if err := json.Unmarshal([]byte(serverUserFunctionJSON), &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out, &after); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before["functions"], after["functions"]) {
+		t.Errorf("pipeline not preserved across a round trip:\n before: %v\n after:  %v",
+			before["functions"], after["functions"])
+	}
+}
+
+func TestFunctionStageConfigRejectsAMalformedStage(t *testing.T) {
+	// A stage with no "type" is not a stage. Decoding it to an empty one is
+	// how the original defect stayed silent, so this must be an error.
+	var s FunctionStageConfig
+	if err := json.Unmarshal([]byte(`{"collection":"orders"}`), &s); err == nil {
+		t.Error("a stage with no \"type\" should not decode successfully")
+	}
+	if err := json.Unmarshal([]byte(`[1,2]`), &s); err == nil {
+		t.Error("a non-object stage should not decode successfully")
+	}
+}
+
+func TestFunctionConditionRoundTrip(t *testing.T) {
+	cases := []string{
+		`{"type":"HasRecords"}`,
+		`{"type":"FieldEquals","value":{"field":"status","value":"open"}}`,
+		`{"type":"FieldExists","value":{"field":"email"}}`,
+		`{"type":"CountGreaterThan","value":{"count":5}}`,
+		`{"type":"Not","value":{"condition":{"type":"HasRecords"}}}`,
+		`{"type":"And","value":{"conditions":[{"type":"HasRecords"},` +
+			`{"type":"CountGreaterThan","value":{"count":5}}]}}`,
+	}
+
+	for _, in := range cases {
+		var c FunctionCondition
+		if err := json.Unmarshal([]byte(in), &c); err != nil {
+			t.Errorf("unmarshal %s: %v", in, err)
+			continue
+		}
+		out, err := json.Marshal(c)
+		if err != nil {
+			t.Errorf("marshal %s: %v", in, err)
+			continue
+		}
+		var before, after interface{}
+		if err := json.Unmarshal([]byte(in), &before); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(out, &after); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(before, after) {
+			t.Errorf("condition not preserved:\n before: %s\n after:  %s", in, out)
+		}
+	}
+}

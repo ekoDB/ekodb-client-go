@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sort"
 	"time"
 )
 
@@ -33,10 +34,22 @@ type ParameterDefinition struct {
 
 // ParameterValue removed - use direct values or string interpolation "{{param}}" instead
 
-// FunctionStageConfig represents a pipeline stage
+// FunctionStageConfig represents a pipeline stage.
+//
+// The wire format is ekoDB's internally-tagged stage enum: a flat object whose
+// "type" key names the stage and whose remaining keys are that stage's fields,
+// e.g. {"type": "Insert", "collection": "orders", "record": {...}}.
+//
+// Both fields are tagged "-" because neither maps to a wire key directly:
+// Stage is the "type" discriminator and Data is spread across the object's
+// remaining keys. MarshalJSON and UnmarshalJSON below own the whole
+// translation. The tags previously claimed "stage" and ",inline"; the first
+// contradicted MarshalJSON, which has always written "type", and the second
+// is not a real option — encoding/json has no inline support, so Data was
+// silently looked up as a key named "Data" that the server never sends.
 type FunctionStageConfig struct {
-	Stage string                 `json:"stage"`
-	Data  map[string]interface{} `json:",inline"`
+	Stage string                 `json:"-"`
+	Data  map[string]interface{} `json:"-"`
 }
 
 // MarshalJSON custom marshaling for FunctionStageConfig
@@ -47,6 +60,55 @@ func (f FunctionStageConfig) MarshalJSON() ([]byte, error) {
 		m[k] = v
 	}
 	return json.Marshal(m)
+}
+
+// UnmarshalJSON is the inverse of MarshalJSON: "type" becomes Stage and every
+// other key is collected into Data.
+//
+// Its absence was silent data loss. Decoding a function returned by the server
+// left every stage with an empty Stage and a nil Data, so a
+// GetFunction/UpdateFunction round trip overwrote the stored pipeline with
+// {"type": ""} stages — the stage COUNT survived, so calling code saw a
+// plausible-looking function and no error. See ekodb-client-go#63.
+func (f *FunctionStageConfig) UnmarshalJSON(b []byte) error {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return fmt.Errorf("function stage is not a JSON object: %w", err)
+	}
+
+	raw, ok := m["type"]
+	if !ok {
+		return fmt.Errorf("function stage has no \"type\" key (keys: %v)", stageKeys(m))
+	}
+	if err := json.Unmarshal(raw, &f.Stage); err != nil {
+		return fmt.Errorf("function stage \"type\" is not a string: %w", err)
+	}
+
+	// Always allocate, so a stage with no fields of its own round-trips as an
+	// empty map rather than a nil the caller cannot write into.
+	f.Data = make(map[string]interface{}, len(m)-1)
+	for k, v := range m {
+		if k == "type" {
+			continue
+		}
+		var val interface{}
+		if err := json.Unmarshal(v, &val); err != nil {
+			return fmt.Errorf("function stage %q field %q: %w", f.Stage, k, err)
+		}
+		f.Data[k] = val
+	}
+	return nil
+}
+
+// stageKeys lists an object's keys for an error message, sorted so the message
+// is stable across runs (Go map iteration order is randomised).
+func stageKeys(m map[string]json.RawMessage) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // Parameter returns the structural placeholder
@@ -403,13 +465,19 @@ func StageUpdateWithAction(collection string, recordId string, action string, fi
 //		ConditionCountGreaterThan(5),
 //	})
 //	StageIf(cond, thenFunctions, elseFunctions)
+//
+// Fields are tagged "-" because the wire format is ADJACENTLY tagged
+// ({"type": ..., "value": {...}}) and does not correspond field-for-field to
+// this struct. MarshalJSON and UnmarshalJSON own the translation. Without the
+// tags, encoding/json's defaults would look for keys named "Type", "Field",
+// "FieldValue" and so on, which the server never sends.
 type FunctionCondition struct {
-	Type       string              // Condition type (HasRecords, FieldEquals, CountEquals, And, Or, Not, etc.)
-	Field      string              // Field name for field-based conditions
-	FieldValue interface{}         // Expected value for comparison conditions (FieldEquals)
-	Count      int                 // Count threshold for count-based conditions
-	Conditions []FunctionCondition // Child conditions for And/Or operators
-	Condition  *FunctionCondition  // Single child condition for Not operator
+	Type       string              `json:"-"` // Condition type (HasRecords, FieldEquals, CountEquals, And, Or, Not, etc.)
+	Field      string              `json:"-"` // Field name for field-based conditions
+	FieldValue interface{}         `json:"-"` // Expected value for comparison conditions (FieldEquals)
+	Count      int                 `json:"-"` // Count threshold for count-based conditions
+	Conditions []FunctionCondition `json:"-"` // Child conditions for And/Or operators
+	Condition  *FunctionCondition  `json:"-"` // Single child condition for Not operator
 }
 
 // MarshalJSON implements adjacently-tagged serialization for FunctionCondition.
@@ -458,6 +526,54 @@ func (c FunctionCondition) MarshalJSON() ([]byte, error) {
 	default:
 		return json.Marshal(map[string]string{"type": c.Type})
 	}
+}
+
+// UnmarshalJSON is the inverse of MarshalJSON, reading the adjacently-tagged
+// {"type": ..., "value": {...}} form the server emits.
+//
+// Like FunctionStageConfig, this type shipped with a MarshalJSON and no
+// counterpart, so any condition read back from the server decoded to a zero
+// value and an If stage's condition was silently lost on a round trip.
+// See ekodb-client-go#63.
+func (c *FunctionCondition) UnmarshalJSON(b []byte) error {
+	var envelope struct {
+		Type  string          `json:"type"`
+		Value json.RawMessage `json:"value"`
+	}
+	if err := json.Unmarshal(b, &envelope); err != nil {
+		return fmt.Errorf("condition is not a tagged object: %w", err)
+	}
+	if envelope.Type == "" {
+		return fmt.Errorf("condition has no \"type\"")
+	}
+	c.Type = envelope.Type
+
+	// Unit variants carry no value. Anything unrecognised is also treated as a
+	// unit variant rather than rejected, matching MarshalJSON's default arm --
+	// a client one version behind the server must not fail to READ a condition
+	// type it does not know about. It round-trips the type and drops the
+	// payload, which is lossy but recoverable; refusing to decode would make
+	// the whole function unreadable.
+	if len(envelope.Value) == 0 || string(envelope.Value) == "null" {
+		return nil
+	}
+
+	var v struct {
+		Field      string              `json:"field"`
+		Value      interface{}         `json:"value"`
+		Count      int                 `json:"count"`
+		Conditions []FunctionCondition `json:"conditions"`
+		Condition  *FunctionCondition  `json:"condition"`
+	}
+	if err := json.Unmarshal(envelope.Value, &v); err != nil {
+		return fmt.Errorf("condition %q value: %w", c.Type, err)
+	}
+	c.Field = v.Field
+	c.FieldValue = v.Value
+	c.Count = v.Count
+	c.Conditions = v.Conditions
+	c.Condition = v.Condition
+	return nil
 }
 
 // Condition builders
