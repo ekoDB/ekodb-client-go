@@ -518,6 +518,11 @@ type FunctionCondition struct {
 	// Raw holds the "value" payload of a condition type this client does not
 	// model, so it can be re-emitted unchanged. Nil for every modelled type.
 	//
+	// Scope, precisely: this preserves unknown TYPES, not unknown FIELDS. An
+	// unrecognised field inside a condition this client DOES model is still
+	// dropped -- same defect, smaller, and it needs a larger change. See
+	// ekodb-client-go#63.
+	//
 	// This exists so an unknown condition is PRESERVED rather than dropped. An
 	// earlier version kept the type and discarded the payload, which is silent
 	// data loss: a caller could read a function, write it back, and destroy a
