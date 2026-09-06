@@ -85,8 +85,22 @@ and this project adheres to
   Erroring instead would have been loud but would have broken the very case the
   drop was meant to protect. The payload is now carried through unchanged, so
   the round trip is lossless for condition types this client does not model,
-  with no version coupling. There are exactly two acceptable behaviours for
-  unmodelled data — fail loudly, or preserve it — and dropping it is not one.
+  with no version coupling.
+
+  **What this does and does not cover, stated precisely**, because the first
+  draft of this entry claimed more than the code delivers. Unknown data is
+  preserved at *condition-type* granularity: a condition type this client has
+  never heard of survives intact. It is NOT yet preserved at *field*
+  granularity — an unrecognised field inside a condition this client DOES
+  model, such as a future `case_sensitive` on `FieldEquals`, is still dropped
+  silently. That is the same defect, smaller, and it needs a larger change than
+  this release makes.
+
+  The principle being worked toward is that unmodelled data must either fail
+  loudly or be preserved, never silently dropped. This release moves the
+  common case onto the right side of that line; it does not finish the job, and
+  saying otherwise would repeat the overstatement corrected elsewhere in this
+  entry.
 
 - **The condition decoder had the same integer-precision defect as the stage
   decoder.** A comparison operand is caller data and may be an integer past
