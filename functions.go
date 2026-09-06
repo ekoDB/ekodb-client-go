@@ -1,6 +1,7 @@
 package ekodb
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -54,11 +55,15 @@ type FunctionStageConfig struct {
 
 // MarshalJSON custom marshaling for FunctionStageConfig
 func (f FunctionStageConfig) MarshalJSON() ([]byte, error) {
-	m := make(map[string]interface{})
-	m["type"] = f.Stage
+	m := make(map[string]interface{}, len(f.Data)+1)
 	for k, v := range f.Data {
 		m[k] = v
 	}
+	// Written AFTER the copy so a stray "type" key in Data cannot displace the
+	// stage discriminator. Previously Data won, which meant a stage decoded
+	// without stripping "type" would silently re-marshal under whatever Data
+	// held.
+	m["type"] = f.Stage
 	return json.Marshal(m)
 }
 
@@ -91,13 +96,40 @@ func (f *FunctionStageConfig) UnmarshalJSON(b []byte) error {
 		if k == "type" {
 			continue
 		}
-		var val interface{}
-		if err := json.Unmarshal(v, &val); err != nil {
+		val, err := decodeJSONPreservingNumbers(v)
+		if err != nil {
 			return fmt.Errorf("function stage %q field %q: %w", f.Stage, k, err)
 		}
 		f.Data[k] = val
 	}
 	return nil
+}
+
+// decodeJSONPreservingNumbers decodes into interface{} with UseNumber, so JSON
+// numbers become json.Number (backed by the original literal) rather than
+// float64.
+//
+// Without this, every integer in a stage's payload round-trips through a
+// float64 and loses precision past 2^53: 1234567890123456789 comes back as
+// 1234567890123456800, and -9007199254740993 as -9007199254740992. That is
+// reachable through Insert.record, Update.updates, Return.fields and
+// JwtSign.claims — and epoch-NANOSECOND timestamps (~1.7e18) sit squarely in
+// the broken range, so a stored function carrying one would be silently
+// corrupted on every edit.
+//
+// This is the same silent-corruption-on-round-trip failure the missing
+// UnmarshalJSON caused, one layer down, and it is fixed in the same release
+// on purpose: Data was never populated before, so no caller can yet be
+// asserting .(float64) on its contents. This is the only release in which
+// making it json.Number is not a breaking change.
+func decodeJSONPreservingNumbers(raw json.RawMessage) (interface{}, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v interface{}
+	if err := dec.Decode(&v); err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 // stageKeys lists an object's keys for an error message, sorted so the message
@@ -495,6 +527,20 @@ func (c FunctionCondition) MarshalJSON() ([]byte, error) {
 				"value": c.FieldValue,
 			},
 		})
+	case "FieldGreaterThan", "FieldLessThan",
+		"FieldGreaterThanOrEqual", "FieldLessThanOrEqual":
+		// These four exist on the server (stored.rs FunctionCondition) and are
+		// used by shipped app templates. They previously fell through to the
+		// default arm, which emits only {"type": ...} and DROPS field/value —
+		// producing a condition the server rejects, from a client that
+		// reported success.
+		return json.Marshal(map[string]interface{}{
+			"type": c.Type,
+			"value": map[string]interface{}{
+				"field": c.Field,
+				"value": c.FieldValue,
+			},
+		})
 	case "FieldExists":
 		return json.Marshal(map[string]interface{}{
 			"type": c.Type,
@@ -532,8 +578,14 @@ func (c FunctionCondition) MarshalJSON() ([]byte, error) {
 // {"type": ..., "value": {...}} form the server emits.
 //
 // Like FunctionStageConfig, this type shipped with a MarshalJSON and no
-// counterpart, so any condition read back from the server decoded to a zero
-// value and an If stage's condition was silently lost on a round trip.
+// counterpart, so decoding a condition directly produced a zero value.
+//
+// To be precise about the blast radius, because an earlier version of this
+// comment overstated it: this is NOT what lost an If stage's condition on a
+// GetFunction round trip. Nested conditions ride inside the stage's Data as
+// generic maps and never reach this method, so they were lost by the missing
+// STAGE decoder, not this one. What this fixes is an API-surface asymmetry —
+// any caller decoding a FunctionCondition on its own got an empty value.
 // See ekodb-client-go#63.
 func (c *FunctionCondition) UnmarshalJSON(b []byte) error {
 	var envelope struct {
@@ -612,6 +664,29 @@ func ConditionCountGreaterThan(count int) FunctionCondition {
 // of records in the current pipeline stage is strictly less than the provided count.
 func ConditionCountLessThan(count int) FunctionCondition {
 	return FunctionCondition{Type: "CountLessThan", Count: count}
+}
+
+// ConditionFieldGreaterThan is satisfied when the field is strictly greater
+// than value. Works for numbers, strings and ISO-8601 datetimes.
+func ConditionFieldGreaterThan(field string, value interface{}) FunctionCondition {
+	return FunctionCondition{Type: "FieldGreaterThan", Field: field, FieldValue: value}
+}
+
+// ConditionFieldLessThan is satisfied when the field is strictly less than value.
+func ConditionFieldLessThan(field string, value interface{}) FunctionCondition {
+	return FunctionCondition{Type: "FieldLessThan", Field: field, FieldValue: value}
+}
+
+// ConditionFieldGreaterThanOrEqual is satisfied when the field is greater than
+// or equal to value. Use this for "stock >= qty" and "balance >= amount" guards.
+func ConditionFieldGreaterThanOrEqual(field string, value interface{}) FunctionCondition {
+	return FunctionCondition{Type: "FieldGreaterThanOrEqual", Field: field, FieldValue: value}
+}
+
+// ConditionFieldLessThanOrEqual is satisfied when the field is less than or
+// equal to value.
+func ConditionFieldLessThanOrEqual(field string, value interface{}) FunctionCondition {
+	return FunctionCondition{Type: "FieldLessThanOrEqual", Field: field, FieldValue: value}
 }
 
 // ConditionAnd creates a condition that requires all of the provided child conditions
