@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`UserFunction` round trips silently destroyed stored pipelines (#63).**
+  `FunctionStageConfig` defined `MarshalJSON` but no `UnmarshalJSON`, so every
+  pipeline stage of a function read back from the server decoded to an empty
+  `Stage` and a nil `Data`. A `GetFunction` → modify → `UpdateFunction` — the
+  most ordinary edit there is — overwrote the stored function with a pipeline of
+  `{"type": ""}` stages. The update succeeded and returned no error, and the
+  stage _count_ survived, so calling code saw a plausible-looking function.
+
+  Two faults compounded. `json:",inline"` is not a real tag — `encoding/json`
+  has no inline support, so the option was ignored and `Data` was looked up as a
+  key literally named `"Data"`, which the server never sends. And `Stage` was
+  tagged `json:"stage"` while `MarshalJSON` has always written `"type"`, so the
+  read and write paths disagreed about the field's name.
+
+  `MarshalJSON` being correct is what hid this: a function _created_ in Go
+  round-trips fine, so the defect was only reachable on data that came back from
+  the server.
+
+  `FunctionCondition` had the identical defect — a `MarshalJSON` with no
+  counterpart, and no struct tags at all — so an `If` stage's condition was lost
+  the same way. Both now have explicit `UnmarshalJSON`, and both structs' tags
+  say `"-"` to state plainly that the codec owns the translation rather than
+  naming wire keys that do not exist.
+
+  A stage with no `"type"` is now an error rather than an empty stage. Decoding
+  a malformed stage to a valid-looking empty one is how this stayed silent.
+
+  An unknown condition type still decodes, keeping its type and dropping its
+  payload, so a client one version behind the server can still READ a function
+  using a condition it does not know about. Refusing would make the whole
+  function unreadable to fix a lossy case.
+
 ## [0.26.0] - 2026-09-04
 
 ### Added
@@ -37,7 +73,9 @@ and this project adheres to
   lines up to 1 MiB (the scanner's default 64 KiB limit truncated a large token
   or tool payload silently, as `SubscribeSSE` already avoided) and reports a
   stream the scanner could not read to its end as an `error` event
-  (`stream read failed: …`) instead of a clean close. The classification travels as one unit: without an `error_kind` an event carries no `Provider` / `ProviderStatus` / `RetryAfterSecs`, on either route.
+  (`stream read failed: …`) instead of a clean close. The classification travels
+  as one unit: without an `error_kind` an event carries no `Provider` /
+  `ProviderStatus` / `RetryAfterSecs`, on either route.
 
 ## [0.25.0] - 2026-07-14
 
