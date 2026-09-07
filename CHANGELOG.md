@@ -60,11 +60,11 @@ and this project adheres to
   the server and are used by shipped app templates, but `MarshalJSON` had no arm
   for them, so they fell through to the default and emitted only
   `{"type": ...}`. An earlier draft of this entry called that "a client that
-  reported success"; that was wrong, and a reviewer corrected it. Both
-  `POST` and `PUT /api/functions` deserialize into the typed `UserFunction`,
-  so a payload-less condition fails at the request boundary and returns a 4xx.
-  The bug is real — the client emitted an invalid condition — but the failure
-  was loud, not silent. Builders for all four are now exported.
+  reported success"; that was wrong, and a reviewer corrected it. Both `POST`
+  and `PUT /api/functions` deserialize into the typed `UserFunction`, so a
+  payload-less condition fails at the request boundary and returns a 4xx. The
+  bug is real — the client emitted an invalid condition — but the failure was
+  loud, not silent. Builders for all four are now exported.
 
 - **A `"type"` key inside a stage's `Data` could displace the stage
   discriminator**, because `MarshalJSON` wrote the discriminator before copying
@@ -76,11 +76,11 @@ and this project adheres to
 
 - **An unknown condition type is now preserved verbatim instead of being
   stripped.** An earlier version of this change kept the type and DROPPED the
-  payload, defending it as tolerance for a client one version behind the
-  server. That defence does not survive scrutiny: it is silent data loss, and
-  the same failure this release exists to fix. A caller could read a function,
-  write it back, and destroy a condition the client had simply never heard of,
-  with no error at any step.
+  payload, defending it as tolerance for a client one version behind the server.
+  That defence does not survive scrutiny: it is silent data loss, and the same
+  failure this release exists to fix. A caller could read a function, write it
+  back, and destroy a condition the client had simply never heard of, with no
+  error at any step.
 
   Erroring instead would have been loud but would have broken the very case the
   drop was meant to protect. The payload is now carried through unchanged, so
@@ -89,18 +89,17 @@ and this project adheres to
 
   **What this does and does not cover, stated precisely**, because the first
   draft of this entry claimed more than the code delivers. Unknown data is
-  preserved at *condition-type* granularity: a condition type this client has
-  never heard of survives intact. It is NOT yet preserved at *field*
-  granularity — an unrecognised field inside a condition this client DOES
-  model, such as a future `case_sensitive` on `FieldEquals`, is still dropped
-  silently. That is the same defect, smaller, and it needs a larger change than
-  this release makes.
+  preserved at _condition-type_ granularity: a condition type this client has
+  never heard of survives intact. It is NOT yet preserved at _field_ granularity
+  — an unrecognised field inside a condition this client DOES model, such as a
+  future `case_sensitive` on `FieldEquals`, is still dropped silently. That is
+  the same defect, smaller, and it needs a larger change than this release
+  makes.
 
   The principle being worked toward is that unmodelled data must either fail
-  loudly or be preserved, never silently dropped. This release moves the
-  common case onto the right side of that line; it does not finish the job, and
-  saying otherwise would repeat the overstatement corrected elsewhere in this
-  entry.
+  loudly or be preserved, never silently dropped. This release moves the common
+  case onto the right side of that line; it does not finish the job, and saying
+  otherwise would repeat the overstatement corrected elsewhere in this entry.
 
 - **The condition decoder had the same integer-precision defect as the stage
   decoder.** A comparison operand is caller data and may be an integer past
