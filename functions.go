@@ -550,8 +550,8 @@ func (c FunctionCondition) MarshalJSON() ([]byte, error) {
 		})
 	case "FieldGreaterThan", "FieldLessThan",
 		"FieldGreaterThanOrEqual", "FieldLessThanOrEqual":
-		// These four exist on the server (stored.rs FunctionCondition) and are
-		// used by shipped app templates. They previously fell through to the
+		// These four exist on the server side and are used by shipped app
+		// templates. They previously fell through to the
 		// default arm, which emits only {"type": ...} and DROPS field/value —
 		// producing a condition the server rejects, from a client that
 		// reported success.
