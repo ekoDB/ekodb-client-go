@@ -1477,7 +1477,8 @@ func TestSearchSuccess(t *testing.T) {
 					{"id": "doc_1", "score": 0.95, "title": "Result 1"},
 					{"id": "doc_2", "score": 0.85, "title": "Result 2"},
 				},
-				"total": 2,
+				"total":             2,
+				"execution_time_ms": 12,
 			})
 		},
 	}
@@ -1492,6 +1493,9 @@ func TestSearchSuccess(t *testing.T) {
 	}
 	if len(result.Results) != 2 {
 		t.Errorf("Search returned %d results, want 2", len(result.Results))
+	}
+	if result.ExecutionTimeMs == nil || *result.ExecutionTimeMs != 12 {
+		t.Fatalf("Search execution time = %v, want 12ms", result.ExecutionTimeMs)
 	}
 }
 
