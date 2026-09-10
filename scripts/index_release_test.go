@@ -7,6 +7,8 @@ package scripts_test
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -29,9 +31,14 @@ const (
 	pagePath      = "/" + module + "@" + version
 )
 
+// hangFor is how long a scripted status of 0 makes the recorder hold a request
+// before answering; longer than any REQUEST_TIMEOUT the tests set, so curl
+// gives up first and reports its own timeout.
+const hangFor = 2 * time.Second
+
 // recorder is an httptest handler that remembers every request it served and
 // answers each path with a scripted sequence of status codes (the last code
-// repeats once the sequence is exhausted).
+// repeats once the sequence is exhausted; a 0 holds the request for hangFor).
 type recorder struct {
 	mu       sync.Mutex
 	requests []string // "METHOD path"
@@ -57,8 +64,15 @@ func (r *recorder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		i = len(seq) - 1
 	}
 	r.served[req.URL.Path]++
-	w.WriteHeader(seq[i])
-	_, _ = w.Write([]byte(http.StatusText(seq[i])))
+	status := seq[i]
+	if status == 0 {
+		r.mu.Unlock()
+		time.Sleep(hangFor)
+		r.mu.Lock()
+		status = http.StatusOK
+	}
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(http.StatusText(status)))
 }
 
 func (r *recorder) count(prefix string) int {
@@ -90,29 +104,53 @@ func stubs(t *testing.T, proxyStatuses, siteStatuses map[string][]int) (*recorde
 	return proxy, ps.URL, site, ss.URL
 }
 
-// polling is the script's poll configuration, as the strings it reads.
-type polling struct{ attempts, sleep string }
+// polling is the script's poll and timeout configuration, as the strings it
+// reads; an empty timeout leaves the script's defaults in place.
+type polling struct{ attempts, sleep, timeout string }
 
 func fast(attempts string) polling { return polling{attempts: attempts, sleep: "0"} }
 
-// run executes the script against the two base URLs.
+// run executes the repository's script against the two base URLs.
 func run(t *testing.T, proxyURL, siteURL string, p polling, args ...string) (int, string) {
 	t.Helper()
 	script, err := filepath.Abs("index-release.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", append([]string{script}, args...)...)
+	return runScript(t, script, proxyURL, siteURL, p, args...)
+}
+
+// runDeadline bounds every script run: a script that hangs (a request with
+// no timeout against a server that never answers) fails the test here rather
+// than stalling the package until go test gives up.
+const runDeadline = 20 * time.Second
+
+// runScript executes the script at the given path against the two base URLs.
+func runScript(t *testing.T, script, proxyURL, siteURL string, p polling, args ...string) (int, string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bash", append([]string{script}, args...)...)
+	// On the deadline the parent bash is killed, but a command substitution
+	// still running a request holds the inherited pipes; WaitDelay closes
+	// them so the run returns instead of waiting on that orphan.
+	cmd.WaitDelay = 2 * time.Second
 	cmd.Env = append(os.Environ(),
 		"GOPROXY_URL="+proxyURL,
 		"PKGSITE_URL="+siteURL,
 		"INDEX_ATTEMPTS="+p.attempts,
 		"INDEX_SLEEP="+p.sleep,
 	)
+	if p.timeout != "" {
+		cmd.Env = append(cmd.Env, "CONNECT_TIMEOUT="+p.timeout, "REQUEST_TIMEOUT="+p.timeout)
+	}
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	err = cmd.Run()
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		t.Fatalf("script did not finish within %v:\n%s", runDeadline, out.String())
+	}
 	code := 0
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		code = exitErr.ExitCode()
@@ -132,6 +170,64 @@ func closedPort(t *testing.T) string {
 	addr := l.Addr().String()
 	_ = l.Close()
 	return "http://" + addr
+}
+
+// blackHole returns a URL whose server accepts every connection and never
+// answers, so only a client-side timeout can end a request to it.
+func blackHole(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var conns []net.Conn
+	var mu sync.Mutex
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = l.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+	})
+	return "http://" + l.Addr().String()
+}
+
+// scriptBeside copies the script into a fresh directory whose parent holds
+// the given go.mod content (none when goMod is nil), so the module lookup can
+// be driven against a missing or incomplete file.
+func scriptBeside(t *testing.T, goMod []byte) string {
+	t.Helper()
+	src, err := os.ReadFile("index-release.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	dir := filepath.Join(root, "scripts")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "index-release.sh")
+	if err := os.WriteFile(script, src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if goMod != nil {
+		if err := os.WriteFile(filepath.Join(root, "go.mod"), goMod, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return script
 }
 
 func TestIndexRelease_SuccessRequestsProxyThenFetchThenPage(t *testing.T) {
@@ -210,8 +306,7 @@ func TestIndexRelease_ProxyMissFailsBeforeTouchingPkgsite(t *testing.T) {
 func TestIndexRelease_ConnectionFailureReportsCurlDetailOnce(t *testing.T) {
 	// No status at all is a different reading from a 404: the output carries a
 	// single 000 and curl's own message, never a doubled "000000".
-	_, siteURL := newRecorder(nil), closedPort(t)
-	proxyURL := closedPort(t)
+	proxyURL, siteURL := closedPort(t), closedPort(t)
 
 	code, out := run(t, proxyURL, siteURL, fast("2"), version)
 	if code != 1 {
@@ -284,22 +379,26 @@ func TestIndexRelease_SleepsBetweenAttemptsButNotAfterTheLast(t *testing.T) {
 		map[string][]int{proxyInfoPath: {200}},
 		map[string][]int{fetchPath: {200}, pagePath: {404}})
 
+	// The sleep is long relative to a run that makes no sleep at all (tens of
+	// milliseconds), so the upper bound below has a wide margin on a loaded
+	// runner while still failing if the last attempt were followed by a sleep.
+	const sleep = 2 * time.Second
 	start := time.Now()
-	code, out := run(t, proxyURL, siteURL, polling{attempts: "2", sleep: "1"}, version)
+	code, out := run(t, proxyURL, siteURL, polling{attempts: "2", sleep: "2"}, version)
 	if code != 1 {
 		t.Fatalf("expected exit 1, got %d:\n%s", code, out)
 	}
-	if elapsed := time.Since(start); elapsed < time.Second {
-		t.Fatalf("two attempts with INDEX_SLEEP=1 took %v, want at least one second of sleep between them", elapsed)
+	if elapsed := time.Since(start); elapsed < sleep {
+		t.Fatalf("two attempts with INDEX_SLEEP=2 took %v, want at least one sleep between them", elapsed)
 	}
 
 	start = time.Now()
-	code, out = run(t, proxyURL, siteURL, polling{attempts: "1", sleep: "1"}, version)
+	code, out = run(t, proxyURL, siteURL, polling{attempts: "1", sleep: "2"}, version)
 	if code != 1 {
 		t.Fatalf("expected exit 1, got %d:\n%s", code, out)
 	}
-	if elapsed := time.Since(start); elapsed >= time.Second {
-		t.Fatalf("a single attempt with INDEX_SLEEP=1 took %v, want no sleep after the last attempt", elapsed)
+	if elapsed := time.Since(start); elapsed >= sleep {
+		t.Fatalf("a single attempt with INDEX_SLEEP=2 took %v, want no sleep after the last attempt", elapsed)
 	}
 }
 
@@ -335,12 +434,22 @@ func TestIndexRelease_RejectsInvalidPollingBeforeAnyRequest(t *testing.T) {
 		{attempts: "0", sleep: "0"},
 		{attempts: "abc", sleep: "0"},
 		{attempts: "-1", sleep: "0"},
+		// leading zeros: bash would read these as octal inside (( )) and
+		// error, which must be a rejection rather than a skipped check
+		{attempts: "08", sleep: "0"},
+		{attempts: "007", sleep: "0"},
 		{attempts: "3", sleep: "x"},
 		{attempts: "3", sleep: "-1"},
+		{attempts: "3", sleep: "08"},
+		{attempts: "3", sleep: "0", timeout: "0"},
+		{attempts: "3", sleep: "0", timeout: "abc"},
 	} {
 		code, out := run(t, proxyURL, siteURL, p, version)
 		if code != 2 {
-			t.Errorf("INDEX_ATTEMPTS=%q INDEX_SLEEP=%q: expected exit 2, got %d:\n%s", p.attempts, p.sleep, code, out)
+			t.Errorf("INDEX_ATTEMPTS=%q INDEX_SLEEP=%q timeout=%q: expected exit 2, got %d:\n%s", p.attempts, p.sleep, p.timeout, code, out)
+		}
+		if !strings.Contains(out, "must be an integer") {
+			t.Errorf("INDEX_ATTEMPTS=%q INDEX_SLEEP=%q timeout=%q: expected the script's own message, got:\n%s", p.attempts, p.sleep, p.timeout, out)
 		}
 	}
 	if got := proxy.snapshot(); len(got) != 0 {
@@ -348,5 +457,81 @@ func TestIndexRelease_RejectsInvalidPollingBeforeAnyRequest(t *testing.T) {
 	}
 	if got := site.snapshot(); len(got) != 0 {
 		t.Fatalf("pkg.go.dev must not be contacted with invalid polling values, got %v", got)
+	}
+}
+
+func TestIndexRelease_UnresponsiveServerEndsAtTheRequestTimeout(t *testing.T) {
+	// A server that accepts the connection and never answers can only be
+	// ended by the client-side timeout; with the timeouts at one second the
+	// run must finish far sooner than the 30-second default would allow.
+	proxyURL := blackHole(t)
+	siteURL := closedPort(t)
+
+	start := time.Now()
+	code, out := run(t, proxyURL, siteURL, polling{attempts: "1", sleep: "0", timeout: "1"}, version)
+	elapsed := time.Since(start)
+	if code != 1 {
+		t.Fatalf("expected exit 1 when the proxy never answers, got %d:\n%s", code, out)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("run against an unresponsive server took %v, want it bounded by the one-second timeout", elapsed)
+	}
+	if !regexp.MustCompile(`HTTP 000 \(curl: \(28\) `).MatchString(out) {
+		t.Fatalf("an unresponsive server must be reported as curl's timeout (28), got:\n%s", out)
+	}
+}
+
+func TestIndexRelease_LaterAttemptDoesNotCarryAnEarlierRequestsDetail(t *testing.T) {
+	// The proxy hangs on the first attempt (curl times out), answers 404 on
+	// the second and 200 on the third. The 404 line must carry no trace of
+	// the earlier timeout message, and the run must then succeed.
+	proxy, proxyURL, site, siteURL := stubs(t,
+		map[string][]int{proxyInfoPath: {0, 404, 200}},
+		map[string][]int{fetchPath: {200}, pagePath: {200}})
+
+	code, out := run(t, proxyURL, siteURL, polling{attempts: "3", sleep: "0", timeout: "1"}, version)
+	if code != 0 {
+		t.Fatalf("expected exit 0 once the proxy answers, got %d:\n%s", code, out)
+	}
+	if n := proxy.count("GET " + proxyInfoPath); n != 3 {
+		t.Fatalf("proxy polled %d times, want 3", n)
+	}
+	if !regexp.MustCompile(`attempt 1/3: HTTP 000 \(curl: \(28\) `).MatchString(out) {
+		t.Fatalf("first attempt must report curl's timeout, got:\n%s", out)
+	}
+	if !strings.Contains(out, "attempt 2/3: HTTP 404\n") {
+		t.Fatalf("second attempt must report a bare 404 with no earlier detail, got:\n%s", out)
+	}
+	if got := site.snapshot(); len(got) != 2 {
+		t.Fatalf("pkg.go.dev requests = %v, want fetch then page", got)
+	}
+}
+
+func TestIndexRelease_MissingOrIncompleteGoModFailsBeforeAnyRequest(t *testing.T) {
+	proxy, proxyURL, site, siteURL := stubs(t,
+		map[string][]int{proxyInfoPath: {200}},
+		map[string][]int{fetchPath: {200}, pagePath: {200}})
+
+	for name, goMod := range map[string][]byte{
+		"missing":        nil,
+		"no module line": []byte("go 1.27\n"),
+	} {
+		script := scriptBeside(t, goMod)
+		code, out := runScript(t, script, proxyURL, siteURL, fast("3"), version)
+		if code != 1 {
+			t.Errorf("%s go.mod: expected exit 1, got %d:\n%s", name, code, out)
+		}
+		if !strings.Contains(out, "could not read the module path from") {
+			t.Errorf("%s go.mod: expected the script's own message, got:\n%s", name, out)
+		}
+		if strings.Contains(out, fmt.Sprintf("awk: can't open")) {
+			t.Errorf("%s go.mod: awk's error must not reach the operator, got:\n%s", name, out)
+		}
+	}
+	if got := proxy.snapshot(); len(got) != 0 {
+		t.Fatalf("proxy must not be contacted without a module path, got %v", got)
+	}
+	if got := site.snapshot(); len(got) != 0 {
+		t.Fatalf("pkg.go.dev must not be contacted without a module path, got %v", got)
 	}
 }
