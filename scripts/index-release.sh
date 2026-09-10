@@ -36,8 +36,7 @@
 #   REQUEST_TIMEOUT seconds for each whole request, 1 to 99999 (default 30)
 #
 # Exit codes: 0 indexed; 1 a request failed (the URL and status are printed,
-# with curl's own message when the request could not be made at all); 2 bad
-# usage.
+# with curl's own message when the request did not complete); 2 bad usage.
 set -euo pipefail
 
 GOPROXY_URL="${GOPROXY_URL:-https://proxy.golang.org}"
