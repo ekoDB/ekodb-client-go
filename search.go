@@ -61,7 +61,11 @@ type SearchResult struct {
 type SearchResponse struct {
 	Results []SearchResult `json:"results"`
 	Total   int            `json:"total"`
-	TookMs  *int           `json:"took_ms,omitempty"`
+	// ExecutionTimeMs is the server-reported search execution time.
+	ExecutionTimeMs *int `json:"execution_time_ms,omitempty"`
+	// TookMs is retained for compatibility with older/non-ekoDB response shapes.
+	// Deprecated: use ExecutionTimeMs for the ekoDB search response contract.
+	TookMs *int `json:"took_ms,omitempty"`
 }
 
 // SearchQueryBuilder provides a fluent API for building search queries
