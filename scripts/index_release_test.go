@@ -7,14 +7,17 @@ package scripts_test
 
 import (
 	"bytes"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 const (
@@ -76,8 +79,24 @@ func (r *recorder) snapshot() []string {
 	return append([]string(nil), r.requests...)
 }
 
-// run executes the script with the two stub servers and a zero poll delay.
-func run(t *testing.T, proxy, site *httptest.Server, attempts string, args ...string) (int, string) {
+// stubs starts a proxy and a pkg.go.dev stand-in with the given status
+// scripts and returns their recorders and base URLs.
+func stubs(t *testing.T, proxyStatuses, siteStatuses map[string][]int) (*recorder, string, *recorder, string) {
+	t.Helper()
+	proxy, site := newRecorder(proxyStatuses), newRecorder(siteStatuses)
+	ps, ss := httptest.NewServer(proxy), httptest.NewServer(site)
+	t.Cleanup(ps.Close)
+	t.Cleanup(ss.Close)
+	return proxy, ps.URL, site, ss.URL
+}
+
+// polling is the script's poll configuration, as the strings it reads.
+type polling struct{ attempts, sleep string }
+
+func fast(attempts string) polling { return polling{attempts: attempts, sleep: "0"} }
+
+// run executes the script against the two base URLs.
+func run(t *testing.T, proxyURL, siteURL string, p polling, args ...string) (int, string) {
 	t.Helper()
 	script, err := filepath.Abs("index-release.sh")
 	if err != nil {
@@ -85,10 +104,10 @@ func run(t *testing.T, proxy, site *httptest.Server, attempts string, args ...st
 	}
 	cmd := exec.Command("bash", append([]string{script}, args...)...)
 	cmd.Env = append(os.Environ(),
-		"GOPROXY_URL="+proxy.URL,
-		"PKGSITE_URL="+site.URL,
-		"INDEX_ATTEMPTS="+attempts,
-		"INDEX_SLEEP=0",
+		"GOPROXY_URL="+proxyURL,
+		"PKGSITE_URL="+siteURL,
+		"INDEX_ATTEMPTS="+p.attempts,
+		"INDEX_SLEEP="+p.sleep,
 	)
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -103,14 +122,24 @@ func run(t *testing.T, proxy, site *httptest.Server, attempts string, args ...st
 	return code, out.String()
 }
 
-func TestIndexRelease_SuccessRequestsProxyThenFetchThenPage(t *testing.T) {
-	proxy := newRecorder(map[string][]int{proxyInfoPath: {200}})
-	site := newRecorder(map[string][]int{fetchPath: {200}, pagePath: {200}})
-	ps, ss := httptest.NewServer(proxy), httptest.NewServer(site)
-	defer ps.Close()
-	defer ss.Close()
+// closedPort returns a loopback URL nothing is listening on.
+func closedPort(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	_ = l.Close()
+	return "http://" + addr
+}
 
-	code, out := run(t, ps, ss, "3", version)
+func TestIndexRelease_SuccessRequestsProxyThenFetchThenPage(t *testing.T) {
+	proxy, proxyURL, site, siteURL := stubs(t,
+		map[string][]int{proxyInfoPath: {200}},
+		map[string][]int{fetchPath: {200}, pagePath: {200}})
+
+	code, out := run(t, proxyURL, siteURL, fast("3"), version)
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d:\n%s", code, out)
 	}
@@ -120,19 +149,17 @@ func TestIndexRelease_SuccessRequestsProxyThenFetchThenPage(t *testing.T) {
 	if got := site.snapshot(); len(got) != 2 || got[0] != "POST "+fetchPath || got[1] != "GET "+pagePath {
 		t.Fatalf("pkg.go.dev requests = %v, want POST fetch then GET page", got)
 	}
-	if !strings.Contains(out, ss.URL+pagePath) {
+	if !strings.Contains(out, siteURL+pagePath) {
 		t.Fatalf("success output should name the version page, got:\n%s", out)
 	}
 }
 
 func TestIndexRelease_PollsPageUntilItRenders(t *testing.T) {
-	proxy := newRecorder(map[string][]int{proxyInfoPath: {200}})
-	site := newRecorder(map[string][]int{fetchPath: {200}, pagePath: {404, 404, 200}})
-	ps, ss := httptest.NewServer(proxy), httptest.NewServer(site)
-	defer ps.Close()
-	defer ss.Close()
+	_, proxyURL, site, siteURL := stubs(t,
+		map[string][]int{proxyInfoPath: {200}},
+		map[string][]int{fetchPath: {200}, pagePath: {404, 404, 200}})
 
-	code, out := run(t, ps, ss, "5", version)
+	code, out := run(t, proxyURL, siteURL, fast("5"), version)
 	if code != 0 {
 		t.Fatalf("expected exit 0 once the page renders, got %d:\n%s", code, out)
 	}
@@ -141,18 +168,38 @@ func TestIndexRelease_PollsPageUntilItRenders(t *testing.T) {
 	}
 }
 
-func TestIndexRelease_ProxyMissFailsBeforeTouchingPkgsite(t *testing.T) {
-	proxy := newRecorder(map[string][]int{proxyInfoPath: {404}})
-	site := newRecorder(map[string][]int{fetchPath: {200}, pagePath: {200}})
-	ps, ss := httptest.NewServer(proxy), httptest.NewServer(site)
-	defer ps.Close()
-	defer ss.Close()
+func TestIndexRelease_PollsProxyUntilItServesTheVersion(t *testing.T) {
+	// Seconds after a tag push the proxy's first fetch from origin may not
+	// have completed; the proxy step retries within the same budget.
+	proxy, proxyURL, site, siteURL := stubs(t,
+		map[string][]int{proxyInfoPath: {404, 200}},
+		map[string][]int{fetchPath: {200}, pagePath: {200}})
 
-	code, out := run(t, ps, ss, "3", version)
+	code, out := run(t, proxyURL, siteURL, fast("3"), version)
+	if code != 0 {
+		t.Fatalf("expected exit 0 once the proxy serves the version, got %d:\n%s", code, out)
+	}
+	if n := proxy.count("GET " + proxyInfoPath); n != 2 {
+		t.Fatalf("proxy polled %d times, want 2 (a 404 then a 200)", n)
+	}
+	if got := site.snapshot(); len(got) != 2 {
+		t.Fatalf("pkg.go.dev requests = %v, want fetch then page after the proxy succeeded", got)
+	}
+}
+
+func TestIndexRelease_ProxyMissFailsBeforeTouchingPkgsite(t *testing.T) {
+	proxy, proxyURL, site, siteURL := stubs(t,
+		map[string][]int{proxyInfoPath: {404}},
+		map[string][]int{fetchPath: {200}, pagePath: {200}})
+
+	code, out := run(t, proxyURL, siteURL, fast("3"), version)
 	if code != 1 {
 		t.Fatalf("expected exit 1 on a proxy 404, got %d:\n%s", code, out)
 	}
-	if !strings.Contains(out, ps.URL+proxyInfoPath) || !strings.Contains(out, "404") {
+	if n := proxy.count("GET " + proxyInfoPath); n != 3 {
+		t.Fatalf("proxy polled %d times, want exactly INDEX_ATTEMPTS=3", n)
+	}
+	if !strings.Contains(out, proxyURL+proxyInfoPath) || !strings.Contains(out, "HTTP 404") {
 		t.Fatalf("failure output must name the proxy URL and status, got:\n%s", out)
 	}
 	if got := site.snapshot(); len(got) != 0 {
@@ -160,18 +207,37 @@ func TestIndexRelease_ProxyMissFailsBeforeTouchingPkgsite(t *testing.T) {
 	}
 }
 
-func TestIndexRelease_FetchNotFoundFailsWithoutPolling(t *testing.T) {
-	proxy := newRecorder(map[string][]int{proxyInfoPath: {200}})
-	site := newRecorder(map[string][]int{fetchPath: {404}, pagePath: {200}})
-	ps, ss := httptest.NewServer(proxy), httptest.NewServer(site)
-	defer ps.Close()
-	defer ss.Close()
+func TestIndexRelease_ConnectionFailureReportsCurlDetailOnce(t *testing.T) {
+	// No status at all is a different reading from a 404: the output carries a
+	// single 000 and curl's own message, never a doubled "000000".
+	_, siteURL := newRecorder(nil), closedPort(t)
+	proxyURL := closedPort(t)
 
-	code, out := run(t, ps, ss, "3", version)
+	code, out := run(t, proxyURL, siteURL, fast("2"), version)
+	if code != 1 {
+		t.Fatalf("expected exit 1 when the proxy cannot be reached, got %d:\n%s", code, out)
+	}
+	if strings.Contains(out, "000000") {
+		t.Fatalf("status must not be doubled on a connection failure, got:\n%s", out)
+	}
+	if !regexp.MustCompile(`HTTP 000 \(curl: \(\d+\) `).MatchString(out) {
+		t.Fatalf("connection failure must print HTTP 000 with curl's message, got:\n%s", out)
+	}
+	if !strings.Contains(out, proxyURL+proxyInfoPath) {
+		t.Fatalf("failure output must name the proxy URL, got:\n%s", out)
+	}
+}
+
+func TestIndexRelease_FetchNotFoundFailsWithoutPolling(t *testing.T) {
+	_, proxyURL, site, siteURL := stubs(t,
+		map[string][]int{proxyInfoPath: {200}},
+		map[string][]int{fetchPath: {404}, pagePath: {200}})
+
+	code, out := run(t, proxyURL, siteURL, fast("3"), version)
 	if code != 1 {
 		t.Fatalf("expected exit 1 on a fetch 404, got %d:\n%s", code, out)
 	}
-	if !strings.Contains(out, ss.URL+fetchPath) || !strings.Contains(out, "404") {
+	if !strings.Contains(out, siteURL+fetchPath) || !strings.Contains(out, "HTTP 404") {
 		t.Fatalf("failure output must name the fetch URL and status, got:\n%s", out)
 	}
 	if n := site.count("GET " + pagePath); n != 0 {
@@ -183,13 +249,11 @@ func TestIndexRelease_FetchTransientFailureStillPolls(t *testing.T) {
 	// pkg.go.dev answers the fetch endpoint with a 5xx while its worker is
 	// still processing; the page rendering is the success criterion, so the
 	// script keeps polling rather than giving up on that code.
-	proxy := newRecorder(map[string][]int{proxyInfoPath: {200}})
-	site := newRecorder(map[string][]int{fetchPath: {500}, pagePath: {404, 200}})
-	ps, ss := httptest.NewServer(proxy), httptest.NewServer(site)
-	defer ps.Close()
-	defer ss.Close()
+	_, proxyURL, site, siteURL := stubs(t,
+		map[string][]int{proxyInfoPath: {200}},
+		map[string][]int{fetchPath: {500}, pagePath: {404, 200}})
 
-	code, out := run(t, ps, ss, "3", version)
+	code, out := run(t, proxyURL, siteURL, fast("3"), version)
 	if code != 0 {
 		t.Fatalf("expected exit 0 when the page renders after a transient fetch error, got %d:\n%s", code, out)
 	}
@@ -199,37 +263,57 @@ func TestIndexRelease_FetchTransientFailureStillPolls(t *testing.T) {
 }
 
 func TestIndexRelease_PollTimeoutFailsNamingThePage(t *testing.T) {
-	proxy := newRecorder(map[string][]int{proxyInfoPath: {200}})
-	site := newRecorder(map[string][]int{fetchPath: {200}, pagePath: {404}})
-	ps, ss := httptest.NewServer(proxy), httptest.NewServer(site)
-	defer ps.Close()
-	defer ss.Close()
+	_, proxyURL, site, siteURL := stubs(t,
+		map[string][]int{proxyInfoPath: {200}},
+		map[string][]int{fetchPath: {200}, pagePath: {404}})
 
-	code, out := run(t, ps, ss, "3", version)
+	code, out := run(t, proxyURL, siteURL, fast("3"), version)
 	if code != 1 {
 		t.Fatalf("expected exit 1 when the page never renders, got %d:\n%s", code, out)
 	}
 	if n := site.count("GET " + pagePath); n != 3 {
 		t.Fatalf("page polled %d times, want exactly INDEX_ATTEMPTS=3", n)
 	}
-	if !strings.Contains(out, ss.URL+pagePath) || !strings.Contains(out, "404") {
+	if !strings.Contains(out, siteURL+pagePath) || !strings.Contains(out, "HTTP 404") {
 		t.Fatalf("timeout output must name the page URL and last status, got:\n%s", out)
 	}
 }
 
+func TestIndexRelease_SleepsBetweenAttemptsButNotAfterTheLast(t *testing.T) {
+	_, proxyURL, _, siteURL := stubs(t,
+		map[string][]int{proxyInfoPath: {200}},
+		map[string][]int{fetchPath: {200}, pagePath: {404}})
+
+	start := time.Now()
+	code, out := run(t, proxyURL, siteURL, polling{attempts: "2", sleep: "1"}, version)
+	if code != 1 {
+		t.Fatalf("expected exit 1, got %d:\n%s", code, out)
+	}
+	if elapsed := time.Since(start); elapsed < time.Second {
+		t.Fatalf("two attempts with INDEX_SLEEP=1 took %v, want at least one second of sleep between them", elapsed)
+	}
+
+	start = time.Now()
+	code, out = run(t, proxyURL, siteURL, polling{attempts: "1", sleep: "1"}, version)
+	if code != 1 {
+		t.Fatalf("expected exit 1, got %d:\n%s", code, out)
+	}
+	if elapsed := time.Since(start); elapsed >= time.Second {
+		t.Fatalf("a single attempt with INDEX_SLEEP=1 took %v, want no sleep after the last attempt", elapsed)
+	}
+}
+
 func TestIndexRelease_RejectsMalformedVersionBeforeAnyRequest(t *testing.T) {
-	proxy := newRecorder(map[string][]int{proxyInfoPath: {200}})
-	site := newRecorder(map[string][]int{fetchPath: {200}, pagePath: {200}})
-	ps, ss := httptest.NewServer(proxy), httptest.NewServer(site)
-	defer ps.Close()
-	defer ss.Close()
+	proxy, proxyURL, site, siteURL := stubs(t,
+		map[string][]int{proxyInfoPath: {200}},
+		map[string][]int{fetchPath: {200}, pagePath: {200}})
 
 	for _, bad := range []string{"", "1.2.3", "v1.2", "v1.2.3-rc.1"} {
 		args := []string{bad}
 		if bad == "" {
 			args = nil
 		}
-		code, out := run(t, ps, ss, "3", args...)
+		code, out := run(t, proxyURL, siteURL, fast("3"), args...)
 		if code != 2 {
 			t.Errorf("version %q: expected exit 2, got %d:\n%s", bad, code, out)
 		}
@@ -239,5 +323,30 @@ func TestIndexRelease_RejectsMalformedVersionBeforeAnyRequest(t *testing.T) {
 	}
 	if got := site.snapshot(); len(got) != 0 {
 		t.Fatalf("pkg.go.dev must not be contacted for a malformed version, got %v", got)
+	}
+}
+
+func TestIndexRelease_RejectsInvalidPollingBeforeAnyRequest(t *testing.T) {
+	proxy, proxyURL, site, siteURL := stubs(t,
+		map[string][]int{proxyInfoPath: {200}},
+		map[string][]int{fetchPath: {200}, pagePath: {200}})
+
+	for _, p := range []polling{
+		{attempts: "0", sleep: "0"},
+		{attempts: "abc", sleep: "0"},
+		{attempts: "-1", sleep: "0"},
+		{attempts: "3", sleep: "x"},
+		{attempts: "3", sleep: "-1"},
+	} {
+		code, out := run(t, proxyURL, siteURL, p, version)
+		if code != 2 {
+			t.Errorf("INDEX_ATTEMPTS=%q INDEX_SLEEP=%q: expected exit 2, got %d:\n%s", p.attempts, p.sleep, code, out)
+		}
+	}
+	if got := proxy.snapshot(); len(got) != 0 {
+		t.Fatalf("proxy must not be contacted with invalid polling values, got %v", got)
+	}
+	if got := site.snapshot(); len(got) != 0 {
+		t.Fatalf("pkg.go.dev must not be contacted with invalid polling values, got %v", got)
 	}
 }
