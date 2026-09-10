@@ -61,8 +61,8 @@ It can be run on its own for a tag that was pushed some other way:
 make index-release VERSION=vX.Y.Z
 ```
 
-It exits 1, naming the URL and HTTP status (with curl's own message when no
-status was obtained), when the proxy has not served the version after
+It exits 1, naming the URL and HTTP status (with curl's own message when the
+request did not complete), when the proxy has not served the version after
 `INDEX_ATTEMPTS` polls `INDEX_SLEEP` seconds apart (the tag is not on origin, or
 points at a commit without a `go.mod`), when pkg.go.dev reports the version as
 not found, or when the page has not rendered after the same number of polls. The

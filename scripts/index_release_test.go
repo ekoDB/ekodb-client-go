@@ -589,6 +589,11 @@ func TestIndexRelease_StalledTransferIsNotARender(t *testing.T) {
 	if !regexp.MustCompile(`attempt 1/1: HTTP 000 \(curl: \(28\) `).MatchString(out) {
 		t.Fatalf("a stalled transfer must be reported as curl's timeout with no status, got:\n%s", out)
 	}
+	// curl's message names the partial body it received, which is what
+	// distinguishes headers-then-stall from a server that never answered.
+	if !strings.Contains(out, "out of 100 bytes") {
+		t.Fatalf("the stand-in must have delivered headers and part of the body before stalling, got:\n%s", out)
+	}
 	if strings.Contains(out, "HTTP 200") {
 		t.Fatalf("a partial 200 must not be reported as a status, got:\n%s", out)
 	}
