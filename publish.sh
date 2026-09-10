@@ -117,6 +117,12 @@ echo ""
 echo "🚀 Pushing tag to remote..."
 git push origin "$NEW_VERSION"
 
+# Neither the module proxy nor pkg.go.dev watches GitHub: without these
+# requests the tag can sit unindexed for days. Fails if the page never renders.
+echo ""
+echo "📚 Making $NEW_VERSION visible on pkg.go.dev..."
+"$SCRIPT_DIR/scripts/index-release.sh" "$NEW_VERSION"
+
 # Also push main branch if needed
 echo ""
 read -p "Push main branch too? (y/N): " -n 1 -r
@@ -129,5 +135,3 @@ echo ""
 echo "✅ Successfully published ekodb-client-go $NEW_VERSION!"
 echo "📦 Users can install with: go get $MODULE@$NEW_VERSION"
 echo "📚 Documentation available at: https://pkg.go.dev/$MODULE@$NEW_VERSION"
-echo ""
-echo "Note: It may take a few minutes for pkg.go.dev to index the new version."

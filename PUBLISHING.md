@@ -1,84 +1,60 @@
 # Publishing ekoDB Go Client
 
-This Go client will be moved to a separate public repository for distribution
-via Go modules.
+The client is distributed as a Go module from this repository. A release is a
+semantic-version tag on `main`; there is no registry upload.
 
-## Current Status
-
-🚧 **In Development** - Currently part of the ekoDB monorepo
-
-## Future Publishing Strategy
-
-### When Moving to Separate Repository
-
-1. **Create Public Repository**
-
-   ```bash
-   # Create new repo at: github.com/ekoDB/ekodb-client-go
-   ```
-
-2. **Copy Files**
-
-   ```bash
-   # Copy all Go client files to the new repository
-   cp -r ekodb-client-go/* /path/to/new/ekodb-client-go/
-   ```
-
-3. **Initialize and Push**
-
-   ```bash
-   cd /path/to/new/ekodb-client-go
-   git init
-   git add .
-   git commit -m "Initial commit: ekoDB Go client"
-   git remote add origin git@github.com:ekoDB/ekodb-client-go.git
-   git push -u origin main
-   ```
-
-4. **Tag and Publish**
-
-   ```bash
-   # Use the publish.sh script
-   ./publish.sh
-
-   # Or manually:
-   git tag v0.1.0
-   git push origin v0.1.0
-   ```
-
-## Publishing from Separate Repository
-
-Once in its own repository, use the `publish.sh` script:
+## Release
 
 ```bash
-./publish.sh
+make publish
 ```
 
-This script will:
+`make publish` runs `check-ready` (format check, `go vet`, the test suite, and a
+clean working tree) and then `publish.sh`, which:
 
-- Run tests
-- Create a semantic version tag
-- Push the tag to GitHub
-- Automatically indexed by pkg.go.dev
+1. runs the tests and `go mod tidy`
+2. prompts for the new version (`vX.Y.Z`) and creates an annotated tag
+3. pushes the tag, and optionally `main`
+4. runs `scripts/index-release.sh`, which makes the tag visible on pkg.go.dev
 
-## Installation (After Publishing)
+## Why step 4 exists
 
-Users will install with:
+Neither the Go module proxy nor pkg.go.dev watches GitHub. The proxy fetches a
+version the first time something asks for it, and pkg.go.dev indexes a version
+when it is asked to. Left alone, a pushed tag can sit for days while
+<https://pkg.go.dev/github.com/ekoDB/ekodb-client-go> still shows the previous
+release, and `@latest` on the proxy disagrees with the page.
+
+`scripts/index-release.sh vX.Y.Z` performs the three requests in order and
+succeeds only once the version page renders:
+
+1. `GET https://proxy.golang.org/github.com/eko!d!b/ekodb-client-go/@v/vX.Y.Z.info`
+   (the proxy's case-encoded module path) so the proxy fetches the tag
+2. `POST https://pkg.go.dev/fetch/github.com/ekoDB/ekodb-client-go@vX.Y.Z` so
+   pkg.go.dev indexes it
+3. `GET https://pkg.go.dev/github.com/ekoDB/ekodb-client-go@vX.Y.Z` until it
+   returns 200
+
+It can be run on its own for a tag that was pushed some other way:
 
 ```bash
-go get github.com/ekoDB/ekodb-client-go@v0.1.0
+make index-release VERSION=vX.Y.Z
 ```
 
-## Why Separate Repository?
+It exits non-zero, naming the URL and HTTP status, when the proxy does not serve
+the version (the tag is not on origin, or points at a commit without a
+`go.mod`), when pkg.go.dev reports the version as not found, or when the page
+has not rendered after `INDEX_ATTEMPTS` polls `INDEX_SLEEP` seconds apart
+(defaults 30 and 10). Its tests live in `scripts/index_release_test.go` and run
+as part of `go test ./...`.
 
-Go modules work best with dedicated repositories because:
+## Tagging without publishing
 
-- Go pulls the entire repository by default
-- Keeping it separate prevents users from downloading the server code
-- Standard practice in the Go ecosystem
-- Cleaner dependency management
+`make bump-version` runs the tests and creates the tag locally without pushing
+anything; it prints the push and `make index-release` commands to run next.
 
-## Current Development
+## Installation
 
-For now, the Go client is developed in the monorepo alongside other clients. The
-`publish.sh` script is ready for when we move to a separate repository.
+```bash
+go get github.com/ekoDB/ekodb-client-go@vX.Y.Z
+```
