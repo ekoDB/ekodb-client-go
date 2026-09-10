@@ -35,9 +35,15 @@ const (
 // gives up first and reports its own timeout.
 const hangFor = 2 * time.Second
 
+// stallAfterHeaders is a scripted status that makes the recorder send a 200
+// with a body length it then never finishes, so the client sees a status and
+// the transfer still times out.
+const stallAfterHeaders = -1
+
 // recorder is an httptest handler that remembers every request it served and
 // answers each path with a scripted sequence of status codes (the last code
-// repeats once the sequence is exhausted; a 0 holds the request for hangFor).
+// repeats once the sequence is exhausted; a 0 holds the request for hangFor,
+// and stallAfterHeaders sends headers and part of a body, then holds).
 type recorder struct {
 	mu       sync.Mutex
 	requests []string // "METHOD path"
@@ -64,11 +70,23 @@ func (r *recorder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	r.served[req.URL.Path]++
 	status := seq[i]
-	if status == 0 {
+	switch status {
+	case 0:
 		r.mu.Unlock()
 		time.Sleep(hangFor)
 		r.mu.Lock()
 		status = http.StatusOK
+	case stallAfterHeaders:
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("partial"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		r.mu.Unlock()
+		time.Sleep(hangFor)
+		r.mu.Lock()
+		return
 	}
 	w.WriteHeader(status)
 	_, _ = w.Write([]byte(http.StatusText(status)))
@@ -549,5 +567,29 @@ func TestIndexRelease_MissingOrIncompleteGoModFailsBeforeAnyRequest(t *testing.T
 	}
 	if got := site.snapshot(); len(got) != 0 {
 		t.Fatalf("pkg.go.dev must not be contacted without a module path, got %v", got)
+	}
+}
+
+func TestIndexRelease_StalledTransferIsNotARender(t *testing.T) {
+	// pkg.go.dev sends a 200 and part of the page, then stops. The status
+	// arrived but the transfer did not finish within REQUEST_TIMEOUT, and an
+	// unfinished answer is not proof the page renders: the poll reads it as
+	// no status, with curl's timeout, and the run fails rather than passes.
+	_, proxyURL, site, siteURL := stubs(t,
+		map[string][]int{proxyInfoPath: {200}},
+		map[string][]int{fetchPath: {200}, pagePath: {stallAfterHeaders}})
+
+	code, out := run(t, proxyURL, siteURL, polling{attempts: "1", sleep: "0", timeout: "1"}, version)
+	if code != 1 {
+		t.Fatalf("expected exit 1 when the page never finishes, got %d:\n%s", code, out)
+	}
+	if n := site.count("GET " + pagePath); n != 1 {
+		t.Fatalf("page polled %d times, want 1", n)
+	}
+	if !regexp.MustCompile(`attempt 1/1: HTTP 000 \(curl: \(28\) `).MatchString(out) {
+		t.Fatalf("a stalled transfer must be reported as curl's timeout with no status, got:\n%s", out)
+	}
+	if strings.Contains(out, "HTTP 200") {
+		t.Fatalf("a partial 200 must not be reported as a status, got:\n%s", out)
 	}
 }

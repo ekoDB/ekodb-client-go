@@ -17,8 +17,9 @@
 # first fetch from origin is not instant, step 3 because pkg.go.dev processes
 # the fetch asynchronously. Every request carries a timeout, so a server that
 # accepts the connection and never answers cannot hang a release. The worst
-# case per polled step is INDEX_ATTEMPTS x (REQUEST_TIMEOUT + INDEX_SLEEP),
-# about 20 minutes at the defaults against a server that never answers, and a
+# case per polled step is at most INDEX_ATTEMPTS x REQUEST_TIMEOUT plus
+# (INDEX_ATTEMPTS - 1) x INDEX_SLEEP, just under 20 minutes at the defaults
+# against a server that never answers, and a
 # tag that is not on origin costs (INDEX_ATTEMPTS - 1) x INDEX_SLEEP, just
 # under five minutes at the defaults, before step 1 gives up: the proxy's 404
 # for a tag it has not fetched yet is the same 404 it gives for one that does
@@ -102,10 +103,13 @@ escape_module() {
 curl_stderr="$(mktemp)"
 trap 'rm -f "$curl_stderr"' EXIT
 
-# request <method> <url>: sets `code` to the HTTP status, or to 000 with
-# `detail` carrying curl's own message when no status was obtained (refused
-# connection, DNS failure, timeout). The two causes are kept apart so a network
-# failure never reads as a 404 and vice versa.
+# request <method> <url>: sets `code` to the HTTP status of a request that
+# completed, or to 000 with `detail` carrying curl's own message when it did
+# not (refused connection, DNS failure, a timeout before the status arrived,
+# or a transfer that started and then stalled past REQUEST_TIMEOUT, whose
+# partial status is discarded: an answer that never finished is not a render).
+# The two outcomes are kept apart so a network failure never reads as a 404
+# and vice versa.
 code=""
 detail=""
 request() {
