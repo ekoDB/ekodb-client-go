@@ -17,8 +17,11 @@ and this project adheres to
   `pkg.go.dev/github.com/ekoDB/ekodb-client-go` still listed `v0.26.0` as the
   latest, for three days in the first case. `scripts/index-release.sh` requests
   the version from the proxy, asks pkg.go.dev to fetch it, and polls the version
-  page until it renders, failing with the URL and status otherwise. `publish.sh`
-  runs it after the tag push, `make index-release VERSION=vX.Y.Z` runs it alone,
+  page until it renders, failing with the URL and status otherwise; every
+  request carries a timeout, the proxy step retries within the same budget
+  because its first fetch from origin is not instant after a push, and invalid
+  poll settings are rejected before any request. `publish.sh` runs it after the
+  tag push, `make index-release VERSION=vX.Y.Z` runs it alone,
   `make bump-version` names it in its next steps, and `PUBLISHING.md` now
   describes the current single-repository release rather than a planned move out
   of a monorepo. Covered by `scripts/index_release_test.go`, which drives the
