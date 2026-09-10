@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.3] - 2026-09-10
+
+### Changed
+
+- **Coordinated client patch release.** Version aligned with `ekodb-client`
+  0.26.3, which carries the Kotlin schema-type, `Vector` record serialization
+  and HTTP error fixes plus a compatible dependency refresh. No Go client
+  changes; `gorilla/websocket` 1.5.3 and `msgpack/v5` 5.4.1 were checked and are
+  already the latest releases.
+
 ## [0.26.2] - 2026-09-08
 
 ### Fixed
