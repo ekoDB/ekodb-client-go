@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Releases are now made visible on pkg.go.dev instead of waiting for it.**
+  Neither the module proxy nor pkg.go.dev watches GitHub, and the release flow
+  only told the releaser to "wait a few minutes": `v0.26.1` through `v0.26.3`
+  sat on GitHub and on `proxy.golang.org` while
+  `pkg.go.dev/github.com/ekoDB/ekodb-client-go` still listed `v0.26.0` as the
+  latest, for three days in the first case. `scripts/index-release.sh` requests
+  the version from the proxy, asks pkg.go.dev to fetch it, and polls the version
+  page until it renders, failing with the URL and status otherwise. `publish.sh`
+  runs it after the tag push, `make index-release VERSION=vX.Y.Z` runs it alone,
+  `make bump-version` names it in its next steps, and `PUBLISHING.md` now
+  describes the current single-repository release rather than a planned move out
+  of a monorepo. Covered by `scripts/index_release_test.go`, which drives the
+  script against local stand-ins for both services. (#70)
+
 ## [0.26.3] - 2026-09-10
 
 ### Changed
