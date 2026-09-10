@@ -24,7 +24,7 @@ JET := "                    $(MAGENTA)●$(RESET)\n                    $(PURPLE)
 # ASCII Banner for ekoDB (matches CLI banner)
 BANNER := "$(BOLD) ██████═╗ ██╗  ██╗  ██████╗  ████████╗ ████████╗$(RESET)\n$(BOLD)██╔═══██╝ ██║ ██╔╝ ██╔═══██╗  ██╔═══██║ ██╔═══██╗$(RESET)\n$(BOLD)████████╗ █████╔╝  ██║   ██║  ██║   ██║████████╔╝$(RESET)\n$(BOLD)██╔═════╝ ██╔═██╗  ██║   ██║  ██║   ██║ ██╔═══██╗$(RESET)\n$(BOLD)████████╗ ██║  ██╗ ╚██████╔╝ ████████║ ████████╔╝$(RESET)\n$(BOLD)╚═══════╝ ╚═╝  ╚═╝  ╚═════╝  ╚═══════╝ ╚═══════╝$(RESET)"
 
-.PHONY: all build test test-verbose test-coverage clean fmt fmt-go fmt-md fmt-check format lint lint-fix ensure-golangci-lint vet mod-tidy mod-verify mod-download install help setup deps-check deps-update publish bump-version check-ready examples pre-commit ensure-hooks version info
+.PHONY: all build test test-verbose test-coverage clean fmt fmt-go fmt-md fmt-check format lint lint-fix ensure-golangci-lint vet mod-tidy mod-verify mod-download install help setup deps-check deps-update publish bump-version index-release check-ready examples pre-commit ensure-hooks version info
 
 # Language Sub-Banner
 GO_BANNER := \
@@ -71,6 +71,7 @@ help:
 	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
 	@echo "  🚀 $(GREEN)make publish$(RESET)        - Publish new version (runs publish.sh)"
 	@echo "  🔢 $(GREEN)make bump-version$(RESET)   - Bump version and create git tag"
+	@echo "  📚 $(GREEN)make index-release$(RESET)  - Make a pushed tag visible on pkg.go.dev (VERSION=vX.Y.Z)"
 	@echo "  ✅ $(GREEN)make check-ready$(RESET)    - Check if ready to publish"
 	@echo ""
 	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
@@ -321,8 +322,14 @@ bump-version:
 	echo "$(YELLOW)💡 Next steps:$(RESET)"; \
 	echo "  1. Push tag: git push origin $$NEW_VERSION"; \
 	echo "  2. Push commits: git push origin main"; \
-	echo "  3. Wait for pkg.go.dev to index (a few minutes)"; \
+	echo "  3. Make it visible on pkg.go.dev: make index-release VERSION=$$NEW_VERSION"; \
 	echo "  4. Users can install: go get $(MODULE)@$$NEW_VERSION"
+
+# Neither the module proxy nor pkg.go.dev watches GitHub, so a pushed tag is
+# not on pkg.go.dev until something asks for it. This runs the three requests
+# that make it appear and succeeds only once the version page renders.
+index-release: ## Make a pushed tag visible on pkg.go.dev (VERSION=vX.Y.Z)
+	@bash scripts/index-release.sh "$(VERSION)"
 
 # Run example programs from ekodb-client repository
 test-examples:
