@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.2] - 2026-09-08
+
+### Fixed
+
+- **Search responses now expose `execution_time_ms`.** The Go client previously
+  only modeled the obsolete `took_ms` key, so the server's execution timing was
+  silently discarded. `TookMs` remains for compatibility with older response
+  shapes; Go callers should use `ExecutionTimeMs` for the ekoDB contract.
+
 ## [0.26.1] - 2026-09-07
 
 ### Fixed
