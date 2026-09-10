@@ -19,19 +19,20 @@
 # accepts the connection and never answers cannot hang a release. The worst
 # case per polled step is INDEX_ATTEMPTS x (REQUEST_TIMEOUT + INDEX_SLEEP),
 # about 20 minutes at the defaults against a server that never answers, and a
-# tag that is not on origin costs the full INDEX_ATTEMPTS x INDEX_SLEEP (five
-# minutes at the defaults) before step 1 gives up: the proxy's 404 for a tag it
-# has not fetched yet is the same 404 it gives for one that does not exist.
+# tag that is not on origin costs (INDEX_ATTEMPTS - 1) x INDEX_SLEEP, just
+# under five minutes at the defaults, before step 1 gives up: the proxy's 404
+# for a tag it has not fetched yet is the same 404 it gives for one that does
+# not exist.
 #
 # Usage: scripts/index-release.sh vX.Y.Z
 #
 # Environment (overridable, used by the tests to point at local stubs):
 #   GOPROXY_URL     default https://proxy.golang.org
 #   PKGSITE_URL     default https://pkg.go.dev
-#   INDEX_ATTEMPTS  polls per polled step, an integer >= 1 (default 30)
-#   INDEX_SLEEP     seconds between polls, an integer >= 0 (default 10)
-#   CONNECT_TIMEOUT seconds to establish each connection, >= 1 (default 10)
-#   REQUEST_TIMEOUT seconds for each whole request, >= 1 (default 30)
+#   INDEX_ATTEMPTS  polls per polled step, 1 to 99999 (default 30)
+#   INDEX_SLEEP     seconds between polls, 0 to 99999 (default 10)
+#   CONNECT_TIMEOUT seconds to establish each connection, 1 to 99999 (default 10)
+#   REQUEST_TIMEOUT seconds for each whole request, 1 to 99999 (default 30)
 #
 # Exit codes: 0 indexed; 1 a request failed (the URL and status are printed,
 # with curl's own message when the request could not be made at all); 2 bad
@@ -50,17 +51,19 @@ if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "usage: $0 vX.Y.Z (got '${version}')" >&2
   exit 2
 fi
-# The settings are matched as decimal digit strings with no leading zero, and
-# never evaluated arithmetically here: bash reads "08" as octal and errors,
-# and an error inside an `||` chain would skip the check instead of failing it.
+# The settings are matched as decimal digit strings with no leading zero and
+# at most five digits, and never evaluated arithmetically here: bash reads
+# "08" as octal and errors, an error inside an `||` chain would skip the check
+# instead of failing it, and a value past 2^63 wraps negative in the loop
+# counter and silently runs zero attempts.
 for setting in INDEX_ATTEMPTS CONNECT_TIMEOUT REQUEST_TIMEOUT; do
-  if [[ ! "${!setting}" =~ ^[1-9][0-9]*$ ]]; then
-    echo "${setting} must be an integer >= 1 (got '${!setting}')" >&2
+  if [[ ! "${!setting}" =~ ^[1-9][0-9]{0,4}$ ]]; then
+    echo "${setting} must be an integer from 1 to 99999 (got '${!setting}')" >&2
     exit 2
   fi
 done
-if [[ ! "$INDEX_SLEEP" =~ ^(0|[1-9][0-9]*)$ ]]; then
-  echo "INDEX_SLEEP must be an integer >= 0 (got '${INDEX_SLEEP}')" >&2
+if [[ ! "$INDEX_SLEEP" =~ ^(0|[1-9][0-9]{0,4})$ ]]; then
+  echo "INDEX_SLEEP must be an integer from 0 to 99999 (got '${INDEX_SLEEP}')" >&2
   exit 2
 fi
 

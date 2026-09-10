@@ -8,7 +8,6 @@ package scripts_test
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -147,20 +146,29 @@ func runScript(t *testing.T, script, proxyURL, siteURL string, p polling, args .
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
+	start := time.Now()
 	err := cmd.Run()
-	if ctx.Err() != nil {
-		t.Fatalf("script did not finish within %v:\n%s", runDeadline, out.String())
-	}
 	code := 0
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		code = exitErr.ExitCode()
+		// A process ended by a signal reports -1; with the deadline passed
+		// that is the runner's kill, and only that combination is a timeout,
+		// so a run that exited on its own just before the deadline keeps its
+		// real exit code.
+		if code == -1 && ctx.Err() != nil {
+			t.Fatalf("script did not finish within %v (killed after %v):\n%s", runDeadline, time.Since(start), out.String())
+		}
 	} else if err != nil {
 		t.Fatalf("running script: %v", err)
 	}
 	return code, out.String()
 }
 
-// closedPort returns a loopback URL nothing is listening on.
+// closedPort returns a loopback URL nothing is listening on. It relies on the
+// kernel not handing the just-released ephemeral port to another listener
+// started by this process during the test; if that ever happened the run
+// would see an HTTP status instead of a refused connection and the calling
+// test would fail, never pass, so a flake here is loud rather than silent.
 func closedPort(t *testing.T) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -441,8 +449,14 @@ func TestIndexRelease_RejectsInvalidPollingBeforeAnyRequest(t *testing.T) {
 		{attempts: "3", sleep: "x"},
 		{attempts: "3", sleep: "-1"},
 		{attempts: "3", sleep: "08"},
+		// past five digits: 2^63 wrapped the loop counter negative and ran
+		// zero attempts while claiming otherwise
+		{attempts: "100000", sleep: "0"},
+		{attempts: "9223372036854775808", sleep: "0"},
+		{attempts: "3", sleep: "100000"},
 		{attempts: "3", sleep: "0", timeout: "0"},
 		{attempts: "3", sleep: "0", timeout: "abc"},
+		{attempts: "3", sleep: "0", timeout: "100000"},
 	} {
 		code, out := run(t, proxyURL, siteURL, p, version)
 		if code != 2 {
@@ -524,7 +538,9 @@ func TestIndexRelease_MissingOrIncompleteGoModFailsBeforeAnyRequest(t *testing.T
 		if !strings.Contains(out, "could not read the module path from") {
 			t.Errorf("%s go.mod: expected the script's own message, got:\n%s", name, out)
 		}
-		if strings.Contains(out, fmt.Sprintf("awk: can't open")) {
+		// awk's own diagnostics differ between BSD and GNU/mawk in wording
+		// but all carry the "awk:" prefix, so that is what must be absent.
+		if strings.Contains(out, "awk:") {
 			t.Errorf("%s go.mod: awk's error must not reach the operator, got:\n%s", name, out)
 		}
 	}
