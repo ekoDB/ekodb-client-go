@@ -16,7 +16,12 @@
 # apart: step 1 because it runs seconds after the tag push and the proxy's
 # first fetch from origin is not instant, step 3 because pkg.go.dev processes
 # the fetch asynchronously. Every request carries a timeout, so a server that
-# accepts the connection and never answers cannot hang a release.
+# accepts the connection and never answers cannot hang a release. The worst
+# case per polled step is INDEX_ATTEMPTS x (REQUEST_TIMEOUT + INDEX_SLEEP),
+# about 20 minutes at the defaults against a server that never answers, and a
+# tag that is not on origin costs the full INDEX_ATTEMPTS x INDEX_SLEEP (five
+# minutes at the defaults) before step 1 gives up: the proxy's 404 for a tag it
+# has not fetched yet is the same 404 it gives for one that does not exist.
 #
 # Usage: scripts/index-release.sh vX.Y.Z
 #
@@ -25,6 +30,8 @@
 #   PKGSITE_URL     default https://pkg.go.dev
 #   INDEX_ATTEMPTS  polls per polled step, an integer >= 1 (default 30)
 #   INDEX_SLEEP     seconds between polls, an integer >= 0 (default 10)
+#   CONNECT_TIMEOUT seconds to establish each connection, >= 1 (default 10)
+#   REQUEST_TIMEOUT seconds for each whole request, >= 1 (default 30)
 #
 # Exit codes: 0 indexed; 1 a request failed (the URL and status are printed,
 # with curl's own message when the request could not be made at all); 2 bad
@@ -35,26 +42,34 @@ GOPROXY_URL="${GOPROXY_URL:-https://proxy.golang.org}"
 PKGSITE_URL="${PKGSITE_URL:-https://pkg.go.dev}"
 INDEX_ATTEMPTS="${INDEX_ATTEMPTS:-30}"
 INDEX_SLEEP="${INDEX_SLEEP:-10}"
-CONNECT_TIMEOUT=10
-REQUEST_TIMEOUT=30
+CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-10}"
+REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-30}"
 
 version="${1:-}"
 if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "usage: $0 vX.Y.Z (got '${version}')" >&2
   exit 2
 fi
-if [[ ! "$INDEX_ATTEMPTS" =~ ^[0-9]+$ ]] || (( INDEX_ATTEMPTS < 1 )); then
-  echo "INDEX_ATTEMPTS must be an integer >= 1 (got '${INDEX_ATTEMPTS}')" >&2
-  exit 2
-fi
-if [[ ! "$INDEX_SLEEP" =~ ^[0-9]+$ ]]; then
+# The settings are matched as decimal digit strings with no leading zero, and
+# never evaluated arithmetically here: bash reads "08" as octal and errors,
+# and an error inside an `||` chain would skip the check instead of failing it.
+for setting in INDEX_ATTEMPTS CONNECT_TIMEOUT REQUEST_TIMEOUT; do
+  if [[ ! "${!setting}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "${setting} must be an integer >= 1 (got '${!setting}')" >&2
+    exit 2
+  fi
+done
+if [[ ! "$INDEX_SLEEP" =~ ^(0|[1-9][0-9]*)$ ]]; then
   echo "INDEX_SLEEP must be an integer >= 0 (got '${INDEX_SLEEP}')" >&2
   exit 2
 fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 go_mod="${script_dir}/../go.mod"
-module="$(awk '$1 == "module" { print $2; exit }' "$go_mod")"
+module=""
+if [[ -f "$go_mod" ]]; then
+  module="$(awk '$1 == "module" { print $2; exit }' "$go_mod")"
+fi
 if [[ -z "$module" ]]; then
   echo "could not read the module path from ${go_mod}" >&2
   exit 1

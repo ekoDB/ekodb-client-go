@@ -46,8 +46,14 @@ succeeds only once the version page renders:
 3. `GET https://pkg.go.dev/github.com/ekoDB/ekodb-client-go@vX.Y.Z` until it
    returns 200
 
-Every request has a connect timeout of 10 seconds and an overall timeout of 30,
-so an unresponsive server ends the run instead of hanging it.
+Every request has a connect timeout of 10 seconds and an overall timeout of 30
+(`CONNECT_TIMEOUT` and `REQUEST_TIMEOUT`), so an unresponsive server ends the
+run instead of hanging it. The bound is per request, not per run: each polled
+step can take up to `INDEX_ATTEMPTS x (REQUEST_TIMEOUT + INDEX_SLEEP)`, about 20
+minutes at the defaults against a server that never answers. A tag that is not
+on origin costs the full `INDEX_ATTEMPTS x INDEX_SLEEP`, five minutes at the
+defaults, before step 1 gives up, because the proxy's 404 for a tag it has not
+fetched yet is the same 404 it gives for one that does not exist.
 
 It can be run on its own for a tag that was pushed some other way:
 
@@ -60,10 +66,11 @@ status was obtained), when the proxy has not served the version after
 `INDEX_ATTEMPTS` polls `INDEX_SLEEP` seconds apart (the tag is not on origin, or
 points at a commit without a `go.mod`), when pkg.go.dev reports the version as
 not found, or when the page has not rendered after the same number of polls. The
-defaults are 30 attempts and 10 seconds; both must be integers, and the script
-exits 2 before any request when they are not, or when the version is not of the
-form `vX.Y.Z`. Its tests live in `scripts/index_release_test.go` and run as part
-of `go test ./...`.
+defaults are 30 attempts and 10 seconds. `INDEX_ATTEMPTS`, `CONNECT_TIMEOUT` and
+`REQUEST_TIMEOUT` must be integers of at least 1 and `INDEX_SLEEP` an integer of
+at least 0, written as plain decimals; the script exits 2 before any request
+when they are not, or when the version is not of the form `vX.Y.Z`. Its tests
+live in `scripts/index_release_test.go` and run as part of `go test ./...`.
 
 ## Tagging without publishing
 
