@@ -1,8 +1,9 @@
 name: release
 
 # A chore(*): vX.Y.Z cap merged to main cuts the tag, publishes the Release
-# from the CHANGELOG block, and runs the pkg.go.dev index step. This module
-# has no manifest: the version is cross-checked against the changelog heading.
+# from the CHANGELOG block, and runs the pkg.go.dev index step. version.json
+# is the module's manifest (stamped by `make bump-version`); the cap subject is
+# cross-checked against it.
 #
 # The cap must reach main with its subject intact: rebase-merge it (the
 # convention here). A squash appends the PR number and a merge commit replaces
@@ -19,4 +20,5 @@ jobs:
   auto-tag:
     uses: ekoDB/ekodb-workflows-public/.github/workflows/auto-tag.yml@v1
     with:
+      version-command: jq -r .version version.json
       post-tag-command: make index-release VERSION="$TAG"

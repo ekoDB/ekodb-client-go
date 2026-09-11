@@ -29,15 +29,12 @@ if [ ! -d ".git" ]; then
     echo "  3. git commit -m 'Initial commit'"
     echo "  4. git remote add origin git@github.com:ekoDB/ekodb-client-go.git"
     echo "  5. git push -u origin main"
-    echo "  6. Collapse [Unreleased] in CHANGELOG.md into '## [X.Y.Z] - YYYY-MM-DD', commit it as chore(*): vX.Y.Z, and push main; CI tags and publishes the Release"
+    echo "  6. make bump-version VERSION=X.Y.Z, commit CHANGELOG.md and version.json as chore(*): vX.Y.Z, and push main; CI tags and publishes the Release"
     echo ""
     echo "After that, users can install with:"
     echo "  go get github.com/ekoDB/ekodb-client-go@v0.1.0"
     exit 0
 fi
-
-# Get latest git tag
-LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
 
 # Run tests
 echo ""
@@ -64,15 +61,14 @@ if [[ -n $(git status -s) ]]; then
     fi
 fi
 
-# Prompt for new version
-echo ""
-read -p "Enter new version (e.g. the latest tag: '$LATEST_TAG'): " NEW_VERSION
-
-# Validate version format
+# The version is the manifest's: version.json, stamped by `make bump-version`.
+NEW_VERSION="v$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' version.json)"
 if [[ ! $NEW_VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "❌ Error: Version must be in format vX.Y.Z (e.g., v0.1.0)"
+    echo "❌ Error: version.json does not carry a plain X.Y.Z version (read '${NEW_VERSION#v}'); run make bump-version VERSION=X.Y.Z first"
     exit 1
 fi
+echo ""
+echo "📦 Version (version.json): $NEW_VERSION"
 
 # The tag is cut by CI. A cap commit `chore(*): vX.Y.Z` on main triggers
 # .github/workflows/release.yml, which tags, publishes the Release and runs
@@ -81,7 +77,7 @@ fi
 subject="$(git log -1 --format=%s)"
 cap_re="^chore(\\([^)]*\\))?: ${NEW_VERSION//./\\.}\$"
 if ! [[ "$subject" =~ $cap_re ]]; then
-    echo "❌ The head commit '$subject' is not the cap 'chore(<scope>): $NEW_VERSION' that CI tags. Cut the cap first (collapse [Unreleased] into ## [${NEW_VERSION#v}] - YYYY-MM-DD, that date shape exactly), then run this."
+    echo "❌ The head commit '$subject' is not the cap 'chore(<scope>): $NEW_VERSION' that CI tags. Cut the cap first (make bump-version VERSION=${NEW_VERSION#v}, then commit CHANGELOG.md and version.json as chore(*): $NEW_VERSION), then run this from main."
     exit 1
 fi
 branch="$(git rev-parse --abbrev-ref HEAD)"

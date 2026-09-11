@@ -70,7 +70,7 @@ help:
 	@echo "🚀 $(CYAN)PUBLISHING$(RESET)"
 	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
 	@echo "  🚀 $(GREEN)make publish$(RESET)        - Publish new version (runs publish.sh)"
-	@echo "  🔢 $(GREEN)make bump-version$(RESET)   - Run the tests for a candidate vX.Y.Z and print the release steps; CI cuts the tag on the cap merge"
+	@echo "  🔢 $(GREEN)make bump-version$(RESET)   - Collapse [Unreleased] and stamp version.json (VERSION=X.Y.Z); commit as chore(*): vX.Y.Z, CI cuts the tag"
 	@echo "  📚 $(GREEN)make index-release$(RESET)  - Make a pushed tag visible on pkg.go.dev (VERSION=vX.Y.Z)"
 	@echo "  ✅ $(GREEN)make check-ready$(RESET)    - Check if ready to publish"
 	@echo ""
@@ -287,40 +287,23 @@ publish: check-ready
 	@chmod +x publish.sh
 	@./publish.sh
 
-# Check a candidate version: tests, then the release steps. Nothing is written,
-# tagged or pushed here; CI cuts the tag when the cap merges to main.
+# Cut the cap's file changes: collapse [Unreleased] into a dated block and stamp
+# version.json, the module's version manifest (as in the other Go repositories).
+# Nothing is tagged or pushed here: commit the two files as `chore(*): vX.Y.Z`,
+# and CI cuts the tag when that cap merges to main. Tested by
+# scripts/bump_version_test.go against a copy of this Makefile.
 bump-version:
-	@echo "🔢 $(CYAN)Checking a candidate version...$(RESET)"
-	@echo ""
-	@LATEST_TAG=$$(git describe --tags --abbrev=0 2>/dev/null || echo "none"); \
-	echo ""; \
-	read -p "Enter new version (e.g. the latest tag: '$$LATEST_TAG'): " NEW_VERSION; \
-	if [ -z "$$NEW_VERSION" ]; then \
-		echo "$(RED)❌ No version provided$(RESET)"; \
-		exit 1; \
-	fi; \
-	if [[ ! $$NEW_VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$$ ]]; then \
-		echo "$(RED)❌ Version must be in format vX.Y.Z (e.g., v0.2.0)$(RESET)"; \
-		exit 1; \
-	fi; \
-	echo ""; \
-	echo "$(YELLOW)📦 New version: $$NEW_VERSION$(RESET)"; \
-	echo ""; \
-	read -p "Continue? (y/N): " -n 1 -r; \
-	echo; \
-	if [[ ! $$REPLY =~ ^[Yy]$$ ]]; then \
-		echo "$(RED)❌ Cancelled$(RESET)"; \
-		exit 1; \
-	fi; \
-	echo ""; \
-	echo "$(CYAN)Running tests for $$NEW_VERSION (no tag is created here; CI cuts it on the cap merge)...$(RESET)"; \
-	$(GO) test ./... -race || { echo "$(RED)❌ Tests failed$(RESET)"; exit 1; }; \
-	echo ""; \
-	echo "$(YELLOW)💡 Next steps:$(RESET)"; \
-	echo "  1. Cut the cap: collapse [Unreleased] in CHANGELOG.md into '## [$${NEW_VERSION#v}] - YYYY-MM-DD' (that date shape exactly; the gate accepts no other) and commit it as 'chore(*): $$NEW_VERSION'"; \
-	echo "  2. Land it on main (push, or merge its PR): CI cuts the tag, publishes the Release and runs make index-release"; \
-	echo "  3. Watch: gh run list --workflow release.yml --limit 1"; \
-	echo "  4. Users can install: go get $(MODULE)@$$NEW_VERSION"
+	@[ -n "$(VERSION)" ] || { echo "usage: make bump-version VERSION=X.Y.Z"; exit 2; }
+	@printf '%s' "$(VERSION)" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$$' || { echo "VERSION must be plain X.Y.Z (no v, no pre-release suffix)"; exit 2; }
+	@grep -q '^## \[Unreleased\]$$' CHANGELOG.md || { echo "CHANGELOG.md has no [Unreleased] block to collapse"; exit 1; }
+	@sed -i.bak "s/^## \[Unreleased\]$$/## [$(VERSION)] - $$(date -u +%Y-%m-%d)/" CHANGELOG.md && rm -f CHANGELOG.md.bak
+	@printf '{\n  "version": "%s"\n}\n' "$(VERSION)" > version.json
+	@echo "$(GREEN)collapsed [Unreleased] into [$(VERSION)] and stamped version.json$(RESET)"
+	@echo "$(YELLOW)💡 Next steps:$(RESET)"
+	@echo "  1. Commit the cap: git add CHANGELOG.md version.json && git commit -m 'chore(*): v$(VERSION)' (any other subject is not a cap and cuts no tag)"
+	@echo "  2. Land it on main (rebase-merge its PR): CI cuts the tag, publishes the Release and runs make index-release"
+	@echo "  3. Watch: gh run list --workflow release.yml --limit 1"
+	@echo "  4. Users can install: go get $(MODULE)@v$(VERSION)"
 
 # Neither the module proxy nor pkg.go.dev watches GitHub, so a pushed tag is
 # not on pkg.go.dev until something asks for it. This runs the three requests
@@ -359,8 +342,8 @@ format: fmt
 
 # Show current version
 version:
-	@echo "📌 $(CYAN)Current version:$(RESET)"
-	@git describe --tags --abbrev=0 2>/dev/null || echo "$(YELLOW)No tags found$(RESET)"
+	@echo "📌 $(CYAN)Version (version.json):$(RESET) $$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' version.json)"
+	@echo "🏷️  $(CYAN)Newest tag:$(RESET) $$(git describe --tags --abbrev=0 2>/dev/null || echo "none")"
 	@echo ""
 	@echo "📦 $(CYAN)Module:$(RESET) $(MODULE)"
 	@echo "🔷 $(CYAN)Go version:$(RESET) $$(go version | awk '{print $$3}')"

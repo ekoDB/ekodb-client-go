@@ -13,8 +13,8 @@ make publish
 clean working tree) and then `publish.sh`, which:
 
 1. runs the tests and `go mod tidy`
-2. prompts for the new version (`vX.Y.Z`) and checks that the head commit is the
-   cap `chore(<scope>): vX.Y.Z`
+2. reads the version from `version.json` and checks that the head commit is the
+   cap `chore(<scope>): vX.Y.Z` for it
 3. pushes `main` — and refuses first unless `main` is the branch you are on,
    since CI tags a cap only once it is there
 
@@ -77,14 +77,16 @@ request when they are not, or when the version is not of the form `vX.Y.Z`. Its
 tests live in `scripts/index_release_test.go` and run as part of
 `go test ./...`.
 
-## Checking a version before capping
+## Cutting the cap
 
-`make bump-version` runs the tests against a candidate `vX.Y.Z` and prints the
-next steps — cut the cap (collapse `[Unreleased]` in `CHANGELOG.md` into
-`## [X.Y.Z] - YYYY-MM-DD`, that date shape exactly, and commit it as
-`chore(*): vX.Y.Z`), land it on `main`, watch `release.yml`, the install command
-— without writing, tagging or pushing anything itself; the tag is CI's, cut once
-the cap commit lands.
+`version.json` is the module's version manifest, as in the other Go
+repositories. `make bump-version VERSION=X.Y.Z` collapses `[Unreleased]` in
+`CHANGELOG.md` into `## [X.Y.Z] - <today>` and stamps `version.json`; it refuses
+a missing `VERSION`, a pre-release or `v`-prefixed one, and a changelog with no
+`[Unreleased]` block, and it neither tags nor pushes. Commit the two files as
+`chore(*): vX.Y.Z` and land that on `main`: the release workflow cross-checks
+the cap subject against `version.json` before it tags. The target's tests live
+in `scripts/bump_version_test.go` and run as part of `go test ./...`.
 
 ## Installation
 
