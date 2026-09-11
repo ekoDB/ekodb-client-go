@@ -317,9 +317,10 @@ bump-version:
 	$(GO) test ./... -race || { echo "$(RED)❌ Tests failed$(RESET)"; exit 1; }; \
 	echo ""; \
 	echo "$(YELLOW)💡 Next steps:$(RESET)"; \
-	echo "  1. Push main: git push origin main -- CI cuts the tag, publishes the Release and runs make index-release"; \
-	echo "  2. Watch: gh run list --workflow release.yml --limit 1"; \
-	echo "  3. Users can install: go get $(MODULE)@$$NEW_VERSION"
+	echo "  1. Cut the cap: collapse [Unreleased] in CHANGELOG.md into '## [$${NEW_VERSION#v}] - <date>' and commit it as 'chore(*): $$NEW_VERSION'"; \
+	echo "  2. Land it on main (push, or merge its PR): CI cuts the tag, publishes the Release and runs make index-release"; \
+	echo "  3. Watch: gh run list --workflow release.yml --limit 1"; \
+	echo "  4. Users can install: go get $(MODULE)@$$NEW_VERSION"
 
 # Neither the module proxy nor pkg.go.dev watches GitHub, so a pushed tag is
 # not on pkg.go.dev until something asks for it. This runs the three requests
