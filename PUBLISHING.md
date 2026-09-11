@@ -13,14 +13,14 @@ make publish
 clean working tree) and then `publish.sh`, which:
 
 1. runs the tests and `go mod tidy`
-2. prompts for the new version (`vX.Y.Z`) and checks that the head commit is
-   the cap `chore(<scope>): vX.Y.Z`
+2. prompts for the new version (`vX.Y.Z`) and checks that the head commit is the
+   cap `chore(<scope>): vX.Y.Z`
 3. pushes `main`
 
-The cap merging to `main` is the release: `.github/workflows/release.yml`
-tags itself, publishes the GitHub Release from the `CHANGELOG.md` block, and
-runs `scripts/index-release.sh` to make the tag visible on pkg.go.dev.
-`publish.sh` neither creates nor pushes a tag — CI does both. Watch it with:
+The cap merging to `main` is the release: `.github/workflows/release.yml` tags
+itself, publishes the GitHub Release from the `CHANGELOG.md` block, and runs
+`scripts/index-release.sh` to make the tag visible on pkg.go.dev. `publish.sh`
+neither creates nor pushes a tag — CI does both. Watch it with:
 
 ```bash
 gh run list --repo ekoDB/ekodb-client-go --workflow release.yml --limit 1
