@@ -70,7 +70,7 @@ help:
 	@echo "🚀 $(CYAN)PUBLISHING$(RESET)"
 	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
 	@echo "  🚀 $(GREEN)make publish$(RESET)        - Publish new version (runs publish.sh)"
-	@echo "  🔢 $(GREEN)make bump-version$(RESET)   - Bump the version; CI cuts the tag on the cap merge"
+	@echo "  🔢 $(GREEN)make bump-version$(RESET)   - Run the tests for a candidate vX.Y.Z and print the release steps; CI cuts the tag on the cap merge"
 	@echo "  📚 $(GREEN)make index-release$(RESET)  - Make a pushed tag visible on pkg.go.dev (VERSION=vX.Y.Z)"
 	@echo "  ✅ $(GREEN)make check-ready$(RESET)    - Check if ready to publish"
 	@echo ""
@@ -287,9 +287,10 @@ publish: check-ready
 	@chmod +x publish.sh
 	@./publish.sh
 
-# Bump the version (the tag is cut by CI when the cap merges to main)
+# Check a candidate version: tests, then the release steps. Nothing is written,
+# tagged or pushed here; CI cuts the tag when the cap merges to main.
 bump-version:
-	@echo "🔢 $(CYAN)Bumping version...$(RESET)"
+	@echo "🔢 $(CYAN)Checking a candidate version...$(RESET)"
 	@echo ""
 	@LATEST_TAG=$$(git describe --tags --abbrev=0 2>/dev/null || echo "none"); \
 	echo ""; \
@@ -312,7 +313,7 @@ bump-version:
 		exit 1; \
 	fi; \
 	echo ""; \
-	echo "$(CYAN)Running tests before tagging...$(RESET)"; \
+	echo "$(CYAN)Running tests for $$NEW_VERSION (no tag is created here; CI cuts it on the cap merge)...$(RESET)"; \
 	$(GO) test ./... -race || { echo "$(RED)❌ Tests failed$(RESET)"; exit 1; }; \
 	echo ""; \
 	echo "$(YELLOW)💡 Next steps:$(RESET)"; \

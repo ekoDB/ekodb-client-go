@@ -3,6 +3,10 @@ name: release
 # A chore(*): vX.Y.Z cap merged to main cuts the tag, publishes the Release
 # from the CHANGELOG block, and runs the pkg.go.dev index step. This module
 # has no manifest: the version is cross-checked against the changelog heading.
+#
+# The cap must reach main with its subject intact: rebase-merge it (the
+# convention here). A squash appends the PR number and a merge commit replaces
+# the subject, and either makes the cap a silent, green no-op.
 
 on:
   push:
