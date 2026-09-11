@@ -10,7 +10,7 @@ if [ ! -f "go.mod" ]; then
     exit 1
 fi
 
-# Get current version from go.mod or use git tags
+# The module path, from go.mod
 MODULE=$(grep '^module ' go.mod | awk '{print $2}')
 echo "📦 Module: $MODULE"
 
