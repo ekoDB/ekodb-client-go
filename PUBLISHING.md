@@ -23,6 +23,10 @@ itself, publishes the GitHub Release from the `CHANGELOG.md` block, and runs
 `scripts/index-release.sh` to make the tag visible on pkg.go.dev. `publish.sh`
 neither creates nor pushes a tag — CI does both. Watch it with:
 
+A red run after the Release is published means the index step failed on its
+own (a proxy or pkg.go.dev timeout): the tag and the Release are real, and
+`make index-release VERSION=vX.Y.Z` finishes the job by hand.
+
 ```bash
 gh run list --repo ekoDB/ekodb-client-go --workflow release.yml --limit 1
 ```
@@ -77,7 +81,8 @@ tests live in `scripts/index_release_test.go` and run as part of
 
 `make bump-version` runs the tests against a candidate `vX.Y.Z` and prints the
 next steps — cut the cap (collapse `[Unreleased]` in `CHANGELOG.md` into
-`## [X.Y.Z] - <date>` and commit it as `chore(*): vX.Y.Z`), land it on `main`,
+`## [X.Y.Z] - YYYY-MM-DD`, that date shape exactly, and commit it as
+`chore(*): vX.Y.Z`), land it on `main`,
 watch `release.yml`, the install command — without writing, tagging or pushing
 anything itself; the tag is CI's, cut once the cap commit lands.
 
