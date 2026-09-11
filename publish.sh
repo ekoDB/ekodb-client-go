@@ -62,6 +62,10 @@ if [[ -n $(git status -s) ]]; then
 fi
 
 # The version is the manifest's: version.json, stamped by `make bump-version`.
+if [ ! -f version.json ]; then
+    echo "❌ Error: version.json is missing; run make bump-version VERSION=X.Y.Z first"
+    exit 1
+fi
 NEW_VERSION="v$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' version.json)"
 if [[ ! $NEW_VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "❌ Error: version.json does not carry a plain X.Y.Z version (read '${NEW_VERSION#v}'); run make bump-version VERSION=X.Y.Z first"
