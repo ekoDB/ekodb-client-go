@@ -29,7 +29,7 @@ if [ ! -d ".git" ]; then
     echo "  3. git commit -m 'Initial commit'"
     echo "  4. git remote add origin git@github.com:ekoDB/ekodb-client-go.git"
     echo "  5. git push -u origin main"
-    echo "  6. make bump-version, commit it as chore(*): vX.Y.Z, and push main; CI tags and publishes the Release"
+    echo "  6. Collapse [Unreleased] in CHANGELOG.md into '## [X.Y.Z] - YYYY-MM-DD', commit it as chore(*): vX.Y.Z, and push main; CI tags and publishes the Release"
     echo ""
     echo "After that, users can install with:"
     echo "  go get github.com/ekoDB/ekodb-client-go@v0.1.0"
