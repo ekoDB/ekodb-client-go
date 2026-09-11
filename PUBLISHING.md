@@ -82,11 +82,13 @@ tests live in `scripts/index_release_test.go` and run as part of
 `version.json` is the module's version manifest, as in the other Go
 repositories. `make bump-version VERSION=X.Y.Z` collapses `[Unreleased]` in
 `CHANGELOG.md` into `## [X.Y.Z] - <today>` and stamps `version.json`; it refuses
-a missing `VERSION`, a pre-release or `v`-prefixed one, and a changelog with no
-`[Unreleased]` block, and it neither tags nor pushes. Commit the two files as
-`chore(*): vX.Y.Z` and land that on `main`: the release workflow cross-checks
-the cap subject against `version.json` before it tags. The target's tests live
-in `scripts/bump_version_test.go` and run as part of `go test ./...`.
+a missing `VERSION`, a pre-release or `v`-prefixed one, a changelog with no
+`[Unreleased]` block or an empty one, the version already stamped, a version the
+changelog already released, and a version that already has a tag; it neither
+tags nor pushes. Commit the two files as `chore(*): vX.Y.Z` and land that on
+`main`: the release workflow cross-checks the cap subject against `version.json`
+before it tags. The target's tests live in `scripts/bump_version_test.go` and
+run as part of `go test ./...`.
 
 ## Installation
 

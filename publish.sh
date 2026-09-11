@@ -15,7 +15,7 @@ MODULE=$(grep '^module ' go.mod | awk '{print $2}')
 echo "📦 Module: $MODULE"
 
 # Check if git is initialized
-if [ ! -d ".git" ]; then
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
     echo ""
     echo "⚠️  This directory is not a git repository."
     echo "For Go modules, you need to:"

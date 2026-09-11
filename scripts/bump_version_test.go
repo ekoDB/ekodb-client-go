@@ -2,10 +2,10 @@ package scripts_test
 
 // Drives the Makefile's bump-version target against a copy of the Makefile in
 // a temporary directory: the cap's file changes (the changelog collapse and the
-// version.json stamp) in one direction, and every refusal in the other (bad
-// version, missing block, empty block, already-stamped or already-released
-// version), so a cap cut
-// with it is what the release workflow's gates expect.
+// version.json stamp) in one direction, and every refusal in the other (no
+// version, a bad one, a missing or empty block, a version already stamped,
+// already released in the changelog, or already tagged), so a cap cut with it
+// is what the release workflow's gates expect.
 
 import (
 	"errors"
@@ -156,6 +156,30 @@ func TestBumpVersionRefusesAVersionTheChangelogAlreadyReleased(t *testing.T) {
 		t.Errorf("exit %d, want the already-released refusal:\n%s", code, out)
 	}
 	if readFixture(t, dir, "CHANGELOG.md") != bumpChangelog || !strings.Contains(readFixture(t, dir, "version.json"), "0.0.2") {
+		t.Errorf("a refused bump changed the files")
+	}
+}
+
+func TestBumpVersionRefusesAVersionThatAlreadyHasATag(t *testing.T) {
+	dir := bumpFixture(t)
+	// The fixture becomes a git repository carrying a tag the changelog does not
+	// mention, so only the tag can refuse this version.
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "init"},
+		{"tag", "v0.0.5"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	out, code := runBump(t, dir, "VERSION=0.0.5")
+	if code == 0 || !strings.Contains(out, "tag v0.0.5 already exists") {
+		t.Errorf("exit %d, want the existing-tag refusal:\n%s", code, out)
+	}
+	if readFixture(t, dir, "CHANGELOG.md") != bumpChangelog || readFixture(t, dir, "version.json") != bumpManifest {
 		t.Errorf("a refused bump changed the files")
 	}
 }
