@@ -27,7 +27,7 @@ and this project adheres to
   page until it renders, failing with the URL and status otherwise; every
   request carries a timeout, the proxy step retries within the same budget
   because its first fetch from origin is not instant after a push, and invalid
-  poll settings are rejected before any request. the release workflow runs it
+  poll settings are rejected before any request. The release workflow runs it
   after the Release is published, `make index-release VERSION=vX.Y.Z` runs it
   alone, `make bump-version` names it in its next steps, and `PUBLISHING.md` now
   describes the current single-repository release rather than a planned move out
