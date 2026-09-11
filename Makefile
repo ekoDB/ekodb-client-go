@@ -70,7 +70,7 @@ help:
 	@echo "🚀 $(CYAN)PUBLISHING$(RESET)"
 	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
 	@echo "  🚀 $(GREEN)make publish$(RESET)        - Publish new version (runs publish.sh)"
-	@echo "  🔢 $(GREEN)make bump-version$(RESET)   - Bump version and create git tag"
+	@echo "  🔢 $(GREEN)make bump-version$(RESET)   - Bump the version; CI cuts the tag on the cap merge"
 	@echo "  📚 $(GREEN)make index-release$(RESET)  - Make a pushed tag visible on pkg.go.dev (VERSION=vX.Y.Z)"
 	@echo "  ✅ $(GREEN)make check-ready$(RESET)    - Check if ready to publish"
 	@echo ""
@@ -287,7 +287,7 @@ publish: check-ready
 	@chmod +x publish.sh
 	@./publish.sh
 
-# Bump version and create git tag
+# Bump the version (the tag is cut by CI when the cap merges to main)
 bump-version:
 	@echo "🔢 $(CYAN)Bumping version...$(RESET)"
 	@echo ""
