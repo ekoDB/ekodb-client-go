@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   auto-tag:
-    uses: ekoDB/ekodb-workflows-public/.github/workflows/auto-tag.yml@v1
+    uses: ekoDB/ekodb-workflows-public/.github/workflows/auto-tag.yml@main
     with:
       version-command: jq -r .version version.json
       post-tag-command: make index-release VERSION="$TAG"
