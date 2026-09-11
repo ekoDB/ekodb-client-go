@@ -3,7 +3,8 @@ package scripts_test
 // Drives the Makefile's bump-version target against a copy of the Makefile in
 // a temporary directory: the cap's file changes (the changelog collapse and the
 // version.json stamp) in one direction, and every refusal in the other (bad
-// version, missing block, empty block, already-stamped version), so a cap cut
+// version, missing block, empty block, already-stamped or already-released
+// version), so a cap cut
 // with it is what the release workflow's gates expect.
 
 import (
@@ -139,6 +140,22 @@ func TestBumpVersionRefusesTheVersionAlreadyStamped(t *testing.T) {
 		t.Errorf("exit %d, want the already-stamped refusal:\n%s", code, out)
 	}
 	if readFixture(t, dir, "CHANGELOG.md") != bumpChangelog || readFixture(t, dir, "version.json") != bumpManifest {
+		t.Errorf("a refused bump changed the files")
+	}
+}
+
+func TestBumpVersionRefusesAVersionTheChangelogAlreadyReleased(t *testing.T) {
+	dir := bumpFixture(t)
+	// The manifest is ahead of the changelog here, so only the changelog knows
+	// 0.0.1 is released; the guard must read the changelog, not the manifest.
+	if err := os.WriteFile(filepath.Join(dir, "version.json"), []byte("{\n  \"version\": \"0.0.2\"\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, code := runBump(t, dir, "VERSION=0.0.1")
+	if code == 0 || !strings.Contains(out, "already has a released block for 0.0.1") {
+		t.Errorf("exit %d, want the already-released refusal:\n%s", code, out)
+	}
+	if readFixture(t, dir, "CHANGELOG.md") != bumpChangelog || !strings.Contains(readFixture(t, dir, "version.json"), "0.0.2") {
 		t.Errorf("a refused bump changed the files")
 	}
 }
