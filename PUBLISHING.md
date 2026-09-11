@@ -5,23 +5,16 @@ semantic-version tag on `main`; there is no registry upload.
 
 ## Release
 
-```bash
-make publish
-```
+A release is a version cap merged to `main`, the same way the other Go
+repositories release:
 
-`make publish` runs `check-ready` (format check, `go vet`, the test suite, and a
-clean working tree) and then `publish.sh`, which:
+1. Collapse `## [Unreleased]` in `CHANGELOG.md` into `## [X.Y.Z] - YYYY-MM-DD`
+   (that date shape exactly) and set `version.json` to `X.Y.Z`.
+2. Commit the two files as `chore(*): vX.Y.Z` and rebase-merge that to `main`.
 
-1. runs the tests and `go mod tidy`
-2. reads the version from `version.json` and checks that the head commit is the
-   cap `chore(<scope>): vX.Y.Z` for it
-3. pushes `main` — and refuses first unless `main` is the branch you are on,
-   since CI tags a cap only once it is there
-
-The cap merging to `main` is the release: `.github/workflows/release.yml` tags
-itself, publishes the GitHub Release from the `CHANGELOG.md` block, and runs
-`scripts/index-release.sh` to make the tag visible on pkg.go.dev. `publish.sh`
-neither creates nor pushes a tag — CI does both. Watch it with:
+`.github/workflows/release.yml` then tags `vX.Y.Z`, publishes the GitHub Release
+from the changelog block, and runs `scripts/index-release.sh` so the tag shows
+up on pkg.go.dev. Nothing is tagged or pushed by hand. Watch it with:
 
 ```bash
 gh run list --repo ekoDB/ekodb-client-go --workflow release.yml --limit 1
@@ -76,19 +69,6 @@ from 0 to 99999, written as plain decimals; the script exits 2 before any
 request when they are not, or when the version is not of the form `vX.Y.Z`. Its
 tests live in `scripts/index_release_test.go` and run as part of
 `go test ./...`.
-
-## Cutting the cap
-
-`version.json` is the module's version manifest, as in the other Go
-repositories. `make bump-version VERSION=X.Y.Z` collapses `[Unreleased]` in
-`CHANGELOG.md` into `## [X.Y.Z] - <today>` and stamps `version.json`; it refuses
-a missing `VERSION`, a pre-release or `v`-prefixed one, a changelog with no
-`[Unreleased]` block or an empty one, the version already stamped, a version the
-changelog already released, and a version that already has a tag; it neither
-tags nor pushes. Commit the two files as `chore(*): vX.Y.Z` and land that on
-`main`: the release workflow cross-checks the cap subject against `version.json`
-before it tags. The target's tests live in `scripts/bump_version_test.go` and
-run as part of `go test ./...`.
 
 ## Installation
 

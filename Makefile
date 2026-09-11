@@ -24,7 +24,7 @@ JET := "                    $(MAGENTA)●$(RESET)\n                    $(PURPLE)
 # ASCII Banner for ekoDB (matches CLI banner)
 BANNER := "$(BOLD) ██████═╗ ██╗  ██╗  ██████╗  ████████╗ ████████╗$(RESET)\n$(BOLD)██╔═══██╝ ██║ ██╔╝ ██╔═══██╗  ██╔═══██║ ██╔═══██╗$(RESET)\n$(BOLD)████████╗ █████╔╝  ██║   ██║  ██║   ██║████████╔╝$(RESET)\n$(BOLD)██╔═════╝ ██╔═██╗  ██║   ██║  ██║   ██║ ██╔═══██╗$(RESET)\n$(BOLD)████████╗ ██║  ██╗ ╚██████╔╝ ████████║ ████████╔╝$(RESET)\n$(BOLD)╚═══════╝ ╚═╝  ╚═╝  ╚═════╝  ╚═══════╝ ╚═══════╝$(RESET)"
 
-.PHONY: all build test test-verbose test-coverage clean fmt fmt-go fmt-md fmt-check format lint lint-fix ensure-golangci-lint vet mod-tidy mod-verify mod-download install help setup deps-check deps-update publish bump-version index-release check-ready examples pre-commit ensure-hooks version info
+.PHONY: all build test test-verbose test-coverage clean fmt fmt-go fmt-md fmt-check format lint lint-fix ensure-golangci-lint vet mod-tidy mod-verify mod-download install help setup deps-check deps-update index-release check-ready examples pre-commit ensure-hooks version info
 
 # Language Sub-Banner
 GO_BANNER := \
@@ -69,10 +69,8 @@ help:
 	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
 	@echo "🚀 $(CYAN)PUBLISHING$(RESET)"
 	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
-	@echo "  🚀 $(GREEN)make publish$(RESET)        - Publish new version (runs publish.sh)"
-	@echo "  🔢 $(GREEN)make bump-version$(RESET)   - Collapse [Unreleased] and stamp version.json (VERSION=X.Y.Z); commit as chore(*): vX.Y.Z, CI cuts the tag"
 	@echo "  📚 $(GREEN)make index-release$(RESET)  - Make a pushed tag visible on pkg.go.dev (VERSION=vX.Y.Z)"
-	@echo "  ✅ $(GREEN)make check-ready$(RESET)    - Check if ready to publish"
+	@echo "  ✅ $(GREEN)make check-ready$(RESET)    - fmt-check, vet and tests in one run"
 	@echo ""
 	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
 	@echo "🧪 $(CYAN)EXAMPLES$(RESET)"
@@ -92,7 +90,6 @@ help:
 	@echo "  1. $(GREEN)make setup$(RESET)     - Set up development environment"
 	@echo "  2. $(GREEN)make test$(RESET)      - Run tests to verify everything works"
 	@echo "  3. $(GREEN)make fmt$(RESET)       - Format code before committing"
-	@echo "  4. $(GREEN)make publish$(RESET)   - Publish new version"
 
 # Auto-install pre-commit hook if missing
 ensure-hooks:
@@ -271,46 +268,15 @@ setup: mod-download
 	@echo "  2. Format code: make fmt"
 	@echo "  3. Run linter: make lint"
 
-# Check if ready to publish
+# fmt-check, vet and the test suite in one run
 check-ready: fmt-check vet test
-	@echo "✅ $(CYAN)Checking if ready to publish...$(RESET)"
+	@echo "✅ $(CYAN)Checking format, vet and tests...$(RESET)"
 	@if [ -n "$$(git status --porcelain)" ]; then \
 		echo "$(RED)❌ You have uncommitted changes$(RESET)"; \
 		git status --short; \
 		exit 1; \
 	fi
-	@echo "✅ $(GREEN)Ready to publish!$(RESET)"
-
-# Publish new version (uses publish.sh script)
-publish: check-ready
-	@echo "🚀 $(CYAN)Publishing new version...$(RESET)"
-	@chmod +x publish.sh
-	@./publish.sh
-
-# Cut the cap's file changes: collapse [Unreleased] into a dated block and stamp
-# version.json, the module's version manifest (as in the other Go repositories).
-# It refuses what the release gates would refuse later: no VERSION, one that is
-# not plain X.Y.Z, no [Unreleased] block, an empty one, the version already
-# stamped, a version the changelog already released, and a version that already
-# has a tag. Nothing is tagged or pushed here: commit the two files as
-# `chore(*): vX.Y.Z`, and CI cuts the tag when that cap merges to main. Tested
-# by scripts/bump_version_test.go against a copy of this Makefile.
-bump-version:
-	@[ -n "$(VERSION)" ] || { echo "usage: make bump-version VERSION=X.Y.Z"; exit 2; }
-	@printf '%s' "$(VERSION)" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$$' || { echo "VERSION must be plain X.Y.Z (no v, no pre-release suffix)"; exit 2; }
-	@grep -q '^## \[Unreleased\]$$' CHANGELOG.md || { echo "CHANGELOG.md has no [Unreleased] block to collapse"; exit 1; }
-	@awk '/^## \[Unreleased\]$$/{f=1; next} /^## \[/{f=0} f && !/^[[:space:]]*$$/{n++} END{exit !n}' CHANGELOG.md || { echo "the [Unreleased] block is empty -- a release carries its notes or is not cut"; exit 1; }
-	@cur="$$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' version.json)"; [ "$$cur" != "$(VERSION)" ] || { echo "version.json already carries $(VERSION) -- that version is released or already cut; pick the next one"; exit 1; }
-	@! grep -q "^## \[$(VERSION)\]" CHANGELOG.md || { echo "CHANGELOG.md already has a released block for $(VERSION) -- a released version is immutable; pick the next one"; exit 1; }
-	@! git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null 2>&1 || { echo "tag v$(VERSION) already exists -- a released version is immutable; pick the next one"; exit 1; }
-	@sed -i.bak "s/^## \[Unreleased\]$$/## [$(VERSION)] - $$(date -u +%Y-%m-%d)/" CHANGELOG.md && rm -f CHANGELOG.md.bak
-	@printf '{\n  "version": "%s"\n}\n' "$(VERSION)" > version.json
-	@echo "$(GREEN)collapsed [Unreleased] into [$(VERSION)] and stamped version.json$(RESET)"
-	@echo "$(YELLOW)💡 Next steps:$(RESET)"
-	@echo "  1. Commit the cap: git add CHANGELOG.md version.json && git commit -m 'chore(*): v$(VERSION)' (any other subject is not a cap and cuts no tag)"
-	@echo "  2. Land it on main (rebase-merge its PR): CI cuts the tag, publishes the Release and runs make index-release"
-	@echo "  3. Watch: gh run list --workflow release.yml --limit 1"
-	@echo "  4. Users can install: go get $(MODULE)@v$(VERSION)"
+	@echo "✅ $(GREEN)Clean.$(RESET)"
 
 # Neither the module proxy nor pkg.go.dev watches GitHub, so a pushed tag is
 # not on pkg.go.dev until something asks for it. This runs the three requests
