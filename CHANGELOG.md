@@ -31,10 +31,10 @@ and this project adheres to
   because its first fetch from origin is not instant after a push, and invalid
   poll settings are rejected before any request. The release workflow runs it
   after the Release is published, `make index-release VERSION=vX.Y.Z` runs it
-  alone, `make bump-version` names it in its next steps, and `PUBLISHING.md` now
-  describes the current single-repository release rather than a planned move out
-  of a monorepo. Covered by `scripts/index_release_test.go`, which drives the
-  script against local stand-ins for both services. (#70)
+  alone, and `PUBLISHING.md` now describes the current single-repository release
+  rather than a planned move out of a monorepo. Covered by
+  `scripts/index_release_test.go`, which drives the script against local
+  stand-ins for both services. (#70)
 
 ## [0.26.3] - 2026-09-10
 
