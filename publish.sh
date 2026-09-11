@@ -81,7 +81,7 @@ fi
 subject="$(git log -1 --format=%s)"
 cap_re="^chore(\\([^)]*\\))?: ${NEW_VERSION//./\\.}\$"
 if ! [[ "$subject" =~ $cap_re ]]; then
-    echo "❌ The head commit '$subject' is not the cap 'chore(<scope>): $NEW_VERSION' that CI tags. Cut the cap first (collapse [Unreleased] into ## [${NEW_VERSION#v}] - <date>), then run this."
+    echo "❌ The head commit '$subject' is not the cap 'chore(<scope>): $NEW_VERSION' that CI tags. Cut the cap first (collapse [Unreleased] into ## [${NEW_VERSION#v}] - YYYY-MM-DD, that date shape exactly), then run this."
     exit 1
 fi
 branch="$(git rev-parse --abbrev-ref HEAD)"
