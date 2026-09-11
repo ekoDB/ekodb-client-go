@@ -13,21 +13,20 @@ make publish
 clean working tree) and then `publish.sh`, which:
 
 1. runs the tests and `go mod tidy`
-2. prompts for the new version (`vX.Y.Z`) and creates an annotated tag
-3. pushes the tag
-4. runs `scripts/index-release.sh`, which makes the tag visible on pkg.go.dev
-5. offers to push `main`
+2. prompts for the new version (`vX.Y.Z`) and checks that the head commit is
+   the cap `chore(<scope>): vX.Y.Z`
+3. pushes `main`
 
-`publish.sh` runs under `set -e`, so a failure in step 4 stops the run there:
-the tag is already on origin and `main` has not been pushed. Nothing needs
-undoing. Fix whatever the printed URL and status point at, then finish by hand:
+The cap merging to `main` is the release: `.github/workflows/release.yml`
+tags itself, publishes the GitHub Release from the `CHANGELOG.md` block, and
+runs `scripts/index-release.sh` to make the tag visible on pkg.go.dev.
+`publish.sh` neither creates nor pushes a tag — CI does both. Watch it with:
 
 ```bash
-make index-release VERSION=vX.Y.Z
-git push origin main
+gh run list --repo ekoDB/ekodb-client-go --workflow release.yml --limit 1
 ```
 
-## Why step 4 exists
+## Why the pkg.go.dev index step exists
 
 Neither the Go module proxy nor pkg.go.dev watches GitHub. The proxy fetches a
 version the first time something asks for it, and pkg.go.dev indexes a version
@@ -73,10 +72,11 @@ request when they are not, or when the version is not of the form `vX.Y.Z`. Its
 tests live in `scripts/index_release_test.go` and run as part of
 `go test ./...`.
 
-## Tagging without publishing
+## Checking a version before capping
 
-`make bump-version` runs the tests and creates the tag locally without pushing
-anything; it prints the push and `make index-release` commands to run next.
+`make bump-version` runs the tests against a candidate `vX.Y.Z` and prints the
+next steps (push `main`, watch `release.yml`, the install command) without
+tagging or pushing anything — the tag is CI's, cut once the cap commit lands.
 
 ## Installation
 

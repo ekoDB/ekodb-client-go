@@ -1,0 +1,18 @@
+name: release
+
+# A chore(*): vX.Y.Z cap merged to main cuts the tag, publishes the Release
+# from the CHANGELOG block, and runs the pkg.go.dev index step. This module
+# has no manifest: the version is cross-checked against the changelog heading.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  auto-tag:
+    uses: ekoDB/ekodb-workflows-public/.github/workflows/auto-tag.yml@v1
+    with:
+      post-tag-command: make index-release VERSION="$TAG"

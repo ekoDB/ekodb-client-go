@@ -315,15 +315,10 @@ bump-version:
 	echo "$(CYAN)Running tests before tagging...$(RESET)"; \
 	$(GO) test ./... -race || { echo "$(RED)❌ Tests failed$(RESET)"; exit 1; }; \
 	echo ""; \
-	echo "$(CYAN)Creating tag $$NEW_VERSION...$(RESET)"; \
-	git tag -a "$$NEW_VERSION" -m "Release $$NEW_VERSION"; \
-	echo "✅ $(GREEN)Tag created: $$NEW_VERSION$(RESET)"; \
-	echo ""; \
 	echo "$(YELLOW)💡 Next steps:$(RESET)"; \
-	echo "  1. Push tag: git push origin $$NEW_VERSION"; \
-	echo "  2. Push commits: git push origin main"; \
-	echo "  3. Make it visible on pkg.go.dev: make index-release VERSION=$$NEW_VERSION"; \
-	echo "  4. Users can install: go get $(MODULE)@$$NEW_VERSION"
+	echo "  1. Push main: git push origin main -- CI cuts the tag, publishes the Release and runs make index-release"; \
+	echo "  2. Watch: gh run list --workflow release.yml --limit 1"; \
+	echo "  3. Users can install: go get $(MODULE)@$$NEW_VERSION"
 
 # Neither the module proxy nor pkg.go.dev watches GitHub, so a pushed tag is
 # not on pkg.go.dev until something asks for it. This runs the three requests

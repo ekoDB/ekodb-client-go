@@ -4,9 +4,6 @@ set -e
 echo "🐹 Publishing Go Client"
 echo "======================="
 
-# Get paths
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
 # Check if we're in the right directory
 if [ ! -f "go.mod" ]; then
     echo "❌ Error: go.mod not found"
@@ -78,58 +75,20 @@ if [[ ! $NEW_VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     exit 1
 fi
 
-# Check if tag already exists
-TAG_EXISTED=false
-if git rev-parse "$NEW_VERSION" >/dev/null 2>&1; then
-    TAG_EXISTED=true
-    echo ""
-    echo "⚠️  Tag $NEW_VERSION already exists locally"
-    echo ""
-    read -p "Do you want to use the existing tag? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "❌ Publication cancelled"
-        exit 1
-    fi
-    echo "✅ Using existing tag $NEW_VERSION"
-else
-    # Create tag
-    echo ""
-    echo "🏷️  Creating tag $NEW_VERSION..."
-    git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
-fi
-
-echo ""
-echo "⚠️  Ready to push tag $NEW_VERSION to remote"
-read -p "Do you want to continue? (y/N): " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "❌ Publication cancelled"
-    # Only delete tag if we just created it
-    if [ "$TAG_EXISTED" = false ]; then
-        git tag -d "$NEW_VERSION"
-    fi
+# The tag is cut by CI. A cap commit `chore(*): vX.Y.Z` on main triggers
+# .github/workflows/release.yml, which tags, publishes the Release and runs
+# `make index-release`. This script only pushes main.
+# The same shape release-cap-detect.sh accepts: any scope, or none.
+subject="$(git log -1 --format=%s)"
+cap_re="^chore(\\([^)]*\\))?: ${NEW_VERSION//./\\.}\$"
+if ! [[ "$subject" =~ $cap_re ]]; then
+    echo "❌ The head commit '$subject' is not the cap 'chore(<scope>): $NEW_VERSION' that CI tags. Cut the cap first (collapse [Unreleased] into ## [${NEW_VERSION#v}] - <date>), then run this."
     exit 1
 fi
-
-# Push tag
 echo ""
-echo "🚀 Pushing tag to remote..."
-git push origin "$NEW_VERSION"
-
-# Neither the module proxy nor pkg.go.dev watches GitHub: without these
-# requests the tag can sit unindexed for days. Fails if the page never renders.
-echo ""
-echo "📚 Making $NEW_VERSION visible on pkg.go.dev..."
-"$SCRIPT_DIR/scripts/index-release.sh" "$NEW_VERSION"
-
-# Also push main branch if needed
-echo ""
-read -p "Push main branch too? (y/N): " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    git push origin main
-fi
+echo "🚀 Pushing main; CI tags $NEW_VERSION and publishes the Release..."
+git push origin main
+echo "📚 Watch: gh run list --repo ekoDB/ekodb-client-go --workflow release.yml --limit 1"
 
 echo ""
 echo "✅ Successfully published ekodb-client-go $NEW_VERSION!"
