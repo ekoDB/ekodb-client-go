@@ -289,13 +289,17 @@ publish: check-ready
 
 # Cut the cap's file changes: collapse [Unreleased] into a dated block and stamp
 # version.json, the module's version manifest (as in the other Go repositories).
-# Nothing is tagged or pushed here: commit the two files as `chore(*): vX.Y.Z`,
+# It refuses what the release gates would refuse later: a version that is not
+# plain X.Y.Z, no [Unreleased] block, an empty one, and the version already
+# stamped. Nothing is tagged or pushed here: commit the two files as `chore(*): vX.Y.Z`,
 # and CI cuts the tag when that cap merges to main. Tested by
 # scripts/bump_version_test.go against a copy of this Makefile.
 bump-version:
 	@[ -n "$(VERSION)" ] || { echo "usage: make bump-version VERSION=X.Y.Z"; exit 2; }
 	@printf '%s' "$(VERSION)" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$$' || { echo "VERSION must be plain X.Y.Z (no v, no pre-release suffix)"; exit 2; }
 	@grep -q '^## \[Unreleased\]$$' CHANGELOG.md || { echo "CHANGELOG.md has no [Unreleased] block to collapse"; exit 1; }
+	@awk '/^## \[Unreleased\]$$/{f=1; next} /^## \[/{f=0} f && !/^[[:space:]]*$$/{n++} END{exit !n}' CHANGELOG.md || { echo "the [Unreleased] block is empty -- a release carries its notes or is not cut"; exit 1; }
+	@cur="$$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' version.json)"; [ "$$cur" != "$(VERSION)" ] || { echo "version.json already carries $(VERSION) -- that version is released or already cut; pick the next one"; exit 1; }
 	@sed -i.bak "s/^## \[Unreleased\]$$/## [$(VERSION)] - $$(date -u +%Y-%m-%d)/" CHANGELOG.md && rm -f CHANGELOG.md.bak
 	@printf '{\n  "version": "%s"\n}\n' "$(VERSION)" > version.json
 	@echo "$(GREEN)collapsed [Unreleased] into [$(VERSION)] and stamped version.json$(RESET)"

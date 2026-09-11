@@ -2,8 +2,9 @@ package scripts_test
 
 // Drives the Makefile's bump-version target against a copy of the Makefile in
 // a temporary directory: the cap's file changes (the changelog collapse and the
-// version.json stamp) in one direction, and every refusal in the other, so a
-// cap cut with it is what the release workflow's gates expect.
+// version.json stamp) in one direction, and every refusal in the other (bad
+// version, missing block, empty block, already-stamped version), so a cap cut
+// with it is what the release workflow's gates expect.
 
 import (
 	"errors"
@@ -128,6 +129,32 @@ func TestBumpVersionRefusesAMissingVersion(t *testing.T) {
 	}
 	if readFixture(t, dir, "version.json") != bumpManifest {
 		t.Errorf("a refused bump stamped version.json")
+	}
+}
+
+func TestBumpVersionRefusesTheVersionAlreadyStamped(t *testing.T) {
+	dir := bumpFixture(t)
+	out, code := runBump(t, dir, "VERSION=0.0.1")
+	if code == 0 || !strings.Contains(out, "already carries 0.0.1") {
+		t.Errorf("exit %d, want the already-stamped refusal:\n%s", code, out)
+	}
+	if readFixture(t, dir, "CHANGELOG.md") != bumpChangelog || readFixture(t, dir, "version.json") != bumpManifest {
+		t.Errorf("a refused bump changed the files")
+	}
+}
+
+func TestBumpVersionRefusesAnEmptyUnreleasedBlock(t *testing.T) {
+	dir := bumpFixture(t)
+	empty := "# Changelog\n\n## [Unreleased]\n\n## [0.0.1] - 2026-01-01\n\n- Old.\n"
+	if err := os.WriteFile(filepath.Join(dir, "CHANGELOG.md"), []byte(empty), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, code := runBump(t, dir, "VERSION=1.0.0")
+	if code == 0 || !strings.Contains(out, "block is empty") {
+		t.Errorf("exit %d, want the empty-block refusal:\n%s", code, out)
+	}
+	if readFixture(t, dir, "CHANGELOG.md") != empty || readFixture(t, dir, "version.json") != bumpManifest {
+		t.Errorf("a refused bump changed the files")
 	}
 }
 
