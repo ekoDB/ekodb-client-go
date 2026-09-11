@@ -13,7 +13,10 @@ and this project adheres to
 - **Tags and Releases are cut by CI on a version cap.** A `chore(*): vX.Y.Z`
   merge to `main` tags itself, publishes the Release from this file's block, and
   runs the pkg.go.dev index step; `publish.sh` and `make bump-version` no longer
-  create or push tags. (#72)
+  create or push tags. `version.json` is the module's version manifest, as in
+  the other Go repositories: `make bump-version VERSION=X.Y.Z` collapses
+  `[Unreleased]` and stamps it, `publish.sh` reads it, and the workflow
+  cross-checks the cap subject against it. (#72)
 
 ### Fixed
 
