@@ -84,12 +84,17 @@ if ! [[ "$subject" =~ $cap_re ]]; then
     echo "❌ The head commit '$subject' is not the cap 'chore(<scope>): $NEW_VERSION' that CI tags. Cut the cap first (collapse [Unreleased] into ## [${NEW_VERSION#v}] - <date>), then run this."
     exit 1
 fi
+branch="$(git rev-parse --abbrev-ref HEAD)"
+if [[ "$branch" != "main" ]]; then
+    echo "❌ On '$branch', not main. CI tags a cap only when it reaches main; merge it there first, then run this from main."
+    exit 1
+fi
 echo ""
 echo "🚀 Pushing main; CI tags $NEW_VERSION and publishes the Release..."
 git push origin main
 echo "📚 Watch: gh run list --repo ekoDB/ekodb-client-go --workflow release.yml --limit 1"
 
 echo ""
-echo "✅ Successfully published ekodb-client-go $NEW_VERSION!"
-echo "📦 Users can install with: go get $MODULE@$NEW_VERSION"
-echo "📚 Documentation available at: https://pkg.go.dev/$MODULE@$NEW_VERSION"
+echo "✅ main carries the cap; CI cuts $NEW_VERSION, publishes the Release and indexes it. Nothing is published until that run is green."
+echo "📦 Then users can install with: go get $MODULE@$NEW_VERSION"
+echo "📚 And the docs render at: https://pkg.go.dev/$MODULE@$NEW_VERSION"
