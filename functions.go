@@ -304,7 +304,7 @@ func StageBatchDelete(collection string, ids []string, bypassRipple bool) Functi
 		Stage: "BatchDelete",
 		Data: map[string]interface{}{
 			"collection":    collection,
-			"ids":           ids,
+			"record_ids":    ids,
 			"bypass_ripple": bypassRipple,
 		},
 	}
@@ -383,8 +383,12 @@ func StageChat(messages []ChatMessage, model *string, temperature *float64) Func
 	return FunctionStageConfig{Stage: "Chat", Data: data}
 }
 
-func StageEmbed(texts interface{}, model *string) FunctionStageConfig {
-	data := map[string]interface{}{"texts": texts}
+// StageEmbed embeds the value in inputField and writes the vector to outputField.
+func StageEmbed(inputField, outputField string, model *string) FunctionStageConfig {
+	data := map[string]interface{}{
+		"input_field":  inputField,
+		"output_field": outputField,
+	}
 	if model != nil {
 		data["model"] = model
 	}
