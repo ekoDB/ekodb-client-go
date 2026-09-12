@@ -621,6 +621,59 @@ func TestNewStagesJSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStageBatchDeleteUsesRecordIDs(t *testing.T) {
+	stage := StageBatchDelete("orders", []string{"one", "two"}, true)
+	wire, err := json.Marshal(stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(wire, &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := got["ids"]; exists {
+		t.Fatalf("legacy ids field must not be sent: %s", wire)
+	}
+	recordIDs, ok := got["record_ids"].([]interface{})
+	if !ok || len(recordIDs) != 2 || recordIDs[0] != "one" || recordIDs[1] != "two" {
+		t.Fatalf("record_ids = %#v, want [one two]", got["record_ids"])
+	}
+}
+
+func TestStageEmbedUsesFieldNames(t *testing.T) {
+	model := "text-embedding-3-small"
+	stage := StageEmbed("body", "embedding", &model)
+	wire, err := json.Marshal(stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(wire, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["input_field"] != "body" || got["output_field"] != "embedding" || got["model"] != model {
+		t.Fatalf("unexpected Embed shape: %s", wire)
+	}
+	if _, exists := got["texts"]; exists {
+		t.Fatalf("legacy texts field must not be sent: %s", wire)
+	}
+}
+
+func TestStageEmbedOmitsModel(t *testing.T) {
+	stage := StageEmbed("body", "embedding", nil)
+	wire, err := json.Marshal(stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(wire, &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := got["model"]; exists {
+		t.Fatalf("nil model must be omitted: %s", wire)
+	}
+}
+
 // ===== Crypto + concurrency stages =====
 
 func TestStageHmacSign_withAlgorithmAndEncoding(t *testing.T) {
