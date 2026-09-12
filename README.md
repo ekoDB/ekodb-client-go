@@ -464,18 +464,21 @@ client.AgentsByDeployment("deploy-id")
 // Create a schedule
 sched, _ := client.CreateSchedule(map[string]interface{}{
     "name": "nightly-backup",
-    "cron": "0 2 * * *",
-    "task_type": "backup",
+    "cron_expression": "0 0 2 * * *",
+    "function_label": "nightly_backup",
 })
 
 // List, get, update
 schedules, _ := client.ListSchedules()
 client.GetSchedule("sched-id")
-client.UpdateSchedule("sched-id", map[string]interface{}{"cron": "0 3 * * *"})
+client.UpdateSchedule("sched-id", map[string]interface{}{"cron_expression": "0 0 3 * * *"})
 
 // Pause and resume
 client.PauseSchedule("sched-id")
 client.ResumeSchedule("sched-id")
+
+// Run immediately
+client.TriggerSchedule("sched-id")
 
 // Delete
 client.DeleteSchedule("sched-id")
