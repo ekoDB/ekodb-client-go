@@ -812,6 +812,13 @@ func TestKVExistsNotFound(t *testing.T) {
 func TestBeginTransactionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/transactions": func(w http.ResponseWriter, r *http.Request) {
+			var request map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode request: %v", err)
+			}
+			if request["isolation_level"] != "ReadCommitted" {
+				t.Errorf("Expected ReadCommitted isolation, got %v", request["isolation_level"])
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]string{"transaction_id": "tx_123456"})
 		},
@@ -829,6 +836,33 @@ func TestBeginTransactionSuccess(t *testing.T) {
 	}
 }
 
+func TestBeginTransactionUsesServerDefaultWhenIsolationOmitted(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/transactions": func(w http.ResponseWriter, r *http.Request) {
+			var request map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode request: %v", err)
+			}
+			if len(request) != 0 {
+				t.Errorf("Expected empty request for server default isolation, got %v", request)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{"transaction_id": "tx_default"})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	txID, err := client.BeginTransaction()
+	if err != nil {
+		t.Fatalf("BeginTransaction failed: %v", err)
+	}
+	if txID != "tx_default" {
+		t.Errorf("BeginTransaction returned %q, want tx_default", txID)
+	}
+}
+
 func TestBeginTransactionInvalidIsolation(t *testing.T) {
 	server := createTestServer(t, nil)
 	defer server.Close()
@@ -837,6 +871,17 @@ func TestBeginTransactionInvalidIsolation(t *testing.T) {
 	_, err := client.BeginTransaction("INVALID_LEVEL")
 	if err == nil {
 		t.Error("Expected error for invalid isolation level")
+	}
+}
+
+func TestBeginTransactionRejectsMultipleIsolationLevels(t *testing.T) {
+	server := createTestServer(t, nil)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.BeginTransaction("READ_COMMITTED", "SERIALIZABLE")
+	if err == nil {
+		t.Error("Expected error for multiple isolation levels")
 	}
 }
 
