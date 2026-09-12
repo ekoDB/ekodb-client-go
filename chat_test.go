@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -936,6 +937,15 @@ func TestChatMessageRequestToolsOmittedWhenNil(t *testing.T) {
 	for _, field := range []string{"client_tools", "confirm_tools", "exclude_tools"} {
 		if _, exists := m[field]; exists {
 			t.Errorf("Expected %s to be omitted when nil", field)
+		}
+	}
+}
+
+func TestChatMessageRequestDoesNotExposeRetiredForceSummarize(t *testing.T) {
+	typeOfRequest := reflect.TypeOf(ChatMessageRequest{})
+	for i := 0; i < typeOfRequest.NumField(); i++ {
+		if typeOfRequest.Field(i).Tag.Get("json") == "force_summarize,omitempty" {
+			t.Fatal("ChatMessageRequest must not expose the retired force_summarize field")
 		}
 	}
 }

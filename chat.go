@@ -100,15 +100,14 @@ type ClientToolDef struct {
 
 // ChatMessageRequest represents a request to send a message in an existing session
 type ChatMessageRequest struct {
-	Message        string          `json:"message"`
-	BypassRipple   *bool           `json:"bypass_ripple,omitempty"`
-	ForceSummarize *bool           `json:"force_summarize,omitempty"`
-	MaxIterations  *int            `json:"max_iterations,omitempty"`
-	ToolConfig     *ToolConfig     `json:"tool_config,omitempty"`
-	LLMModel       *string         `json:"llm_model,omitempty"`
-	ClientTools    []ClientToolDef `json:"client_tools,omitempty"`
-	ConfirmTools   []string        `json:"confirm_tools,omitempty"`
-	ExcludeTools   []string        `json:"exclude_tools,omitempty"`
+	Message       string          `json:"message"`
+	BypassRipple  *bool           `json:"bypass_ripple,omitempty"`
+	MaxIterations *int            `json:"max_iterations,omitempty"`
+	ToolConfig    *ToolConfig     `json:"tool_config,omitempty"`
+	LLMModel      *string         `json:"llm_model,omitempty"`
+	ClientTools   []ClientToolDef `json:"client_tools,omitempty"`
+	ConfirmTools  []string        `json:"confirm_tools,omitempty"`
+	ExcludeTools  []string        `json:"exclude_tools,omitempty"`
 }
 
 // TokenUsage represents token usage statistics
