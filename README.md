@@ -318,9 +318,9 @@ results, err := client.Find("users", query)
 
 ### Transaction Methods
 
-- `BeginTransaction(isolationLevel string) (string, error)` - Begin a
-  transaction (READ_UNCOMMITTED / READ_COMMITTED / REPEATABLE_READ /
-  SERIALIZABLE); returns the transaction ID
+- `BeginTransaction(isolationLevel ...string) (string, error)` - Begin a
+  transaction using the server default, or optionally select READ_UNCOMMITTED /
+  READ_COMMITTED / REPEATABLE_READ / SERIALIZABLE; returns the transaction ID
 - `GetTransactionStatus(transactionID string) (map[string]interface{}, error)`
 - `CommitTransaction(transactionID string) error` - Apply staged writes
   atomically (may return HTTP 409 on conflict — retry)
