@@ -35,9 +35,12 @@ and this project adheres to
 
 ### Fixed
 
+- README examples now use the current schedule-trigger, transaction-config,
+  goal-status, and agent-model contracts.
 - `make test` now exits nonzero when the Go test command fails, and linked
   worktrees install hooks through Git's resolved hooks path while invalid hook
-  state fails loudly. (#66)
+  state fails loudly. Hook fixtures also isolate nested Git commands from the
+  repository running the hook. (#66)
 
 ## [0.26.4] - 2026-09-12
 
