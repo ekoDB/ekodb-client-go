@@ -24,8 +24,9 @@ and this project adheres to
   existing calls that pass one isolation level remain source-compatible. (#81)
 - Schedule pause and resume operations now update the schedule's `enabled` state
   through the supported update endpoint. (#78)
-- KV document-link helpers now use the document-link routes and return the
-  server's array response. (#77)
+- KV document-link helpers now use the document-link routes, `KVGetLinks`
+  returns the server's array response, and the link/unlink methods retain their
+  existing two-result signatures. (#77)
 
 ### Removed
 
@@ -35,7 +36,8 @@ and this project adheres to
 ### Fixed
 
 - `make test` now exits nonzero when the Go test command fails, and linked
-  worktrees install hooks through Git's resolved hooks path. (#66)
+  worktrees install hooks through Git's resolved hooks path while invalid hook
+  state fails loudly. (#66)
 
 ## [0.26.4] - 2026-09-12
 
