@@ -237,3 +237,37 @@ func (c *Client) GetSchema(collection string) (*Schema, error) {
 
 	return &metadata.Collection, nil
 }
+
+// SchemaConstraintUpdate is a partial update to a single field's schema
+// constraints. Every field is optional (a pointer, or a nil-able slice) so
+// only the constraints actually set by the caller are serialized — an unset
+// field is omitted from the JSON body and left untouched server-side. Field
+// names and semantics mirror the server's SchemaConstraintUpdate exactly
+// (ekodb_server/src/schema.rs).
+type SchemaConstraintUpdate struct {
+	FieldType *string       `json:"field_type,omitempty"`
+	Default   interface{}   `json:"default,omitempty"`
+	Unique    *bool         `json:"unique,omitempty"`
+	Required  *bool         `json:"required,omitempty"`
+	Enums     []interface{} `json:"enums,omitempty"`
+	Max       *float64      `json:"max,omitempty"`
+	Min       *float64      `json:"min,omitempty"`
+	Regex     *string       `json:"regex,omitempty"`
+}
+
+// UpdateSchemaConstraints applies a partial update to one or more fields'
+// schema constraints on an existing collection. Unlike CreateCollection
+// (which sends a full Schema), this PUTs only the constraints that changed:
+// each SchemaConstraintUpdate carries just the attributes the caller set, and
+// the server merges them into the field's existing constraints.
+//
+// It PUTs to /api/schemas/{collection} with body {"constraints": constraints},
+// matching the server's SchemaConstraintsUpdate (ekodb_server/src/schema.rs).
+func (c *Client) UpdateSchemaConstraints(collection string, constraints map[string]SchemaConstraintUpdate) error {
+	endpoint := fmt.Sprintf("/api/schemas/%s", url.PathEscape(collection))
+	body := map[string]interface{}{
+		"constraints": constraints,
+	}
+	_, err := c.makeRequest("PUT", endpoint, body)
+	return err
+}
