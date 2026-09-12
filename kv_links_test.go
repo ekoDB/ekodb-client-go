@@ -47,8 +47,12 @@ func TestKVLink(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	if err := client.KVLink("my-key", "users", "doc_1"); err != nil {
+	result, err := client.KVLink("my-key", "users", "doc_1")
+	if err != nil {
 		t.Fatalf("KVLink failed: %v", err)
+	}
+	if result != nil {
+		t.Fatalf("KVLink result = %#v, want nil for null response", result)
 	}
 }
 
@@ -62,8 +66,12 @@ func TestKVUnlink(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	if err := client.KVUnlink("my-key", "users", "doc_1"); err != nil {
+	result, err := client.KVUnlink("my-key", "users", "doc_1")
+	if err != nil {
 		t.Fatalf("KVUnlink failed: %v", err)
+	}
+	if result != nil {
+		t.Fatalf("KVUnlink result = %#v, want nil for null response", result)
 	}
 }
 
@@ -73,7 +81,7 @@ func TestKVLinkEscapesEveryPathSegment(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	if err := client.KVLink("a/b", "users/archive", "doc/1"); err != nil {
+	if _, err := client.KVLink("a/b", "users/archive", "doc/1"); err != nil {
 		t.Fatalf("KVLink failed: %v", err)
 	}
 	if got.method != http.MethodPost {
@@ -114,7 +122,7 @@ func TestKVLinkServerError(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	if err := client.KVLink("bad-key", "users", "doc_1"); err == nil {
+	if _, err := client.KVLink("bad-key", "users", "doc_1"); err == nil {
 		t.Fatal("Expected error for server error")
 	}
 }
@@ -129,7 +137,7 @@ func TestKVUnlinkNotFound(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	if err := client.KVUnlink("missing-key", "users", "doc_1"); err == nil {
+	if _, err := client.KVUnlink("missing-key", "users", "doc_1"); err == nil {
 		t.Fatal("Expected error for non-existent link")
 	}
 }
