@@ -887,6 +887,43 @@ func TestUserFunction_jsonOmitsHTTPFieldsWhenNil(t *testing.T) {
 	}
 }
 
+func TestStageHttpRequest_serializesCompleteContract(t *testing.T) {
+	timeout := uint64(10)
+	stage := StageHttpRequestWithOptions(
+		"https://example.com/items",
+		"POST",
+		map[string]string{"authorization": "Bearer token"},
+		map[string]interface{}{"id": "item-1"},
+		&HttpRequestOptions{TimeoutSeconds: &timeout, OutputField: "response"},
+	)
+
+	want := map[string]interface{}{
+		"url":             "https://example.com/items",
+		"method":          "POST",
+		"headers":         map[string]string{"authorization": "Bearer token"},
+		"body":            map[string]interface{}{"id": "item-1"},
+		"timeout_seconds": uint64(10),
+		"output_field":    "response",
+	}
+	if !reflect.DeepEqual(stage.Data, want) {
+		t.Fatalf("StageHttpRequest data = %#v, want %#v", stage.Data, want)
+	}
+}
+
+func TestStageHttpRequest_omitsOptionalFields(t *testing.T) {
+	for _, stage := range []FunctionStageConfig{
+		StageHttpRequest("https://example.com", "GET", nil, nil),
+		StageHttpRequestWithOptions("https://example.com", "GET", nil, nil, nil),
+		StageHttpRequestWithOptions("https://example.com", "GET", nil, nil, &HttpRequestOptions{}),
+	} {
+		for _, field := range []string{"headers", "body", "timeout_seconds", "output_field"} {
+			if value, ok := stage.Data[field]; ok {
+				t.Fatalf("%s must be omitted, got %#v", field, value)
+			}
+		}
+	}
+}
+
 // --- ekodb-client-go#63: round-trip through a SERVER-shaped payload ---------
 //
 // These tests decode the exact JSON ekoDB returns and assert the pipeline
