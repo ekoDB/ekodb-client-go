@@ -242,8 +242,8 @@ func (c *Client) GetSchema(collection string) (*Schema, error) {
 // constraints. Every field is optional (a pointer, or a nil-able slice) so
 // only the constraints actually set by the caller are serialized — an unset
 // field is omitted from the JSON body and left untouched server-side. Field
-// names and semantics mirror the server's SchemaConstraintUpdate exactly
-// (ekodb_server/src/schema.rs).
+// names and semantics mirror the server's schema-constraints-update request
+// contract exactly.
 type SchemaConstraintUpdate struct {
 	FieldType *string       `json:"field_type,omitempty"`
 	Default   interface{}   `json:"default,omitempty"`
@@ -262,7 +262,7 @@ type SchemaConstraintUpdate struct {
 // the server merges them into the field's existing constraints.
 //
 // It PUTs to /api/schemas/{collection} with body {"constraints": constraints},
-// matching the server's SchemaConstraintsUpdate (ekodb_server/src/schema.rs).
+// matching the server's schema-constraints-update request contract.
 func (c *Client) UpdateSchemaConstraints(collection string, constraints map[string]SchemaConstraintUpdate) error {
 	endpoint := fmt.Sprintf("/api/schemas/%s", url.PathEscape(collection))
 	body := map[string]interface{}{
