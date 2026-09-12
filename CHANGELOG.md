@@ -6,7 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.26.4] - 2026-09-12
+
+### Added
+
+- **`UpdateSchemaConstraints` added.** The schema-update endpoint had no client
+  method at all — only `CreateCollection`/`GetSchema` existed. Sends
+  `PUT /api/schemas/{collection}` with a `{"constraints": {...}}` body, where
+  each field's update object (`field_type`, `default`, `unique`, `required`,
+  `enums`, `max`, `min`, `regex`) uses `omitempty` so only set attributes are
+  serialized (partial-update semantics). (#75)
 
 ### Changed
 
