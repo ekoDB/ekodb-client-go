@@ -846,6 +846,11 @@ const serverUserFunctionJSON = `{
   "label": "sync_partner",
   "name": "Sync partner",
   "parameters": {},
+  "transaction_config": {
+    "enabled": true,
+    "auto_rollback": true,
+    "isolation_level": "Serializable"
+  },
   "functions": [
     {"type": "Insert", "collection": "orders", "record": {"a": 1}},
     {"type": "HttpRequest", "url": "https://p.example.com/v1", "method": "POST"},
@@ -861,6 +866,15 @@ func TestUserFunctionRoundTripPreservesPipeline(t *testing.T) {
 
 	if got := len(fn.Functions); got != 3 {
 		t.Fatalf("stage count: got %d want 3", got)
+	}
+	if fn.TransactionConfig == nil {
+		t.Fatal("transaction_config was dropped")
+	}
+	if !fn.TransactionConfig.Enabled || !fn.TransactionConfig.AutoRollback {
+		t.Errorf("transaction_config flags changed: %+v", fn.TransactionConfig)
+	}
+	if fn.TransactionConfig.IsolationLevel == nil || *fn.TransactionConfig.IsolationLevel != "Serializable" {
+		t.Errorf("transaction_config isolation changed: %+v", fn.TransactionConfig)
 	}
 
 	if got := fn.Functions[0].Stage; got != "Insert" {
@@ -898,6 +912,10 @@ func TestUserFunctionRoundTripPreservesPipeline(t *testing.T) {
 	if !reflect.DeepEqual(before["functions"], after["functions"]) {
 		t.Errorf("pipeline not preserved across a round trip:\n before: %v\n after:  %v",
 			before["functions"], after["functions"])
+	}
+	if !reflect.DeepEqual(before["transaction_config"], after["transaction_config"]) {
+		t.Errorf("transaction_config not preserved across a round trip:\n before: %v\n after:  %v",
+			before["transaction_config"], after["transaction_config"])
 	}
 }
 
@@ -1086,6 +1104,58 @@ func TestUnknownConditionTypeRoundTripsVerbatim(t *testing.T) {
 	}
 	if !reflect.DeepEqual(before, after) {
 		t.Errorf("unknown condition not preserved:\n before: %s\n after:  %s", in, out)
+	}
+}
+
+func TestModelledConditionPreservesUnknownFields(t *testing.T) {
+	const in = `{"type":"FieldEquals","value":{"field":"status","value":"open","case_sensitive":false}}`
+
+	var condition FunctionCondition
+	if err := json.Unmarshal([]byte(in), &condition); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := condition.Extra["case_sensitive"]; !ok {
+		t.Fatal("unknown condition field was not retained")
+	}
+
+	out, err := json.Marshal(condition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before, after interface{}
+	if err := json.Unmarshal([]byte(in), &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out, &after); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Errorf("modelled condition lost an unknown field:\n before: %s\n after:  %s", in, out)
+	}
+}
+
+func TestNestedConditionsPreserveUnknownFields(t *testing.T) {
+	const in = `{"type":"And","value":{"future_mode":"all","conditions":[` +
+		`{"type":"FieldExists","value":{"field":"id","case_sensitive":true}},` +
+		`{"type":"Not","value":{"condition":{"type":"CountEquals","value":{"count":1,"approximate":false}}}}]}}`
+
+	var condition FunctionCondition
+	if err := json.Unmarshal([]byte(in), &condition); err != nil {
+		t.Fatal(err)
+	}
+	out, err := json.Marshal(condition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before, after interface{}
+	if err := json.Unmarshal([]byte(in), &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out, &after); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Errorf("nested conditions lost unknown fields:\n before: %s\n after:  %s", in, out)
 	}
 }
 

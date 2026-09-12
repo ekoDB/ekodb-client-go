@@ -12,18 +12,26 @@ import (
 // UserFunction is a reusable sequence of Functions stored in ekoDB.
 // Called by label via the call_function chat tool or REST API.
 type UserFunction struct {
-	Label       string                         `json:"label"`
-	Name        string                         `json:"name"`
-	Description *string                        `json:"description,omitempty"`
-	Version     *string                        `json:"version,omitempty"`
-	Parameters  map[string]ParameterDefinition `json:"parameters"`
-	Functions   []FunctionStageConfig          `json:"functions"`
-	Tags        []string                       `json:"tags,omitempty"`
-	HTTPMethod  *string                        `json:"http_method,omitempty"`
-	HTTPPath    *string                        `json:"http_path,omitempty"`
-	ID          *string                        `json:"id,omitempty"`
-	CreatedAt   *time.Time                     `json:"created_at,omitempty"`
-	UpdatedAt   *time.Time                     `json:"updated_at,omitempty"`
+	Label             string                         `json:"label"`
+	Name              string                         `json:"name"`
+	Description       *string                        `json:"description,omitempty"`
+	Version           *string                        `json:"version,omitempty"`
+	Parameters        map[string]ParameterDefinition `json:"parameters"`
+	Functions         []FunctionStageConfig          `json:"functions"`
+	Tags              []string                       `json:"tags,omitempty"`
+	TransactionConfig *TransactionConfig             `json:"transaction_config,omitempty"`
+	HTTPMethod        *string                        `json:"http_method,omitempty"`
+	HTTPPath          *string                        `json:"http_path,omitempty"`
+	ID                *string                        `json:"id,omitempty"`
+	CreatedAt         *time.Time                     `json:"created_at,omitempty"`
+	UpdatedAt         *time.Time                     `json:"updated_at,omitempty"`
+}
+
+// TransactionConfig controls whether a stored function executes atomically.
+type TransactionConfig struct {
+	Enabled        bool    `json:"enabled"`
+	AutoRollback   bool    `json:"auto_rollback"`
+	IsolationLevel *string `json:"isolation_level,omitempty"`
 }
 
 // ParameterDefinition for function parameters
@@ -514,6 +522,9 @@ type FunctionCondition struct {
 	Count      int                 `json:"-"` // Count threshold for count-based conditions
 	Conditions []FunctionCondition `json:"-"` // Child conditions for And/Or operators
 	Condition  *FunctionCondition  `json:"-"` // Single child condition for Not operator
+	// Extra preserves fields the client does not yet model inside a known
+	// condition payload. Known fields always win when the condition is encoded.
+	Extra map[string]json.RawMessage `json:"-"`
 
 	// Raw holds the "value" payload of a condition type this client does not
 	// model, so it can be re-emitted unchanged. Nil for every modelled type.
@@ -539,14 +550,20 @@ type FunctionCondition struct {
 func (c FunctionCondition) MarshalJSON() ([]byte, error) {
 	switch c.Type {
 	case "HasRecords":
+		if len(c.Extra) > 0 {
+			return json.Marshal(map[string]interface{}{
+				"type":  c.Type,
+				"value": c.valueWithExtra(nil),
+			})
+		}
 		return json.Marshal(map[string]string{"type": c.Type})
 	case "FieldEquals":
 		return json.Marshal(map[string]interface{}{
 			"type": c.Type,
-			"value": map[string]interface{}{
+			"value": c.valueWithExtra(map[string]interface{}{
 				"field": c.Field,
 				"value": c.FieldValue,
-			},
+			}),
 		})
 	case "FieldGreaterThan", "FieldLessThan",
 		"FieldGreaterThanOrEqual", "FieldLessThanOrEqual":
@@ -557,38 +574,38 @@ func (c FunctionCondition) MarshalJSON() ([]byte, error) {
 		// reported success.
 		return json.Marshal(map[string]interface{}{
 			"type": c.Type,
-			"value": map[string]interface{}{
+			"value": c.valueWithExtra(map[string]interface{}{
 				"field": c.Field,
 				"value": c.FieldValue,
-			},
+			}),
 		})
 	case "FieldExists":
 		return json.Marshal(map[string]interface{}{
 			"type": c.Type,
-			"value": map[string]interface{}{
+			"value": c.valueWithExtra(map[string]interface{}{
 				"field": c.Field,
-			},
+			}),
 		})
 	case "CountEquals", "CountGreaterThan", "CountLessThan":
 		return json.Marshal(map[string]interface{}{
 			"type": c.Type,
-			"value": map[string]interface{}{
+			"value": c.valueWithExtra(map[string]interface{}{
 				"count": c.Count,
-			},
+			}),
 		})
 	case "And", "Or":
 		return json.Marshal(map[string]interface{}{
 			"type": c.Type,
-			"value": map[string]interface{}{
+			"value": c.valueWithExtra(map[string]interface{}{
 				"conditions": c.Conditions,
-			},
+			}),
 		})
 	case "Not":
 		return json.Marshal(map[string]interface{}{
 			"type": c.Type,
-			"value": map[string]interface{}{
+			"value": c.valueWithExtra(map[string]interface{}{
 				"condition": c.Condition,
-			},
+			}),
 		})
 	default:
 		// Re-emit a preserved payload verbatim. Without this the default arm
@@ -601,6 +618,17 @@ func (c FunctionCondition) MarshalJSON() ([]byte, error) {
 		}
 		return json.Marshal(map[string]string{"type": c.Type})
 	}
+}
+
+func (c FunctionCondition) valueWithExtra(known map[string]interface{}) map[string]interface{} {
+	value := make(map[string]interface{}, len(c.Extra)+len(known))
+	for key, raw := range c.Extra {
+		value[key] = raw
+	}
+	for key, fieldValue := range known {
+		value[key] = fieldValue
+	}
+	return value
 }
 
 // modelledConditionTypes are the condition types this client marshals through
@@ -646,7 +674,7 @@ func (c *FunctionCondition) UnmarshalJSON(b []byte) error {
 	if envelope.Type == "" {
 		return fmt.Errorf("condition has no \"type\"")
 	}
-	c.Type = envelope.Type
+	*c = FunctionCondition{Type: envelope.Type}
 
 	// Unit variants carry no value.
 	if len(envelope.Value) == 0 || string(envelope.Value) == "null" {
@@ -662,26 +690,62 @@ func (c *FunctionCondition) UnmarshalJSON(b []byte) error {
 		return nil
 	}
 
-	var v struct {
-		Field      string              `json:"field"`
-		Value      interface{}         `json:"value"`
-		Count      int                 `json:"count"`
-		Conditions []FunctionCondition `json:"conditions"`
-		Condition  *FunctionCondition  `json:"condition"`
-	}
-	// UseNumber for the same reason the stage decoder needs it: a comparison
-	// operand is caller data and may be an integer past 2^53. Decoding it
-	// through float64 rewrites 1700000000000000001 as 1.7e+18.
-	dec := json.NewDecoder(bytes.NewReader(envelope.Value))
-	dec.UseNumber()
-	if err := dec.Decode(&v); err != nil {
+	var value map[string]json.RawMessage
+	if err := json.Unmarshal(envelope.Value, &value); err != nil {
 		return fmt.Errorf("condition %q value: %w", c.Type, err)
 	}
-	c.Field = v.Field
-	c.FieldValue = v.Value
-	c.Count = v.Count
-	c.Conditions = v.Conditions
-	c.Condition = v.Condition
+
+	known := make(map[string]bool)
+	decode := func(key string, dst interface{}) error {
+		raw, ok := value[key]
+		if !ok {
+			return nil
+		}
+		known[key] = true
+		return json.Unmarshal(raw, dst)
+	}
+
+	switch c.Type {
+	case "FieldEquals", "FieldGreaterThan", "FieldLessThan",
+		"FieldGreaterThanOrEqual", "FieldLessThanOrEqual":
+		if err := decode("field", &c.Field); err != nil {
+			return fmt.Errorf("condition %q field: %w", c.Type, err)
+		}
+		if raw, ok := value["value"]; ok {
+			known["value"] = true
+			fieldValue, err := decodeJSONPreservingNumbers(raw)
+			if err != nil {
+				return fmt.Errorf("condition %q operand: %w", c.Type, err)
+			}
+			c.FieldValue = fieldValue
+		}
+	case "FieldExists":
+		if err := decode("field", &c.Field); err != nil {
+			return fmt.Errorf("condition %q field: %w", c.Type, err)
+		}
+	case "CountEquals", "CountGreaterThan", "CountLessThan":
+		if err := decode("count", &c.Count); err != nil {
+			return fmt.Errorf("condition %q count: %w", c.Type, err)
+		}
+	case "And", "Or":
+		if err := decode("conditions", &c.Conditions); err != nil {
+			return fmt.Errorf("condition %q children: %w", c.Type, err)
+		}
+	case "Not":
+		if err := decode("condition", &c.Condition); err != nil {
+			return fmt.Errorf("condition %q child: %w", c.Type, err)
+		}
+	}
+
+	c.Extra = make(map[string]json.RawMessage)
+	for key, raw := range value {
+		if !known[key] {
+			c.Extra[key] = append(json.RawMessage(nil), raw...)
+		}
+	}
+	if len(c.Extra) == 0 {
+		c.Extra = nil
+	}
 	return nil
 }
 
