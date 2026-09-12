@@ -141,8 +141,8 @@ func main() {
   `CreateSavepoint` / `RollbackToSavepoint` / `ReleaseSavepoint`, and
   read-your-writes via the `TransactionId` option on `Find` / `FindByID`
 - ✅ **KV document linking** - `KVLink` / `KVGetLinks` / `KVUnlink`
-- ✅ **Schedule management** - create/list/get/update/delete/pause/resume
-  scheduled functions
+- ✅ **Schedule management** -
+  create/list/get/update/delete/pause/resume/trigger scheduled functions
 - ✅ **Rate limiting with automatic retry** (429, 503, network errors)
 - ✅ **Rate limit tracking** (`X-RateLimit-*` headers)
 - ✅ **Configurable retry behavior**
@@ -371,6 +371,23 @@ within the transaction.
   existing user function
 - `DeleteUserFunction(label string) error` - Delete user function
 
+Attach `TransactionConfig` when supported write stages must commit atomically.
+Omit `IsolationLevel` to use the server default; get/update round trips preserve
+the configuration and condition payloads.
+
+```go
+fn := ekodb.UserFunction{
+    Label:      "place_order",
+    Name:       "Place order",
+    Parameters: map[string]ekodb.ParameterDefinition{},
+    Functions:  []ekodb.FunctionStageConfig{/* write stages */},
+    TransactionConfig: &ekodb.TransactionConfig{
+        Enabled:      true,
+        AutoRollback: true,
+    },
+}
+```
+
 ### WebSocket Methods
 
 **Connection:**
@@ -427,7 +444,7 @@ id := client.ExtractRecordID("users", inserted)
 goal, _ := client.GoalCreate(map[string]interface{}{
     "title": "Migrate user data",
     "description": "Move users from legacy to new schema",
-    "status": "active",
+    "status": "pending",
 })
 
 // List goals
@@ -452,7 +469,7 @@ client.TaskPause("task-id")
 client.TaskResume("task-id", nil)
 
 // Agents
-agent, _ := client.AgentCreate(map[string]interface{}{"name": "data-processor", "model": "gpt-4.1"})
+agent, _ := client.AgentCreate(map[string]interface{}{"name": "data-processor", "llm_model": "gpt-4.1"})
 agents, _ := client.AgentList()
 client.AgentGetByName("data-processor")
 client.AgentsByDeployment("deploy-id")
