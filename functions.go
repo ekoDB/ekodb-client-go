@@ -310,7 +310,23 @@ func StageBatchDelete(collection string, ids []string, bypassRipple bool) Functi
 	}
 }
 
+// HttpRequestOptions carries optional execution controls for StageHttpRequest.
+// Leave TimeoutSeconds nil or OutputField empty to let the server use its
+// defaults.
+type HttpRequestOptions struct {
+	TimeoutSeconds *uint64
+	OutputField    string
+}
+
+// StageHttpRequest performs an outbound HTTP request using server defaults for
+// the optional timeout and output field.
 func StageHttpRequest(url, method string, headers map[string]string, body interface{}) FunctionStageConfig {
+	return StageHttpRequestWithOptions(url, method, headers, body, nil)
+}
+
+// StageHttpRequestWithOptions performs an outbound HTTP request with optional
+// timeout and output-field controls.
+func StageHttpRequestWithOptions(url, method string, headers map[string]string, body interface{}, options *HttpRequestOptions) FunctionStageConfig {
 	data := map[string]interface{}{
 		"url":    url,
 		"method": method,
@@ -320,6 +336,14 @@ func StageHttpRequest(url, method string, headers map[string]string, body interf
 	}
 	if body != nil {
 		data["body"] = body
+	}
+	if options != nil {
+		if options.TimeoutSeconds != nil {
+			data["timeout_seconds"] = *options.TimeoutSeconds
+		}
+		if options.OutputField != "" {
+			data["output_field"] = options.OutputField
+		}
 	}
 	return FunctionStageConfig{Stage: "HttpRequest", Data: data}
 }
