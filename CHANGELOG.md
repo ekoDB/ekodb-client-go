@@ -22,8 +22,8 @@ and this project adheres to
   function API, while `StageBatchDelete` sends `record_ids`. (#79, #80)
 - `BeginTransaction()` can omit its isolation level to use the server default;
   existing calls that pass one isolation level remain source-compatible. (#81)
-- Schedule pause and resume operations now update the schedule's `enabled`
-  state through the supported update endpoint. (#78)
+- Schedule pause and resume operations now update the schedule's `enabled` state
+  through the supported update endpoint. (#78)
 - KV document-link helpers now use the document-link routes and return the
   server's array response. (#77)
 
