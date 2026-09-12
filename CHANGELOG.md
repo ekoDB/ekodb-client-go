@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Function definitions now retain `transaction_config`, and modeled conditions
+  preserve unknown fields while still providing typed access to known fields.
+  (#65, #67, #76)
+- `TriggerSchedule` runs a schedule immediately through the schedule trigger
+  endpoint. (#78)
+
+### Changed
+
+- `StageEmbed` now accepts the input and output field names required by the
+  function API, while `StageBatchDelete` sends `record_ids`. (#79, #80)
+- `BeginTransaction()` can omit its isolation level to use the server default;
+  existing calls that pass one isolation level remain source-compatible. (#81)
+- Schedule pause and resume operations now update the schedule's `enabled`
+  state through the supported update endpoint. (#78)
+- KV document-link helpers now use the document-link routes and return the
+  server's array response. (#77)
+
+### Removed
+
+- `ChatMessageRequest.ForceSummarize`, which is no longer accepted by the chat
+  API. (#82)
+
+### Fixed
+
+- `make test` now exits nonzero when the Go test command fails, and linked
+  worktrees install hooks through Git's resolved hooks path. (#66)
+
 ## [0.26.4] - 2026-09-12
 
 ### Added
