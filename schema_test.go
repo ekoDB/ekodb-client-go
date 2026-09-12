@@ -7,8 +7,8 @@ import (
 
 // TestUpdateSchemaConstraintsRequestShape proves UpdateSchemaConstraints PUTs
 // to /api/schemas/{collection} with a top-level "constraints" key — matching
-// the server's SchemaConstraintsUpdate (ekodb_server/src/schema.rs:401-404)
-// exactly. docs.ekodb.io previously documented a client.UpdateSchema method
+// the server's schema-constraints-update request contract exactly.
+// docs.ekodb.io previously documented a client.UpdateSchema method
 // using a "fields" envelope that never existed in this client; this test pins
 // the real wire shape so that mistake cannot recur.
 func TestUpdateSchemaConstraintsRequestShape(t *testing.T) {
@@ -60,7 +60,7 @@ func TestUpdateSchemaConstraintsRequestShape(t *testing.T) {
 	// envelope docs.ekodb.io previously documented for a method that never
 	// existed in this client).
 	if _, present := body["fields"]; present {
-		t.Error(`request body carries a top-level "fields" key — the server expects "constraints" (ekodb_server/src/schema.rs SchemaConstraintsUpdate)`)
+		t.Error(`request body carries a top-level "fields" key — the server expects "constraints"`)
 	}
 	rawConstraints, present := body["constraints"]
 	if !present {
