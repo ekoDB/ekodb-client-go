@@ -19,7 +19,10 @@ and this project adheres to
 ### Changed
 
 - `StageEmbed` now accepts the input and output field names required by the
-  function API, while `StageBatchDelete` sends `record_ids`. (#79, #80)
+  function API, `StageBatchDelete` sends `record_ids`, and
+  `StageHttpRequestWithOptions` exposes the server's optional timeout and
+  output-field controls without changing existing `StageHttpRequest` calls.
+  (#79, #80)
 - `BeginTransaction()` can omit its isolation level to use the server default;
   existing calls that pass one isolation level remain source-compatible. (#81)
 - Schedule pause and resume operations now update the schedule's `enabled` state
