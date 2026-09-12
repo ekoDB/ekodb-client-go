@@ -7,12 +7,12 @@ import (
 )
 
 // KVGetLinks retrieves documents linked to a KV key.
-func (c *Client) KVGetLinks(key string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/kv/links/%s", url.PathEscape(key)), nil)
+func (c *Client) KVGetLinks(key string) ([]map[string]interface{}, error) {
+	respBody, err := c.makeRequest("GET", fmt.Sprintf("/api/kv/%s/links", url.PathEscape(key)), nil)
 	if err != nil {
 		return nil, err
 	}
-	var result map[string]interface{}
+	var result []map[string]interface{}
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, err
 	}
@@ -20,37 +20,25 @@ func (c *Client) KVGetLinks(key string) (map[string]interface{}, error) {
 }
 
 // KVLink creates a link between a KV key and a document.
-func (c *Client) KVLink(key, collection, documentId string) (map[string]interface{}, error) {
-	body := map[string]interface{}{
-		"key":         key,
-		"collection":  collection,
-		"document_id": documentId,
-	}
-	respBody, err := c.makeRequest("POST", "/api/kv/link", body)
-	if err != nil {
-		return nil, err
-	}
-	var result map[string]interface{}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, err
-	}
-	return result, nil
+func (c *Client) KVLink(key, collection, documentID string) error {
+	path := fmt.Sprintf(
+		"/api/kv/%s/links/%s/%s",
+		url.PathEscape(key),
+		url.PathEscape(collection),
+		url.PathEscape(documentID),
+	)
+	_, err := c.makeRequest("POST", path, map[string]interface{}{})
+	return err
 }
 
 // KVUnlink removes a link between a KV key and a document.
-func (c *Client) KVUnlink(key, collection, documentId string) (map[string]interface{}, error) {
-	body := map[string]interface{}{
-		"key":         key,
-		"collection":  collection,
-		"document_id": documentId,
-	}
-	respBody, err := c.makeRequest("POST", "/api/kv/unlink", body)
-	if err != nil {
-		return nil, err
-	}
-	var result map[string]interface{}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, err
-	}
-	return result, nil
+func (c *Client) KVUnlink(key, collection, documentID string) error {
+	path := fmt.Sprintf(
+		"/api/kv/%s/links/%s/%s",
+		url.PathEscape(key),
+		url.PathEscape(collection),
+		url.PathEscape(documentID),
+	)
+	_, err := c.makeRequest("DELETE", path, nil)
+	return err
 }
