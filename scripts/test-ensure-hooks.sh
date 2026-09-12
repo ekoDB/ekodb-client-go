@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 
+# Git exports repository-local environment variables while invoking hooks.
+# Without clearing them, the fixture's nested Git commands can accidentally
+# operate on the repository whose hook is under test even when `git -C` points
+# at the temporary repository.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_OBJECT_DIRECTORY
+unset GIT_ALTERNATE_OBJECT_DIRECTORIES
+
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/ekodb-hooks-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT HUP INT TERM
 
@@ -10,6 +17,10 @@ linked_worktree="$test_root/worktree"
 git init --quiet "$main_repo"
 git -C "$main_repo" config user.email "hooks-test@example.invalid"
 git -C "$main_repo" config user.name "Hook Test"
+# Keep the fixture independent from any repository-level or global hooks path
+# inherited by the process that launched this test.
+mkdir -p "$main_repo/.git/hooks"
+git -C "$main_repo" config core.hooksPath "$main_repo/.git/hooks"
 mkdir -p "$main_repo/scripts"
 cp Makefile "$main_repo/Makefile"
 cp scripts/pre-commit "$main_repo/scripts/pre-commit"
