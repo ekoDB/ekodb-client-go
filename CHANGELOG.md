@@ -33,8 +33,8 @@ and this project adheres to
 
 ### Removed
 
-- `ChatMessageRequest.ForceSummarize`, which is no longer accepted by the chat
-  API. (#82)
+- `ChatMessageRequest.ForceSummarize`, which is silently ignored by the chat API
+  and no longer has any effect. (#82, #84)
 
 ### Fixed
 
