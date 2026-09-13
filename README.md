@@ -141,8 +141,8 @@ func main() {
   `CreateSavepoint` / `RollbackToSavepoint` / `ReleaseSavepoint`, and
   read-your-writes via the `TransactionId` option on `Find` / `FindByID`
 - ✅ **KV document linking** - `KVLink` / `KVGetLinks` / `KVUnlink`
-- ✅ **Schedule management** - create/list/get/update/delete/pause/resume
-  scheduled functions
+- ✅ **Schedule management** -
+  create/list/get/update/delete/pause/resume/trigger scheduled functions
 - ✅ **Rate limiting with automatic retry** (429, 503, network errors)
 - ✅ **Rate limit tracking** (`X-RateLimit-*` headers)
 - ✅ **Configurable retry behavior**
@@ -318,9 +318,9 @@ results, err := client.Find("users", query)
 
 ### Transaction Methods
 
-- `BeginTransaction(isolationLevel string) (string, error)` - Begin a
-  transaction (READ_UNCOMMITTED / READ_COMMITTED / REPEATABLE_READ /
-  SERIALIZABLE); returns the transaction ID
+- `BeginTransaction(isolationLevel ...string) (string, error)` - Begin a
+  transaction using the server default, or optionally select READ_UNCOMMITTED /
+  READ_COMMITTED / REPEATABLE_READ / SERIALIZABLE; returns the transaction ID
 - `GetTransactionStatus(transactionID string) (map[string]interface{}, error)`
 - `CommitTransaction(transactionID string) error` - Apply staged writes
   atomically (may return HTTP 409 on conflict — retry)
@@ -370,6 +370,23 @@ within the transaction.
 - `UpdateUserFunction(label string, userFunction UserFunction) error` - Update
   existing user function
 - `DeleteUserFunction(label string) error` - Delete user function
+
+Attach `TransactionConfig` when supported write stages must commit atomically.
+Omit `IsolationLevel` to use the server default; get/update round trips preserve
+the configuration and condition payloads.
+
+```go
+fn := ekodb.UserFunction{
+    Label:      "place_order",
+    Name:       "Place order",
+    Parameters: map[string]ekodb.ParameterDefinition{},
+    Functions:  []ekodb.FunctionStageConfig{/* write stages */},
+    TransactionConfig: &ekodb.TransactionConfig{
+        Enabled:      true,
+        AutoRollback: true,
+    },
+}
+```
 
 ### WebSocket Methods
 
@@ -427,7 +444,7 @@ id := client.ExtractRecordID("users", inserted)
 goal, _ := client.GoalCreate(map[string]interface{}{
     "title": "Migrate user data",
     "description": "Move users from legacy to new schema",
-    "status": "active",
+    "status": "pending",
 })
 
 // List goals
@@ -452,7 +469,7 @@ client.TaskPause("task-id")
 client.TaskResume("task-id", nil)
 
 // Agents
-agent, _ := client.AgentCreate(map[string]interface{}{"name": "data-processor", "model": "gpt-4.1"})
+agent, _ := client.AgentCreate(map[string]interface{}{"name": "data-processor", "llm_model": "gpt-4.1"})
 agents, _ := client.AgentList()
 client.AgentGetByName("data-processor")
 client.AgentsByDeployment("deploy-id")
@@ -464,18 +481,21 @@ client.AgentsByDeployment("deploy-id")
 // Create a schedule
 sched, _ := client.CreateSchedule(map[string]interface{}{
     "name": "nightly-backup",
-    "cron": "0 2 * * *",
-    "task_type": "backup",
+    "cron_expression": "0 0 2 * * *",
+    "function_label": "nightly_backup",
 })
 
 // List, get, update
 schedules, _ := client.ListSchedules()
 client.GetSchedule("sched-id")
-client.UpdateSchedule("sched-id", map[string]interface{}{"cron": "0 3 * * *"})
+client.UpdateSchedule("sched-id", map[string]interface{}{"cron_expression": "0 0 3 * * *"})
 
 // Pause and resume
 client.PauseSchedule("sched-id")
 client.ResumeSchedule("sched-id")
+
+// Run immediately
+client.TriggerSchedule("sched-id")
 
 // Delete
 client.DeleteSchedule("sched-id")

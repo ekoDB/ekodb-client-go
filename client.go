@@ -1441,11 +1441,15 @@ func (c *Client) KVQuery(pattern string, includeExpired bool) ([]map[string]inte
 // Transaction Operations
 // ============================================================================
 
-// BeginTransaction starts a new transaction on the server with the given isolation level.
-// The isolationLevel parameter must be one of: "READ_UNCOMMITTED", "READ_COMMITTED",
-// "REPEATABLE_READ", or "SERIALIZABLE". It returns the server-assigned transaction ID
-// as a string, or an error if the transaction could not be created.
-func (c *Client) BeginTransaction(isolationLevel string) (string, error) {
+// BeginTransaction starts a new transaction on the server. When supplied, the
+// isolation level must be one of: "READ_UNCOMMITTED", "READ_COMMITTED",
+// "REPEATABLE_READ", or "SERIALIZABLE". Omitting it uses the server default.
+// It returns the server-assigned transaction ID or an error.
+func (c *Client) BeginTransaction(isolationLevel ...string) (string, error) {
+	if len(isolationLevel) > 1 {
+		return "", fmt.Errorf("expected at most one isolation level, got %d", len(isolationLevel))
+	}
+
 	// Map user-friendly uppercase format to server's PascalCase format
 	isolationMap := map[string]string{
 		"READ_UNCOMMITTED": "ReadUncommitted",
@@ -1454,14 +1458,15 @@ func (c *Client) BeginTransaction(isolationLevel string) (string, error) {
 		"SERIALIZABLE":     "Serializable",
 	}
 
-	serverIsolation, valid := isolationMap[isolationLevel]
-	if !valid {
-		return "", fmt.Errorf("invalid isolation level: %s (must be one of: READ_UNCOMMITTED, READ_COMMITTED, REPEATABLE_READ, SERIALIZABLE)", isolationLevel)
+	data := map[string]interface{}{}
+	if len(isolationLevel) == 1 {
+		serverIsolation, valid := isolationMap[isolationLevel[0]]
+		if !valid {
+			return "", fmt.Errorf("invalid isolation level: %s (must be one of: READ_UNCOMMITTED, READ_COMMITTED, REPEATABLE_READ, SERIALIZABLE)", isolationLevel[0])
+		}
+		data["isolation_level"] = serverIsolation
 	}
 
-	data := map[string]interface{}{
-		"isolation_level": serverIsolation,
-	}
 	respBody, err := c.makeRequest("POST", "/api/transactions", data)
 	if err != nil {
 		return "", err

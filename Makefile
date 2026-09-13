@@ -24,7 +24,7 @@ JET := "                    $(MAGENTA)●$(RESET)\n                    $(PURPLE)
 # ASCII Banner for ekoDB (matches CLI banner)
 BANNER := "$(BOLD) ██████═╗ ██╗  ██╗  ██████╗  ████████╗ ████████╗$(RESET)\n$(BOLD)██╔═══██╝ ██║ ██╔╝ ██╔═══██╗  ██╔═══██║ ██╔═══██╗$(RESET)\n$(BOLD)████████╗ █████╔╝  ██║   ██║  ██║   ██║████████╔╝$(RESET)\n$(BOLD)██╔═════╝ ██╔═██╗  ██║   ██║  ██║   ██║ ██╔═══██╗$(RESET)\n$(BOLD)████████╗ ██║  ██╗ ╚██████╔╝ ████████║ ████████╔╝$(RESET)\n$(BOLD)╚═══════╝ ╚═╝  ╚═╝  ╚═════╝  ╚═══════╝ ╚═══════╝$(RESET)"
 
-.PHONY: all build test test-verbose test-coverage clean fmt fmt-go fmt-md fmt-check format lint lint-fix ensure-golangci-lint vet mod-tidy mod-verify mod-download install help setup deps-check deps-update index-release check-ready examples pre-commit ensure-hooks version info
+.PHONY: all build test test-verbose test-coverage test-hooks clean fmt fmt-go fmt-md fmt-check format lint lint-fix ensure-golangci-lint vet mod-tidy mod-verify mod-download install help setup deps-check deps-update index-release check-ready examples pre-commit ensure-hooks version info
 
 # Language Sub-Banner
 GO_BANNER := \
@@ -93,12 +93,24 @@ help:
 
 # Auto-install pre-commit hook if missing
 ensure-hooks:
-	@if [ ! -f .git/hooks/pre-commit ]; then \
+	@set -eu; \
+	HOOK_PATH="$$(git rev-parse --git-path hooks/pre-commit)"; \
+	if [ -L "$$HOOK_PATH" ] && [ ! -e "$$HOOK_PATH" ]; then \
+		echo "❌ $(RED)Pre-commit hook is a dangling symlink: $$HOOK_PATH$(RESET)"; \
+		exit 1; \
+	fi; \
+	if [ ! -e "$$HOOK_PATH" ]; then \
 		echo "🔗 $(CYAN)Installing pre-commit hook...$(RESET)"; \
-		ln -s ../../scripts/pre-commit .git/hooks/pre-commit; \
-		chmod +x .git/hooks/pre-commit; \
+		GIT_COMMON_DIR="$$(git rev-parse --path-format=absolute --git-common-dir)"; \
+		REPO_ROOT="$$(dirname "$$GIT_COMMON_DIR")"; \
+		test -x "$$REPO_ROOT/scripts/pre-commit"; \
+		ln -s "$$REPO_ROOT/scripts/pre-commit" "$$HOOK_PATH"; \
+		chmod +x "$$HOOK_PATH"; \
 		echo "✅ $(GREEN)Pre-commit hook installed$(RESET)"; \
 	fi
+
+test-hooks:
+	@scripts/test-ensure-hooks.sh
 
 # Build the library
 build: ensure-hooks
@@ -107,13 +119,20 @@ build: ensure-hooks
 	@echo "✅ $(GREEN)Build complete!$(RESET)"
 
 # Run tests
-test: ensure-hooks
+test: ensure-hooks test-hooks
 	@echo "🧪 $(CYAN)Running tests...$(RESET)"
 	@TEST_OUTPUT=$$($(GO) test ./... -race -v 2>&1); \
+	TEST_STATUS=$$?; \
 	echo "$$TEST_OUTPUT"; \
-	TEST_COUNT=$$(echo "$$TEST_OUTPUT" | grep -c "^--- PASS:" || echo "0"); \
+	TEST_COUNT=$$(echo "$$TEST_OUTPUT" | grep -c "^--- PASS:" || true); \
 	echo ""; \
 	echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"; \
+	if [ "$$TEST_STATUS" -ne 0 ]; then \
+		echo "❌ $(RED)Tests failed!$(RESET)"; \
+		echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"; \
+		printf "  🔷 Go:         %3d passing tests\n" "$$TEST_COUNT"; \
+		exit "$$TEST_STATUS"; \
+	fi; \
 	echo "✅ $(GREEN)All tests complete!$(RESET)"; \
 	echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"; \
 	printf "  🔷 Go:         %3d tests\n" "$$TEST_COUNT"; \

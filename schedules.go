@@ -66,20 +66,17 @@ func (c *Client) DeleteSchedule(id string) error {
 
 // PauseSchedule pauses a schedule by ID.
 func (c *Client) PauseSchedule(id string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/schedules/%s/pause", url.PathEscape(id)), nil)
-	if err != nil {
-		return nil, err
-	}
-	var result map[string]interface{}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, err
-	}
-	return result, nil
+	return c.UpdateSchedule(id, map[string]interface{}{"enabled": false})
 }
 
 // ResumeSchedule resumes a schedule by ID.
 func (c *Client) ResumeSchedule(id string) (map[string]interface{}, error) {
-	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/schedules/%s/resume", url.PathEscape(id)), nil)
+	return c.UpdateSchedule(id, map[string]interface{}{"enabled": true})
+}
+
+// TriggerSchedule immediately runs a schedule by ID.
+func (c *Client) TriggerSchedule(id string) (map[string]interface{}, error) {
+	respBody, err := c.makeRequest("POST", fmt.Sprintf("/api/schedules/%s/trigger", url.PathEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}

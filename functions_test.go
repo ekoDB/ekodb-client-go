@@ -621,6 +621,59 @@ func TestNewStagesJSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStageBatchDeleteUsesRecordIDs(t *testing.T) {
+	stage := StageBatchDelete("orders", []string{"one", "two"}, true)
+	wire, err := json.Marshal(stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(wire, &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := got["ids"]; exists {
+		t.Fatalf("legacy ids field must not be sent: %s", wire)
+	}
+	recordIDs, ok := got["record_ids"].([]interface{})
+	if !ok || len(recordIDs) != 2 || recordIDs[0] != "one" || recordIDs[1] != "two" {
+		t.Fatalf("record_ids = %#v, want [one two]", got["record_ids"])
+	}
+}
+
+func TestStageEmbedUsesFieldNames(t *testing.T) {
+	model := "text-embedding-3-small"
+	stage := StageEmbed("body", "embedding", &model)
+	wire, err := json.Marshal(stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(wire, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["input_field"] != "body" || got["output_field"] != "embedding" || got["model"] != model {
+		t.Fatalf("unexpected Embed shape: %s", wire)
+	}
+	if _, exists := got["texts"]; exists {
+		t.Fatalf("legacy texts field must not be sent: %s", wire)
+	}
+}
+
+func TestStageEmbedOmitsModel(t *testing.T) {
+	stage := StageEmbed("body", "embedding", nil)
+	wire, err := json.Marshal(stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(wire, &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := got["model"]; exists {
+		t.Fatalf("nil model must be omitted: %s", wire)
+	}
+}
+
 // ===== Crypto + concurrency stages =====
 
 func TestStageHmacSign_withAlgorithmAndEncoding(t *testing.T) {
@@ -834,6 +887,43 @@ func TestUserFunction_jsonOmitsHTTPFieldsWhenNil(t *testing.T) {
 	}
 }
 
+func TestStageHttpRequest_serializesCompleteContract(t *testing.T) {
+	timeout := uint64(10)
+	stage := StageHttpRequestWithOptions(
+		"https://example.com/items",
+		"POST",
+		map[string]string{"authorization": "Bearer token"},
+		map[string]interface{}{"id": "item-1"},
+		&HttpRequestOptions{TimeoutSeconds: &timeout, OutputField: "response"},
+	)
+
+	want := map[string]interface{}{
+		"url":             "https://example.com/items",
+		"method":          "POST",
+		"headers":         map[string]string{"authorization": "Bearer token"},
+		"body":            map[string]interface{}{"id": "item-1"},
+		"timeout_seconds": uint64(10),
+		"output_field":    "response",
+	}
+	if !reflect.DeepEqual(stage.Data, want) {
+		t.Fatalf("StageHttpRequest data = %#v, want %#v", stage.Data, want)
+	}
+}
+
+func TestStageHttpRequest_omitsOptionalFields(t *testing.T) {
+	for _, stage := range []FunctionStageConfig{
+		StageHttpRequest("https://example.com", "GET", nil, nil),
+		StageHttpRequestWithOptions("https://example.com", "GET", nil, nil, nil),
+		StageHttpRequestWithOptions("https://example.com", "GET", nil, nil, &HttpRequestOptions{}),
+	} {
+		for _, field := range []string{"headers", "body", "timeout_seconds", "output_field"} {
+			if value, ok := stage.Data[field]; ok {
+				t.Fatalf("%s must be omitted, got %#v", field, value)
+			}
+		}
+	}
+}
+
 // --- ekodb-client-go#63: round-trip through a SERVER-shaped payload ---------
 //
 // These tests decode the exact JSON ekoDB returns and assert the pipeline
@@ -846,6 +936,11 @@ const serverUserFunctionJSON = `{
   "label": "sync_partner",
   "name": "Sync partner",
   "parameters": {},
+  "transaction_config": {
+    "enabled": true,
+    "auto_rollback": true,
+    "isolation_level": "Serializable"
+  },
   "functions": [
     {"type": "Insert", "collection": "orders", "record": {"a": 1}},
     {"type": "HttpRequest", "url": "https://p.example.com/v1", "method": "POST"},
@@ -861,6 +956,15 @@ func TestUserFunctionRoundTripPreservesPipeline(t *testing.T) {
 
 	if got := len(fn.Functions); got != 3 {
 		t.Fatalf("stage count: got %d want 3", got)
+	}
+	if fn.TransactionConfig == nil {
+		t.Fatal("transaction_config was dropped")
+	}
+	if !fn.TransactionConfig.Enabled || !fn.TransactionConfig.AutoRollback {
+		t.Errorf("transaction_config flags changed: %+v", fn.TransactionConfig)
+	}
+	if fn.TransactionConfig.IsolationLevel == nil || *fn.TransactionConfig.IsolationLevel != "Serializable" {
+		t.Errorf("transaction_config isolation changed: %+v", fn.TransactionConfig)
 	}
 
 	if got := fn.Functions[0].Stage; got != "Insert" {
@@ -898,6 +1002,10 @@ func TestUserFunctionRoundTripPreservesPipeline(t *testing.T) {
 	if !reflect.DeepEqual(before["functions"], after["functions"]) {
 		t.Errorf("pipeline not preserved across a round trip:\n before: %v\n after:  %v",
 			before["functions"], after["functions"])
+	}
+	if !reflect.DeepEqual(before["transaction_config"], after["transaction_config"]) {
+		t.Errorf("transaction_config not preserved across a round trip:\n before: %v\n after:  %v",
+			before["transaction_config"], after["transaction_config"])
 	}
 }
 
@@ -1086,6 +1194,58 @@ func TestUnknownConditionTypeRoundTripsVerbatim(t *testing.T) {
 	}
 	if !reflect.DeepEqual(before, after) {
 		t.Errorf("unknown condition not preserved:\n before: %s\n after:  %s", in, out)
+	}
+}
+
+func TestModelledConditionPreservesUnknownFields(t *testing.T) {
+	const in = `{"type":"FieldEquals","value":{"field":"status","value":"open","case_sensitive":false}}`
+
+	var condition FunctionCondition
+	if err := json.Unmarshal([]byte(in), &condition); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := condition.Extra["case_sensitive"]; !ok {
+		t.Fatal("unknown condition field was not retained")
+	}
+
+	out, err := json.Marshal(condition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before, after interface{}
+	if err := json.Unmarshal([]byte(in), &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out, &after); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Errorf("modelled condition lost an unknown field:\n before: %s\n after:  %s", in, out)
+	}
+}
+
+func TestNestedConditionsPreserveUnknownFields(t *testing.T) {
+	const in = `{"type":"And","value":{"future_mode":"all","conditions":[` +
+		`{"type":"FieldExists","value":{"field":"id","case_sensitive":true}},` +
+		`{"type":"Not","value":{"condition":{"type":"CountEquals","value":{"count":1,"approximate":false}}}}]}}`
+
+	var condition FunctionCondition
+	if err := json.Unmarshal([]byte(in), &condition); err != nil {
+		t.Fatal(err)
+	}
+	out, err := json.Marshal(condition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before, after interface{}
+	if err := json.Unmarshal([]byte(in), &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out, &after); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Errorf("nested conditions lost unknown fields:\n before: %s\n after:  %s", in, out)
 	}
 }
 

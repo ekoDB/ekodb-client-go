@@ -12,13 +12,11 @@ import (
 
 func TestKVGetLinks(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
-		"GET /api/kv/links/my-key": func(w http.ResponseWriter, r *http.Request) {
+		"GET /api/kv/my-key/links": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"links": []map[string]interface{}{
-					{"collection": "users", "document_id": "doc_1"},
-					{"collection": "users", "document_id": "doc_2"},
-				},
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"collection": "users", "document_id": "doc_1"},
+				{"collection": "users", "document_id": "doc_2"},
 			})
 		},
 	})
@@ -29,29 +27,21 @@ func TestKVGetLinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("KVGetLinks failed: %v", err)
 	}
-	if result["links"] == nil {
-		t.Error("Expected links field")
+	if len(result) != 2 || result[0]["document_id"] != "doc_1" {
+		t.Fatalf("unexpected links: %#v", result)
 	}
 }
 
 func TestKVLink(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
-		"POST /api/kv/link": func(w http.ResponseWriter, r *http.Request) {
+		"POST /api/kv/my-key/links/users/doc_1": func(w http.ResponseWriter, r *http.Request) {
 			var body map[string]interface{}
 			_ = json.NewDecoder(r.Body).Decode(&body)
-			if body["key"] != "my-key" {
-				t.Errorf("Expected key my-key, got %v", body["key"])
-			}
-			if body["collection"] != "users" {
-				t.Errorf("Expected collection users, got %v", body["collection"])
-			}
-			if body["document_id"] != "doc_1" {
-				t.Errorf("Expected document_id doc_1, got %v", body["document_id"])
+			if len(body) != 0 {
+				t.Errorf("Expected empty link options, got %#v", body)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"ok": true, "key": "my-key", "collection": "users", "document_id": "doc_1",
-			})
+			_ = json.NewEncoder(w).Encode(nil)
 		},
 	})
 	defer server.Close()
@@ -61,29 +51,16 @@ func TestKVLink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("KVLink failed: %v", err)
 	}
-	if result["ok"] != true {
-		t.Errorf("Expected ok true, got %v", result["ok"])
+	if result != nil {
+		t.Fatalf("KVLink result = %#v, want nil for null response", result)
 	}
 }
 
 func TestKVUnlink(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
-		"POST /api/kv/unlink": func(w http.ResponseWriter, r *http.Request) {
-			var body map[string]interface{}
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			if body["key"] != "my-key" {
-				t.Errorf("Expected key my-key, got %v", body["key"])
-			}
-			if body["collection"] != "users" {
-				t.Errorf("Expected collection users, got %v", body["collection"])
-			}
-			if body["document_id"] != "doc_1" {
-				t.Errorf("Expected document_id doc_1, got %v", body["document_id"])
-			}
+		"DELETE /api/kv/my-key/links/users/doc_1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"ok": true,
-			})
+			_ = json.NewEncoder(w).Encode(nil)
 		},
 	})
 	defer server.Close()
@@ -93,8 +70,25 @@ func TestKVUnlink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("KVUnlink failed: %v", err)
 	}
-	if result["ok"] != true {
-		t.Errorf("Expected ok true, got %v", result["ok"])
+	if result != nil {
+		t.Fatalf("KVUnlink result = %#v, want nil for null response", result)
+	}
+}
+
+func TestKVLinkEscapesEveryPathSegment(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	if _, err := client.KVLink("a/b", "users/archive", "doc/1"); err != nil {
+		t.Fatalf("KVLink failed: %v", err)
+	}
+	if got.method != http.MethodPost {
+		t.Fatalf("method = %s, want POST", got.method)
+	}
+	if got.escapedPath != "/api/kv/a%2Fb/links/users%2Farchive/doc%2F1" {
+		t.Fatalf("escaped path = %s", got.escapedPath)
 	}
 }
 
@@ -104,7 +98,7 @@ func TestKVUnlink(t *testing.T) {
 
 func TestKVGetLinksNotFound(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
-		"GET /api/kv/links/missing-key": func(w http.ResponseWriter, r *http.Request) {
+		"GET /api/kv/missing-key/links": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte("Key not found"))
 		},
@@ -120,7 +114,7 @@ func TestKVGetLinksNotFound(t *testing.T) {
 
 func TestKVLinkServerError(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
-		"POST /api/kv/link": func(w http.ResponseWriter, r *http.Request) {
+		"POST /api/kv/bad-key/links/users/doc_1": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte("Internal Server Error"))
 		},
@@ -128,15 +122,14 @@ func TestKVLinkServerError(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	_, err := client.KVLink("bad-key", "users", "doc_1")
-	if err == nil {
+	if _, err := client.KVLink("bad-key", "users", "doc_1"); err == nil {
 		t.Fatal("Expected error for server error")
 	}
 }
 
 func TestKVUnlinkNotFound(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
-		"POST /api/kv/unlink": func(w http.ResponseWriter, r *http.Request) {
+		"DELETE /api/kv/missing-key/links/users/doc_1": func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte("Link not found"))
 		},
@@ -144,19 +137,16 @@ func TestKVUnlinkNotFound(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	_, err := client.KVUnlink("missing-key", "users", "doc_1")
-	if err == nil {
+	if _, err := client.KVUnlink("missing-key", "users", "doc_1"); err == nil {
 		t.Fatal("Expected error for non-existent link")
 	}
 }
 
 func TestKVGetLinksEmpty(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
-		"GET /api/kv/links/empty-key": func(w http.ResponseWriter, r *http.Request) {
+		"GET /api/kv/empty-key/links": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"links": []interface{}{},
-			})
+			_ = json.NewEncoder(w).Encode([]interface{}{})
 		},
 	})
 	defer server.Close()
@@ -166,11 +156,7 @@ func TestKVGetLinksEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("KVGetLinks failed: %v", err)
 	}
-	links, ok := result["links"].([]interface{})
-	if !ok {
-		t.Fatal("Expected links to be an array")
-	}
-	if len(links) != 0 {
-		t.Errorf("Expected 0 links, got %d", len(links))
+	if len(result) != 0 {
+		t.Errorf("Expected 0 links, got %d", len(result))
 	}
 }
