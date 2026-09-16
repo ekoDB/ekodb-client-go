@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-09-16
+
 ### Added
 
 - Function definitions now retain `transaction_config`, and modeled conditions
