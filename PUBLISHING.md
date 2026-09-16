@@ -8,8 +8,9 @@ semantic-version tag on `main`; there is no registry upload.
 A release is a version cap merged to `main`, the same way the other Go
 repositories release:
 
-1. Collapse `## [Unreleased]` in `CHANGELOG.md` into `## [X.Y.Z] - YYYY-MM-DD`
-   (that date shape exactly) and set `version.json` to `X.Y.Z`.
+1. Run `make bump-version VERSION=X.Y.Z` to set `version.json`, then collapse
+   `## [Unreleased]` in `CHANGELOG.md` into `## [X.Y.Z] - YYYY-MM-DD` (that date
+   shape exactly).
 2. Commit the two files as `chore(*): vX.Y.Z` and rebase-merge that to `main`.
 
 `.github/workflows/release.yml` then tags `vX.Y.Z`, publishes the GitHub Release
