@@ -24,7 +24,7 @@ JET := "                    $(MAGENTA)●$(RESET)\n                    $(PURPLE)
 # ASCII Banner for ekoDB (matches CLI banner)
 BANNER := "$(BOLD) ██████═╗ ██╗  ██╗  ██████╗  ████████╗ ████████╗$(RESET)\n$(BOLD)██╔═══██╝ ██║ ██╔╝ ██╔═══██╗  ██╔═══██║ ██╔═══██╗$(RESET)\n$(BOLD)████████╗ █████╔╝  ██║   ██║  ██║   ██║████████╔╝$(RESET)\n$(BOLD)██╔═════╝ ██╔═██╗  ██║   ██║  ██║   ██║ ██╔═══██╗$(RESET)\n$(BOLD)████████╗ ██║  ██╗ ╚██████╔╝ ████████║ ████████╔╝$(RESET)\n$(BOLD)╚═══════╝ ╚═╝  ╚═╝  ╚═════╝  ╚═══════╝ ╚═══════╝$(RESET)"
 
-.PHONY: all build test test-verbose test-coverage test-hooks clean fmt fmt-go fmt-md fmt-check format lint lint-fix ensure-golangci-lint vet mod-tidy mod-verify mod-download install help setup deps-check deps-update index-release check-ready examples pre-commit ensure-hooks version info
+.PHONY: all build test test-verbose test-coverage test-hooks clean fmt fmt-go fmt-md fmt-check format lint lint-fix ensure-golangci-lint vet mod-tidy mod-verify mod-download install help setup deps-check deps-update bump-version index-release check-ready examples pre-commit ensure-hooks version info
 
 # Language Sub-Banner
 GO_BANNER := \
@@ -69,6 +69,7 @@ help:
 	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
 	@echo "🚀 $(CYAN)PUBLISHING$(RESET)"
 	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+	@echo "  🔢 $(GREEN)make bump-version$(RESET)   - Update version.json (VERSION=X.Y.Z)"
 	@echo "  📚 $(GREEN)make index-release$(RESET)  - Make a pushed tag visible on pkg.go.dev (VERSION=vX.Y.Z)"
 	@echo "  ✅ $(GREEN)make check-ready$(RESET)    - fmt-check, vet and tests in one run"
 	@echo ""
@@ -300,6 +301,25 @@ check-ready: fmt-check vet test
 # Neither the module proxy nor pkg.go.dev watches GitHub, so a pushed tag is
 # not on pkg.go.dev until something asks for it. This runs the three requests
 # that make it appear and succeeds only once the version page renders.
+bump-version: ## Update version.json (VERSION=X.Y.Z; prompts when omitted)
+	@CURRENT_VERSION=$$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' version.json); \
+	NEW_VERSION='$(VERSION)'; \
+	if [ -z "$$NEW_VERSION" ]; then \
+		printf "Enter new version (current: %s): " "$$CURRENT_VERSION"; \
+		read -r NEW_VERSION; \
+	fi; \
+	if ! printf '%s\n' "$$NEW_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$$'; then \
+		echo "❌ $(RED)Version must use X.Y.Z format (got '$$NEW_VERSION')$(RESET)"; \
+		exit 2; \
+	fi; \
+	if [ "$$NEW_VERSION" = "$$CURRENT_VERSION" ]; then \
+		echo "📌 $(YELLOW)version.json is already $$NEW_VERSION$(RESET)"; \
+		exit 0; \
+	fi; \
+	printf '{\n  "version": "%s"\n}\n' "$$NEW_VERSION" > version.json; \
+	echo "✅ $(GREEN)Bumped version.json from $$CURRENT_VERSION to $$NEW_VERSION$(RESET)"; \
+	echo "$(YELLOW)Next: move [Unreleased] to ## [$$NEW_VERSION] - YYYY-MM-DD in CHANGELOG.md for the release cap.$(RESET)"
+
 index-release: ## Make a pushed tag visible on pkg.go.dev (VERSION=vX.Y.Z)
 	@bash scripts/index-release.sh "$(VERSION)"
 
