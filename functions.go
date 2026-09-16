@@ -1647,9 +1647,11 @@ func (c *Client) GetFunction(id string) (*UserFunction, error) {
 func (c *Client) ListFunctions(tags []string) ([]UserFunction, error) {
 	reqURL := "/api/functions"
 	if len(tags) > 0 {
-		// QueryEscape encodes the value (`&`/`=`/`,`), so a tag containing
-		// query-reserved characters can't smuggle extra query params.
-		reqURL += "?tags=" + url.QueryEscape(joinStrings(tags, ","))
+		query := url.Values{}
+		for _, tag := range tags {
+			query.Add("tag", tag)
+		}
+		reqURL += "?" + query.Encode()
 	}
 
 	respBody, err := c.makeRequest("GET", reqURL, nil)
@@ -1697,18 +1699,6 @@ func (c *Client) CallFunction(labelOrID string, params map[string]interface{}) (
 	return &result, nil
 }
 
-// Helper function to join strings
-func joinStrings(strs []string, sep string) string {
-	if len(strs) == 0 {
-		return ""
-	}
-	result := strs[0]
-	for i := 1; i < len(strs); i++ {
-		result += sep + strs[i]
-	}
-	return result
-}
-
 // ============================================================================
 // User Functions API
 // ============================================================================
@@ -1750,9 +1740,11 @@ func (c *Client) GetUserFunction(label string) (*UserFunction, error) {
 func (c *Client) ListUserFunctions(tags []string) ([]UserFunction, error) {
 	reqURL := "/api/functions"
 	if len(tags) > 0 {
-		// QueryEscape encodes the value (`&`/`=`/`,`), so a tag containing
-		// query-reserved characters can't smuggle extra query params.
-		reqURL += "?tags=" + url.QueryEscape(joinStrings(tags, ","))
+		query := url.Values{}
+		for _, tag := range tags {
+			query.Add("tag", tag)
+		}
+		reqURL += "?" + query.Encode()
 	}
 
 	respBody, err := c.makeRequest("GET", reqURL, nil)

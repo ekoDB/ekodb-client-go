@@ -38,6 +38,10 @@ and this project adheres to
 
 ### Fixed
 
+- Atomic update bodies now use lowercase field names in MessagePack mode,
+  action sequences use their required JSON wire format, and collection restore
+  reads the current `cleared_count` response field. `RestoreRecordStatus`
+  exposes the server's `restored` boolean without breaking `RestoreRecord`.
 - README examples now use the current schedule-trigger, transaction-config,
   goal-status, and agent-model contracts.
 - `make test` now exits nonzero when the Go test command fails, and linked

@@ -743,9 +743,9 @@ func TestListUserFunctions(t *testing.T) {
 func TestListUserFunctionsWithTags(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"GET /api/functions*": func(w http.ResponseWriter, r *http.Request) {
-			tags := r.URL.Query().Get("tags")
-			if tags == "" {
-				t.Error("Expected tags parameter")
+			tags := r.URL.Query()["tag"]
+			if !reflect.DeepEqual(tags, []string{"etl", "cron"}) {
+				t.Errorf("tag parameters = %v, want [etl cron]", tags)
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode([]map[string]interface{}{

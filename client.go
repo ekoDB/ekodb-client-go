@@ -523,6 +523,19 @@ func (c *Client) unmarshal(path string, data []byte, v interface{}) error {
 // Only CRUD operations (insert/update/delete/find/batch) use MessagePack
 // Everything else uses JSON for compatibility
 func shouldUseJSON(path string) bool {
+	// The action-sequence endpoint accepts JSON even though it lives under the
+	// otherwise MessagePack-capable /api/update namespace. Match its full route
+	// shape so a normal update to a collection named "sequence" remains
+	// MessagePack-capable.
+	routePath := path
+	if queryStart := strings.IndexByte(routePath, '?'); queryStart >= 0 {
+		routePath = routePath[:queryStart]
+	}
+	segments := strings.Split(strings.Trim(routePath, "/"), "/")
+	if len(segments) == 5 && segments[0] == "api" && segments[1] == "update" && segments[2] == "sequence" {
+		return true
+	}
+
 	// ONLY these operations support MessagePack
 	msgpackPaths := []string{
 		"/api/insert/",
@@ -796,6 +809,7 @@ type FindByIDOptions struct {
 	// carries it) and rides alongside transaction_id when both are set. Nil
 	// leaves it off.
 	BypassRipple  *bool
+	BypassCache   *bool
 	TransactionId *string
 }
 
@@ -813,6 +827,9 @@ func (c *Client) FindByID(collection, id string, opts ...FindByIDOptions) (Recor
 		}
 		if opts[0].BypassRipple != nil {
 			params.Add("bypass_ripple", fmt.Sprintf("%t", *opts[0].BypassRipple))
+		}
+		if opts[0].BypassCache != nil {
+			params.Add("bypass_cache", fmt.Sprintf("%t", *opts[0].BypassCache))
 		}
 		if opts[0].TransactionId != nil {
 			params.Add("transaction_id", *opts[0].TransactionId)
@@ -917,8 +934,8 @@ func (c *Client) Update(collection, id string, record Record, opts ...UpdateOpti
 
 // UpdateWithActionBody is the request body for a single atomic field action.
 type UpdateWithActionBody struct {
-	Field string      `json:"field"`
-	Value interface{} `json:"value"`
+	Field string      `json:"field" msgpack:"field"`
+	Value interface{} `json:"value" msgpack:"value"`
 }
 
 // UpdateWithAction applies an atomic field action to a single field of a record.
@@ -1179,8 +1196,9 @@ type UpsertOptions struct {
 	BypassCache   *bool
 }
 
-// Upsert inserts or updates a document (atomic insert-or-update)
-// Attempts to update first. If the record doesn't exist (404), it will be inserted.
+// Upsert inserts or updates a document.
+// It checks whether the record exists first because some servers return a
+// successful-looking response when updating a missing caller-supplied ID.
 func (c *Client) Upsert(collection, id string, record Record, opts ...UpsertOptions) (Record, error) {
 	var bypassRipple *bool
 	var transactionId *string
@@ -1193,18 +1211,14 @@ func (c *Client) Upsert(collection, id string, record Record, opts ...UpsertOpti
 		ttl = opts[0].TTL
 	}
 
-	// Try update first
-	updateOpts := UpdateOptions{
+	findOpts := FindByIDOptions{
 		BypassRipple:  bypassRipple,
-		TransactionId: transactionId,
 		BypassCache:   bypassCache,
+		TransactionId: transactionId,
 	}
-	result, err := c.Update(collection, id, record, updateOpts)
+	_, err := c.FindByID(collection, id, findOpts)
 	if err != nil {
-		// Check if it's a 404 Not Found error
 		if httpErr, ok := err.(*HTTPError); ok && httpErr.IsNotFound() {
-			// Record doesn't exist, insert it with the intended id
-			record["id"] = id
 			insertOpts := InsertOptions{
 				TTL:           ttl,
 				BypassRipple:  bypassRipple,
@@ -1213,10 +1227,15 @@ func (c *Client) Upsert(collection, id string, record Record, opts ...UpsertOpti
 			}
 			return c.Insert(collection, record, insertOpts)
 		}
-		// Other error, propagate it
 		return nil, err
 	}
-	return result, nil
+
+	updateOpts := UpdateOptions{
+		BypassRipple:  bypassRipple,
+		TransactionId: transactionId,
+		BypassCache:   bypassCache,
+	}
+	return c.Update(collection, id, record, updateOpts)
 }
 
 // FindOne finds a single record by field value
@@ -1610,8 +1629,29 @@ func (c *Client) CountDocuments(collection string) (int, error) {
 	return len(records), nil
 }
 
-// RestoreRecord restores a deleted record from trash
-// Records remain in trash for 30 days before permanent deletion
+// RestoreRecordStatus restores a deleted record from trash and reports whether
+// the record data was recoverable. A successful request can still return false
+// after clearing a tombstone whose original data is unavailable.
+func (c *Client) RestoreRecordStatus(collection, id string) (bool, error) {
+	path := fmt.Sprintf("/api/trash/%s/%s", url.PathEscape(collection), url.PathEscape(id))
+	respBody, err := c.makeRequest("POST", path, nil)
+	if err != nil {
+		return false, err
+	}
+
+	var result struct {
+		Status   string `json:"status"`
+		Restored bool   `json:"restored"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return false, err
+	}
+	return result.Status == "success" && result.Restored, nil
+}
+
+// RestoreRecord restores a deleted record from trash.
+//
+// Deprecated: use RestoreRecordStatus when the restore outcome matters.
 func (c *Client) RestoreRecord(collection, id string) error {
 	path := fmt.Sprintf("/api/trash/%s/%s", url.PathEscape(collection), url.PathEscape(id))
 	_, err := c.makeRequest("POST", path, nil)
@@ -1628,15 +1668,15 @@ func (c *Client) RestoreCollection(collection string) (int, error) {
 	}
 
 	var result struct {
-		Status          string `json:"status"`
-		Collection      string `json:"collection"`
-		RecordsRestored int    `json:"records_restored"`
+		Status       string `json:"status"`
+		Collection   string `json:"collection"`
+		ClearedCount int    `json:"cleared_count"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return 0, err
 	}
 
-	return result.RecordsRestored, nil
+	return result.ClearedCount, nil
 }
 
 // HealthState is a health status value reported by ekoDB's /api/health.
