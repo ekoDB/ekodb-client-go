@@ -12,6 +12,10 @@ import (
 
 func TestUpsert_UpdatePath(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
+		"GET /api/find/users/user_123": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(Record{"id": "user_123", "name": "Alice"})
+		},
 		"PUT /api/update/users/user_123": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(Record{"id": "user_123", "name": "Alice Updated"})
@@ -30,18 +34,53 @@ func TestUpsert_UpdatePath(t *testing.T) {
 	}
 }
 
+func TestUpsert_ForwardsBypassCacheToExistenceProbe(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"GET /api/find/users/user_123": func(w http.ResponseWriter, r *http.Request) {
+			if got := r.URL.Query().Get("bypass_cache"); got != "true" {
+				t.Fatalf("existence probe bypass_cache = %q, want true", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(Record{"id": "user_123"})
+		},
+		"PUT /api/update/users/user_123": func(w http.ResponseWriter, r *http.Request) {
+			if got := r.URL.Query().Get("bypass_cache"); got != "true" {
+				t.Fatalf("update bypass_cache = %q, want true", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(Record{"id": "user_123", "name": "updated"})
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	bypassCache := true
+	if _, err := client.Upsert(
+		"users",
+		"user_123",
+		Record{"name": "updated"},
+		UpsertOptions{BypassCache: &bypassCache},
+	); err != nil {
+		t.Fatalf("Upsert failed: %v", err)
+	}
+}
+
 func TestUpsert_InsertPath(t *testing.T) {
 	callCount := 0
+	var insertBody Record
 	server := createTestServer(t, map[string]http.HandlerFunc{
-		"PUT /api/update/users/new_id": func(w http.ResponseWriter, r *http.Request) {
+		"GET /api/find/users/new_id": func(w http.ResponseWriter, r *http.Request) {
 			callCount++
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Not found"})
 		},
 		"POST /api/insert/users": func(w http.ResponseWriter, r *http.Request) {
 			callCount++
+			if err := json.NewDecoder(r.Body).Decode(&insertBody); err != nil {
+				t.Errorf("decode insert body: %v", err)
+			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(Record{"id": "new_id", "name": "Bob"})
+			_ = json.NewEncoder(w).Encode(Record{"id": "server_generated_id", "name": "Bob"})
 		},
 	})
 	defer server.Close()
@@ -53,10 +92,50 @@ func TestUpsert_InsertPath(t *testing.T) {
 		t.Fatalf("Upsert failed: %v", err)
 	}
 	if callCount != 2 {
-		t.Errorf("Expected 2 calls (update + insert), got %d", callCount)
+		t.Errorf("Expected 2 calls (existence check + insert), got %d", callCount)
 	}
-	if result["id"] != "new_id" {
-		t.Errorf("Expected id new_id, got %v", result["id"])
+	if _, ok := insertBody["id"]; ok {
+		t.Errorf("insert body unexpectedly contains caller-supplied id: %v", insertBody)
+	}
+	if result["id"] != "server_generated_id" {
+		t.Errorf("Expected server-generated id, got %v", result["id"])
+	}
+}
+
+func TestUpsert_DoesNotTrustSuccessfulMissingUpdate(t *testing.T) {
+	putCalled := false
+	var insertBody Record
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"GET /api/find/users/new_id": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Not found"})
+		},
+		"PUT /api/update/users/new_id": func(w http.ResponseWriter, r *http.Request) {
+			putCalled = true
+			_ = json.NewEncoder(w).Encode(Record{"id": "new_id", "name": "Bob"})
+		},
+		"POST /api/insert/users": func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewDecoder(r.Body).Decode(&insertBody); err != nil {
+				t.Errorf("decode insert body: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(Record{"id": "server_generated_id", "name": "Bob"})
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.Upsert("users", "new_id", Record{"name": "Bob"})
+	if err != nil {
+		t.Fatalf("Upsert failed: %v", err)
+	}
+	if putCalled {
+		t.Fatal("Upsert called Update after the existence check reported not found")
+	}
+	if _, ok := insertBody["id"]; ok {
+		t.Errorf("insert body unexpectedly contains caller-supplied id: %v", insertBody)
+	}
+	if result["id"] != "server_generated_id" {
+		t.Errorf("Expected server-generated id, got %v", result["id"])
 	}
 }
 

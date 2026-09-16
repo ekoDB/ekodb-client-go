@@ -242,7 +242,7 @@ func TestTaskCreate(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/tasks": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1", "name": "Test Task", "status": "active"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "task_1"})
 		},
 	})
 	defer server.Close()
@@ -449,7 +449,7 @@ func TestAgentCreate(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/agents": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "agent_1", "name": "TestAgent"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "agent_1"})
 		},
 	})
 	defer server.Close()
@@ -459,8 +459,8 @@ func TestAgentCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentCreate failed: %v", err)
 	}
-	if result["name"] != "TestAgent" {
-		t.Errorf("Expected name TestAgent, got %v", result["name"])
+	if result["id"] != "agent_1" {
+		t.Errorf("Expected id agent_1, got %v", result["id"])
 	}
 }
 
@@ -635,9 +635,7 @@ func TestGoalTemplateCreate(t *testing.T) {
 	server := createTestServer(t, map[string]http.HandlerFunc{
 		"POST /api/chat/goal-templates": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"id": "tpl_1", "title": "Migration Template",
-			})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "tpl_1"})
 		},
 	})
 	defer server.Close()

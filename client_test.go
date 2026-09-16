@@ -606,6 +606,133 @@ func TestUpdateWithActionNotFound(t *testing.T) {
 	}
 }
 
+func TestUpdateWithActionUsesLowercaseMessagePackFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/token" {
+			mockTokenHandler(t)(w, r)
+			return
+		}
+
+		if got := r.Header.Get("Content-Type"); got != "application/msgpack" {
+			t.Fatalf("Content-Type = %q, want application/msgpack", got)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		var decoded map[string]interface{}
+		if err := msgpack.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("decode MessagePack request: %v", err)
+		}
+		if decoded["field"] != "views" {
+			t.Fatalf("field = %v, want views; body keys: %v", decoded["field"], decoded)
+		}
+		if _, ok := decoded["Field"]; ok {
+			t.Fatalf("request used Go field name instead of wire name: %v", decoded)
+		}
+
+		w.Header().Set("Content-Type", "application/msgpack")
+		response, _ := msgpack.Marshal(Record{"id": "rec_1"})
+		_, _ = w.Write(response)
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithConfig(ClientConfig{
+		BaseURL:     server.URL,
+		APIKey:      "test-api-key",
+		ShouldRetry: false,
+		Timeout:     5 * time.Second,
+		Format:      MessagePack,
+	})
+	if err != nil {
+		t.Fatalf("NewClientWithConfig failed: %v", err)
+	}
+	if _, err := client.UpdateWithAction("counters", "rec_1", "increment", "views", 1); err != nil {
+		t.Fatalf("UpdateWithAction failed: %v", err)
+	}
+}
+
+func TestUpdateWithActionSequenceUsesJSONForMessagePackClient(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/token" {
+			mockTokenHandler(t)(w, r)
+			return
+		}
+
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
+		var actions [][3]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&actions); err != nil {
+			t.Fatalf("decode JSON request: %v", err)
+		}
+		if len(actions) != 1 || actions[0][0] != "increment" {
+			t.Fatalf("actions = %v, want one increment action", actions)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(Record{"id": "rec_1"})
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithConfig(ClientConfig{
+		BaseURL:     server.URL,
+		APIKey:      "test-api-key",
+		ShouldRetry: false,
+		Timeout:     5 * time.Second,
+		Format:      MessagePack,
+	})
+	if err != nil {
+		t.Fatalf("NewClientWithConfig failed: %v", err)
+	}
+	actions := [][3]interface{}{{"increment", "views", 1}}
+	if _, err := client.UpdateWithActionSequence("counters", "rec_1", actions); err != nil {
+		t.Fatalf("UpdateWithActionSequence failed: %v", err)
+	}
+}
+
+func TestUpdateCollectionNamedSequenceUsesMessagePack(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/token" {
+			mockTokenHandler(t)(w, r)
+			return
+		}
+
+		if r.URL.Path != "/api/update/sequence/rec_1" {
+			t.Fatalf("path = %q, want /api/update/sequence/rec_1", r.URL.Path)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/msgpack" {
+			t.Fatalf("Content-Type = %q, want application/msgpack", got)
+		}
+		var record Record
+		if err := msgpack.NewDecoder(r.Body).Decode(&record); err != nil {
+			t.Fatalf("decode MessagePack request: %v", err)
+		}
+		if record["name"] != "updated" {
+			t.Fatalf("record name = %v, want updated", record["name"])
+		}
+
+		w.Header().Set("Content-Type", "application/msgpack")
+		response, _ := msgpack.Marshal(Record{"id": "rec_1", "name": "updated"})
+		_, _ = w.Write(response)
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithConfig(ClientConfig{
+		BaseURL:     server.URL,
+		APIKey:      "test-api-key",
+		ShouldRetry: false,
+		Timeout:     5 * time.Second,
+		Format:      MessagePack,
+	})
+	if err != nil {
+		t.Fatalf("NewClientWithConfig failed: %v", err)
+	}
+	if _, err := client.Update("sequence", "rec_1", Record{"name": "updated"}); err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+}
+
 // ============================================================================
 // Batch Operation Tests
 // ============================================================================
@@ -1394,7 +1521,10 @@ func TestRestoreRecordSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/trash/users/record_123": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]string{"status": "restored"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":   "success",
+				"restored": true,
+			})
 		},
 	}
 	server := createTestServer(t, handlers)
@@ -1407,14 +1537,52 @@ func TestRestoreRecordSuccess(t *testing.T) {
 	}
 }
 
+func TestRestoreRecordPreservesLegacyEmptyResponseCompatibility(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/trash/users/record_123": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	if err := client.RestoreRecord("users", "record_123"); err != nil {
+		t.Errorf("RestoreRecord failed for a successful empty response: %v", err)
+	}
+}
+
+func TestRestoreRecordStatusReportsUnrecoverableData(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/trash/users/record_123": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":   "success",
+				"restored": false,
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	restored, err := client.RestoreRecordStatus("users", "record_123")
+	if err != nil {
+		t.Fatalf("RestoreRecordStatus failed: %v", err)
+	}
+	if restored {
+		t.Error("RestoreRecordStatus = true, want false")
+	}
+}
+
 func TestRestoreCollectionSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/trash/users": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"status":           "restored",
-				"collection":       "users",
-				"records_restored": 5,
+				"status":        "success",
+				"collection":    "users",
+				"cleared_count": 5,
 			})
 		},
 	}
@@ -2147,8 +2315,8 @@ func TestGetTransactionStatusSuccess(t *testing.T) {
 		"GET /api/transactions/tx_123": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"transaction_id": "tx_123",
-				"status":         "active",
+				"state":            "Active",
+				"operations_count": 2,
 			})
 		},
 	}
@@ -2160,8 +2328,11 @@ func TestGetTransactionStatusSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTransactionStatus failed: %v", err)
 	}
-	if status["status"] != "active" {
-		t.Errorf("GetTransactionStatus status = %v, want active", status["status"])
+	if status["state"] != "Active" {
+		t.Errorf("GetTransactionStatus state = %v, want Active", status["state"])
+	}
+	if status["operations_count"] != float64(2) {
+		t.Errorf("GetTransactionStatus operations_count = %v, want 2", status["operations_count"])
 	}
 }
 
@@ -2749,8 +2920,7 @@ func TestListUserFunctionsEncodesReservedCharsInTags(t *testing.T) {
 
 	client := createTestClient(t, server)
 	// A tag containing query-reserved characters must be percent-encoded, not
-	// concatenated raw into ?tags=... (which would split into extra query
-	// params). The capturing server's "{}" body won't unmarshal into
+	// sent as separate repeated `tag` values. The capturing server's "{}" body won't unmarshal into
 	// []UserFunction, so we ignore the result and assert only on the captured
 	// query — which is recorded before the response is written.
 	_, _ = client.ListUserFunctions([]string{"a&injected=1", "b"})
@@ -2758,8 +2928,8 @@ func TestListUserFunctionsEncodesReservedCharsInTags(t *testing.T) {
 	if got.escapedPath != "/api/functions" {
 		t.Errorf("path = %q, want /api/functions", got.escapedPath)
 	}
-	if v := got.queryValues.Get("tags"); v != "a&injected=1,b" {
-		t.Errorf("tags = %q, want %q", v, "a&injected=1,b")
+	if v := got.queryValues["tag"]; strings.Join(v, "|") != "a&injected=1|b" {
+		t.Errorf("tag values = %q, want %q", v, []string{"a&injected=1", "b"})
 	}
 	if got.queryValues.Has("injected") {
 		t.Errorf("reserved chars leaked a smuggled query param: injected=%q", got.queryValues.Get("injected"))
@@ -2772,8 +2942,8 @@ func TestListFunctionsEncodesReservedCharsInTags(t *testing.T) {
 	defer server.Close()
 
 	client := createTestClient(t, server)
-	// ListFunctions applies the same tags QueryEscape as ListUserFunctions, so
-	// a tag containing query-reserved characters must round-trip intact and not
+	// ListFunctions applies the same repeated tag encoding as ListUserFunctions, so
+	// tags containing query-reserved characters must round-trip intact and not
 	// smuggle an extra query param. The capturing server's "{}" body won't
 	// unmarshal into []UserFunction, so we ignore the result and assert only on
 	// the captured query.
@@ -2782,8 +2952,8 @@ func TestListFunctionsEncodesReservedCharsInTags(t *testing.T) {
 	if got.escapedPath != "/api/functions" {
 		t.Errorf("path = %q, want /api/functions", got.escapedPath)
 	}
-	if v := got.queryValues.Get("tags"); v != "a&injected=1,b" {
-		t.Errorf("tags = %q, want %q", v, "a&injected=1,b")
+	if v := got.queryValues["tag"]; strings.Join(v, "|") != "a&injected=1|b" {
+		t.Errorf("tag values = %q, want %q", v, []string{"a&injected=1", "b"})
 	}
 	if got.queryValues.Has("injected") {
 		t.Errorf("reserved chars leaked a smuggled query param: injected=%q", got.queryValues.Get("injected"))
