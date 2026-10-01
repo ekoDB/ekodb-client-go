@@ -5,6 +5,10 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+    # Listing `types:` replaces the default three, so `ready_for_review` is
+    # added explicitly: both jobs below skip while the PR is a draft, and
+    # marking it ready is the event that runs them.
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,6 +20,9 @@ permissions:
 jobs:
   lint:
     name: Lint
+    # No work on a draft PR; runs when the PR is marked ready. A no-op on
+    # push, where github.event.pull_request is null.
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,6 +38,9 @@ jobs:
 
   go-tests:
     name: Go Client Tests
+    # No work on a draft PR; runs when the PR is marked ready. A no-op on
+    # push, where github.event.pull_request is null.
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
