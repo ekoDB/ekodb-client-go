@@ -8,6 +8,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- CI does no work on a draft PR and runs when the PR is marked ready. The
+  `pull_request` trigger in `unit-tests.yml` now lists
+  `types: [opened, synchronize, reopened, ready_for_review]`, and the `lint` and
+  `go-tests` jobs carry `!github.event.pull_request.draft` in their `if:`. The
+  guard is a no-op on `push` runs. (#88)
+
 ## [0.27.0] - 2026-09-16
 
 ### Added
