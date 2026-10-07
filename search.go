@@ -28,6 +28,7 @@ type SearchQuery struct {
 	VectorMetric    *string   `json:"vector_metric,omitempty"`
 	VectorK         *int      `json:"vector_k,omitempty"`
 	VectorThreshold *float64  `json:"vector_threshold,omitempty"`
+	EfSearch        *int      `json:"ef_search,omitempty"`
 
 	// Hybrid search parameters
 	TextWeight   *float64 `json:"text_weight,omitempty"`
@@ -163,6 +164,12 @@ func (sb *SearchQueryBuilder) VectorK(k int) *SearchQueryBuilder {
 // VectorThreshold sets minimum similarity threshold
 func (sb *SearchQueryBuilder) VectorThreshold(threshold float64) *SearchQueryBuilder {
 	sb.query.VectorThreshold = &threshold
+	return sb
+}
+
+// EfSearch sets the HNSW query beam width for this search.
+func (sb *SearchQueryBuilder) EfSearch(efSearch int) *SearchQueryBuilder {
+	sb.query.EfSearch = &efSearch
 	return sb
 }
 

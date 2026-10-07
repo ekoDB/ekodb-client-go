@@ -1199,6 +1199,8 @@ type UpsertOptions struct {
 // Upsert inserts or updates a document.
 // It checks whether the record exists first because some servers return a
 // successful-looking response when updating a missing caller-supplied ID.
+// This is a read followed by a write, not an atomic operation. On insert,
+// the id argument overrides any id in record.
 func (c *Client) Upsert(collection, id string, record Record, opts ...UpsertOptions) (Record, error) {
 	var bypassRipple *bool
 	var transactionId *string
@@ -1225,7 +1227,12 @@ func (c *Client) Upsert(collection, id string, record Record, opts ...UpsertOpti
 				TransactionId: transactionId,
 				BypassCache:   bypassCache,
 			}
-			return c.Insert(collection, record, insertOpts)
+			insertRecord := make(Record, len(record)+1)
+			for key, value := range record {
+				insertRecord[key] = value
+			}
+			insertRecord["id"] = id
+			return c.Insert(collection, insertRecord, insertOpts)
 		}
 		return nil, err
 	}

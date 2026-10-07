@@ -40,6 +40,7 @@ type IndexConfig struct {
 	Metric         *DistanceMetric       `json:"metric,omitempty"`
 	M              *int                  `json:"m,omitempty"`
 	EfConstruction *int                  `json:"ef_construction,omitempty"`
+	EfSearch       *int                  `json:"ef_search,omitempty"`
 }
 
 // FieldTypeSchema represents field type schema with constraints
@@ -131,13 +132,16 @@ func (fb *FieldTypeSchemaBuilder) TextIndex(language string) *FieldTypeSchemaBui
 }
 
 // VectorIndex adds a vector index
-func (fb *FieldTypeSchemaBuilder) VectorIndex(algorithm VectorIndexAlgorithm, metric DistanceMetric, m, efConstruction int) *FieldTypeSchemaBuilder {
+func (fb *FieldTypeSchemaBuilder) VectorIndex(algorithm VectorIndexAlgorithm, metric DistanceMetric, m, efConstruction int, efSearch ...int) *FieldTypeSchemaBuilder {
 	fb.schema.Index = &IndexConfig{
 		Type:           "vector",
 		Algorithm:      &algorithm,
 		Metric:         &metric,
 		M:              &m,
 		EfConstruction: &efConstruction,
+	}
+	if len(efSearch) > 0 {
+		fb.schema.Index.EfSearch = &efSearch[0]
 	}
 	return fb
 }
