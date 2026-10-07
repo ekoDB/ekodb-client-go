@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- `SearchQuery.EfSearch`, `SearchQueryBuilder.EfSearch`, and optional
+  vector-index `efSearch` expose HNSW query beam width in the search request and
+  schema. Unset values are omitted from JSON. (#90)
+
 ### Fixed
 
 - CI does no work on a draft PR and runs when the PR is marked ready. The
@@ -15,6 +21,9 @@ and this project adheres to
   `types: [opened, synchronize, reopened, ready_for_review]`, and the `lint` and
   `go-tests` jobs carry `!github.event.pull_request.draft` in their `if:`. The
   guard is a no-op on `push` runs. (#88)
+- `Upsert` now inserts with the requested ID on a miss and leaves the caller's
+  map unchanged. The ID argument wins over a conflicting `record["id"]`; the
+  operation remains a non-atomic read and write. (#90)
 
 ## [0.27.0] - 2026-09-16
 

@@ -80,7 +80,7 @@ func TestUpsert_InsertPath(t *testing.T) {
 				t.Errorf("decode insert body: %v", err)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(Record{"id": "server_generated_id", "name": "Bob"})
+			_ = json.NewEncoder(w).Encode(Record{"id": "new_id", "name": "Bob"})
 		},
 	})
 	defer server.Close()
@@ -94,11 +94,11 @@ func TestUpsert_InsertPath(t *testing.T) {
 	if callCount != 2 {
 		t.Errorf("Expected 2 calls (existence check + insert), got %d", callCount)
 	}
-	if _, ok := insertBody["id"]; ok {
-		t.Errorf("insert body unexpectedly contains caller-supplied id: %v", insertBody)
+	if insertBody["id"] != "new_id" {
+		t.Errorf("insert body id = %v, want new_id", insertBody["id"])
 	}
-	if result["id"] != "server_generated_id" {
-		t.Errorf("Expected server-generated id, got %v", result["id"])
+	if result["id"] != "new_id" {
+		t.Errorf("Expected caller-supplied id, got %v", result["id"])
 	}
 }
 
@@ -118,7 +118,7 @@ func TestUpsert_DoesNotTrustSuccessfulMissingUpdate(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&insertBody); err != nil {
 				t.Errorf("decode insert body: %v", err)
 			}
-			_ = json.NewEncoder(w).Encode(Record{"id": "server_generated_id", "name": "Bob"})
+			_ = json.NewEncoder(w).Encode(Record{"id": "new_id", "name": "Bob"})
 		},
 	})
 	defer server.Close()
@@ -131,11 +131,11 @@ func TestUpsert_DoesNotTrustSuccessfulMissingUpdate(t *testing.T) {
 	if putCalled {
 		t.Fatal("Upsert called Update after the existence check reported not found")
 	}
-	if _, ok := insertBody["id"]; ok {
-		t.Errorf("insert body unexpectedly contains caller-supplied id: %v", insertBody)
+	if insertBody["id"] != "new_id" {
+		t.Errorf("insert body id = %v, want new_id", insertBody["id"])
 	}
-	if result["id"] != "server_generated_id" {
-		t.Errorf("Expected server-generated id, got %v", result["id"])
+	if result["id"] != "new_id" {
+		t.Errorf("Expected caller-supplied id, got %v", result["id"])
 	}
 }
 

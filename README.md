@@ -148,6 +148,17 @@ func main() {
 - ✅ **Configurable retry behavior**
 - ✅ **Retry-After header support**
 
+`Upsert(collection, id, record)` checks for the ID before writing. On a miss, it
+inserts the caller-supplied ID, which wins over a conflicting `record["id"]`.
+The caller's map is not changed. Upsert is a read followed by a write, not an
+atomic server operation.
+
+For HNSW vector search, set the query beam width with
+`NewSearchQueryBuilder("").Vector(vector).EfSearch(128)`. For a schema's vector
+index, pass the optional fifth argument to
+`NewFieldTypeSchemaBuilder("Vector").VectorIndex(algorithm, metric, m, efConstruction, efSearch)`.
+Both send `ef_search` only when set.
+
 ## 📖 Usage Examples
 
 ### Query Builder

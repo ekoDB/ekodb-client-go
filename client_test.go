@@ -320,6 +320,59 @@ func TestHealthFailure(t *testing.T) {
 // Insert Tests
 // ============================================================================
 
+func TestUpsertPreservesRequestedIDOnMissAndUpdatesOnHit(t *testing.T) {
+	var stored Record
+	inserts := 0
+	updates := 0
+	handlers := map[string]http.HandlerFunc{
+		"GET /api/find/users/requested": func(w http.ResponseWriter, r *http.Request) {
+			if stored == nil {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(stored)
+		},
+		"POST /api/insert/users": func(w http.ResponseWriter, r *http.Request) {
+			inserts++
+			if err := json.NewDecoder(r.Body).Decode(&stored); err != nil {
+				t.Fatalf("decode insert: %v", err)
+			}
+			if stored["id"] != "requested" {
+				t.Errorf("inserted id = %v, want requested", stored["id"])
+			}
+			_ = json.NewEncoder(w).Encode(stored)
+		},
+		"PUT /api/update/users/requested": func(w http.ResponseWriter, r *http.Request) {
+			updates++
+			var body Record
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode update: %v", err)
+			}
+			stored["name"] = body["name"]
+			_ = json.NewEncoder(w).Encode(stored)
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+	client := createTestClient(t, server)
+	record := Record{"id": "different-id", "name": "first"}
+
+	first, err := client.Upsert("users", "requested", record)
+	if err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	if first["id"] != "requested" || record["id"] != "different-id" {
+		t.Fatalf("first result = %v, caller record = %v", first, record)
+	}
+	second, err := client.Upsert("users", "requested", Record{"name": "second"})
+	if err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+	if second["id"] != "requested" || second["name"] != "second" || inserts != 1 || updates != 1 {
+		t.Fatalf("second result = %v, inserts = %d, updates = %d", second, inserts, updates)
+	}
+}
+
 func TestInsertSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/insert/users": func(w http.ResponseWriter, r *http.Request) {
@@ -1680,6 +1733,35 @@ func TestGetSchemaSuccess(t *testing.T) {
 // ============================================================================
 // Search Tests
 // ============================================================================
+
+func TestSearchEfSearchWire(t *testing.T) {
+	var bodies []map[string]interface{}
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/search/documents": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode search: %v", err)
+			}
+			bodies = append(bodies, body)
+			_ = json.NewEncoder(w).Encode(SearchResponse{Results: []SearchResult{}, Total: 0})
+		},
+	})
+	defer server.Close()
+	client := createTestClient(t, server)
+
+	if _, err := client.Search("documents", NewSearchQueryBuilder("").Vector([]float64{1, 0}).EfSearch(128).Build()); err != nil {
+		t.Fatalf("search with ef_search: %v", err)
+	}
+	if _, err := client.Search("documents", NewSearchQueryBuilder("").Vector([]float64{1, 0}).Build()); err != nil {
+		t.Fatalf("search without ef_search: %v", err)
+	}
+	if len(bodies) != 2 || bodies[0]["ef_search"] != float64(128) {
+		t.Fatalf("search bodies = %v", bodies)
+	}
+	if _, present := bodies[1]["ef_search"]; present {
+		t.Fatalf("unset ef_search was sent: %v", bodies[1])
+	}
+}
 
 func TestSearchSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{

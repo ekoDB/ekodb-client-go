@@ -5,6 +5,30 @@ import (
 	"testing"
 )
 
+func TestVectorIndexEfSearchWire(t *testing.T) {
+	encode := func(schema FieldTypeSchema) map[string]interface{} {
+		t.Helper()
+		body, err := json.Marshal(schema)
+		if err != nil {
+			t.Fatalf("marshal schema: %v", err)
+		}
+		var decoded map[string]interface{}
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("decode schema: %v", err)
+		}
+		return decoded["index"].(map[string]interface{})
+	}
+
+	with := encode(NewFieldTypeSchemaBuilder("Vector").VectorIndex(VectorIndexHNSW, DistanceMetricCosine, 16, 200, 64).Build())
+	without := encode(NewFieldTypeSchemaBuilder("Vector").VectorIndex(VectorIndexHNSW, DistanceMetricCosine, 16, 200).Build())
+	if with["ef_search"] != float64(64) {
+		t.Fatalf("index ef_search = %v, want 64", with["ef_search"])
+	}
+	if _, present := without["ef_search"]; present {
+		t.Fatalf("unset ef_search was sent: %v", without)
+	}
+}
+
 // TestUpdateSchemaConstraintsRequestShape proves UpdateSchemaConstraints PUTs
 // to /api/schemas/{collection} with a top-level "constraints" key — matching
 // the server's schema-constraints-update request contract exactly.
