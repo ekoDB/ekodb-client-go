@@ -29,6 +29,36 @@ func TestVectorIndexEfSearchWire(t *testing.T) {
 	}
 }
 
+func TestVectorIndexDimensionWire(t *testing.T) {
+	encode := func(schema FieldTypeSchema) map[string]interface{} {
+		t.Helper()
+		body, err := json.Marshal(schema)
+		if err != nil {
+			t.Fatalf("marshal schema: %v", err)
+		}
+		var decoded map[string]interface{}
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("decode schema: %v", err)
+		}
+		return decoded["index"].(map[string]interface{})
+	}
+
+	with := encode(NewFieldTypeSchemaBuilder("Vector").VectorIndex(VectorIndexHNSW, DistanceMetricCosine, 16, 200).Dimension(384).Build())
+	without := encode(NewFieldTypeSchemaBuilder("Vector").VectorIndex(VectorIndexHNSW, DistanceMetricCosine, 16, 200).Build())
+	if with["dimension"] != float64(384) {
+		t.Fatalf("index dimension = %v, want 384", with["dimension"])
+	}
+	if _, present := without["dimension"]; present {
+		t.Fatalf("unset dimension was sent: %v", without)
+	}
+
+	// Dimension on a field with no vector index must not invent one.
+	plain := NewFieldTypeSchemaBuilder("String").Dimension(384).Build()
+	if plain.Index != nil {
+		t.Fatalf("Dimension created an index on a non-vector field: %+v", plain.Index)
+	}
+}
+
 // TestUpdateSchemaConstraintsRequestShape proves UpdateSchemaConstraints PUTs
 // to /api/schemas/{collection} with a top-level "constraints" key — matching
 // the server's schema-constraints-update request contract exactly.

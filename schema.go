@@ -41,6 +41,7 @@ type IndexConfig struct {
 	M              *int                  `json:"m,omitempty"`
 	EfConstruction *int                  `json:"ef_construction,omitempty"`
 	EfSearch       *int                  `json:"ef_search,omitempty"`
+	Dimension      *int                  `json:"dimension,omitempty"`
 }
 
 // FieldTypeSchema represents field type schema with constraints
@@ -142,6 +143,16 @@ func (fb *FieldTypeSchemaBuilder) VectorIndex(algorithm VectorIndexAlgorithm, me
 	}
 	if len(efSearch) > 0 {
 		fb.schema.Index.EfSearch = &efSearch[0]
+	}
+	return fb
+}
+
+// Dimension fixes the vector length the field's vector index enforces from the
+// first write. Call it after VectorIndex; on a field without a vector index it
+// does nothing. The server refuses a dimension that is not a positive integer.
+func (fb *FieldTypeSchemaBuilder) Dimension(dimension int) *FieldTypeSchemaBuilder {
+	if fb.schema.Index != nil && fb.schema.Index.Type == "vector" {
+		fb.schema.Index.Dimension = &dimension
 	}
 	return fb
 }
