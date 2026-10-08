@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-08
+
 ### Added
 
 - `IndexConfig.Dimension` and `FieldTypeSchemaBuilder.Dimension` set the
