@@ -159,6 +159,10 @@ index, pass the optional fifth argument to
 `NewFieldTypeSchemaBuilder("Vector").VectorIndex(algorithm, metric, m, efConstruction, efSearch)`.
 Both send `ef_search` only when set.
 
+To fix the vector length a field's index enforces from the first write, chain
+`.Dimension(384)` after `VectorIndex(...)`; the server rejects a write of any
+other length. `dimension` is sent only when set.
+
 ## 📖 Usage Examples
 
 ### Query Builder
