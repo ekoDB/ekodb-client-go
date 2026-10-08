@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- `IndexConfig.Dimension` and `FieldTypeSchemaBuilder.Dimension` set the
+  optional vector length a vector index enforces from the first write. Unset
+  values are omitted from JSON. (#92)
+
 ## [0.28.0] - 2026-10-08
 
 ### Added
