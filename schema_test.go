@@ -57,6 +57,12 @@ func TestVectorIndexDimensionWire(t *testing.T) {
 	if plain.Index != nil {
 		t.Fatalf("Dimension created an index on a non-vector field: %+v", plain.Index)
 	}
+
+	// Dimension on a non-vector index must not leak into it.
+	text := NewFieldTypeSchemaBuilder("String").TextIndex("english").Dimension(384).Build()
+	if text.Index == nil || text.Index.Dimension != nil {
+		t.Fatalf("Dimension leaked into a text index: %+v", text.Index)
+	}
 }
 
 // TestUpdateSchemaConstraintsRequestShape proves UpdateSchemaConstraints PUTs
