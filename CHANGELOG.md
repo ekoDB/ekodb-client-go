@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-08
+
 ### Added
 
 - `SearchQuery.EfSearch`, `SearchQueryBuilder.EfSearch`, and optional
