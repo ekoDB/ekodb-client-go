@@ -1794,6 +1794,32 @@ func TestSearchSuccess(t *testing.T) {
 	}
 }
 
+func TestSearchExecutionPath(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{"reported", `{"results":[],"total":0,"execution_path":"index_filtered"}`, "index_filtered"},
+		{"absent", `{"results":[],"total":0}`, ""},
+		{"future value", `{"results":[],"total":0,"execution_path":"future_path"}`, "future_path"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var response SearchResponse
+			if err := json.Unmarshal([]byte(test.body), &response); err != nil {
+				t.Fatalf("decode search response: %v", err)
+			}
+			if test.want == "" {
+				if response.ExecutionPath != nil {
+					t.Fatalf("ExecutionPath = %q, want absent", *response.ExecutionPath)
+				}
+			} else if response.ExecutionPath == nil || *response.ExecutionPath != test.want {
+				t.Fatalf("ExecutionPath = %v, want %q", response.ExecutionPath, test.want)
+			}
+		})
+	}
+}
+
 func TestTextSearchSuccess(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"POST /api/search/documents": func(w http.ResponseWriter, r *http.Request) {

@@ -62,6 +62,9 @@ type SearchResult struct {
 type SearchResponse struct {
 	Results []SearchResult `json:"results"`
 	Total   int            `json:"total"`
+	// ExecutionPath reports how the server ran a vector search. It is absent on
+	// older servers and non-vector responses; unknown future values are retained.
+	ExecutionPath *string `json:"execution_path,omitempty"`
 	// ExecutionTimeMs is the server-reported search execution time.
 	ExecutionTimeMs *int `json:"execution_time_ms,omitempty"`
 	// TookMs is retained for compatibility with older/non-ekoDB response shapes.
