@@ -163,6 +163,10 @@ To fix the vector length a field's index enforces from the first write, chain
 `.Dimension(384)` after `VectorIndex(...)`; the server rejects a write of any
 other length. `dimension` is sent only when set.
 
+For vector searches, `SearchResponse.ExecutionPath` reports the server's
+optional `execution_path` (for example, `index_filtered`). It is `nil` when the
+server omits the field, and future path names remain available as strings.
+
 ## 📖 Usage Examples
 
 ### Query Builder
