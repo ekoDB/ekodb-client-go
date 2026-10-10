@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- **Search execution path.** `SearchResponse.ExecutionPath` preserves the
+  server's optional vector-search `execution_path`, including future values.
+  (#94)
+
 ## [0.29.0] - 2026-10-08
 
 ### Added
