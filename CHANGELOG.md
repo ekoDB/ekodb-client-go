@@ -14,6 +14,12 @@ and this project adheres to
   server's optional vector-search `execution_path`, including future values.
   (#94)
 
+### Fixed
+
+- **Version bump regression coverage.** An isolated fixture now checks valid,
+  repeated, invalid, interactive, and EOF inputs without changing the repo's
+  version file. (#87)
+
 ## [0.29.0] - 2026-10-08
 
 ### Added
