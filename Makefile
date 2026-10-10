@@ -24,7 +24,7 @@ JET := "                    $(MAGENTA)●$(RESET)\n                    $(PURPLE)
 # ASCII Banner for ekoDB (matches CLI banner)
 BANNER := "$(BOLD) ██████═╗ ██╗  ██╗  ██████╗  ████████╗ ████████╗$(RESET)\n$(BOLD)██╔═══██╝ ██║ ██╔╝ ██╔═══██╗  ██╔═══██║ ██╔═══██╗$(RESET)\n$(BOLD)████████╗ █████╔╝  ██║   ██║  ██║   ██║████████╔╝$(RESET)\n$(BOLD)██╔═════╝ ██╔═██╗  ██║   ██║  ██║   ██║ ██╔═══██╗$(RESET)\n$(BOLD)████████╗ ██║  ██╗ ╚██████╔╝ ████████║ ████████╔╝$(RESET)\n$(BOLD)╚═══════╝ ╚═╝  ╚═╝  ╚═════╝  ╚═══════╝ ╚═══════╝$(RESET)"
 
-.PHONY: all build test test-verbose test-coverage test-hooks clean fmt fmt-go fmt-md fmt-check format lint lint-fix ensure-golangci-lint vet mod-tidy mod-verify mod-download install help setup deps-check deps-update bump-version index-release check-ready examples pre-commit ensure-hooks version info
+.PHONY: all build test test-verbose test-coverage test-hooks test-bump-version clean fmt fmt-go fmt-md fmt-check format lint lint-fix ensure-golangci-lint vet mod-tidy mod-verify mod-download install help setup deps-check deps-update bump-version index-release check-ready examples pre-commit ensure-hooks version info
 
 # Language Sub-Banner
 GO_BANNER := \
@@ -113,6 +113,9 @@ ensure-hooks:
 test-hooks:
 	@scripts/test-ensure-hooks.sh
 
+test-bump-version:
+	@scripts/test-bump-version.sh
+
 # Build the library
 build: ensure-hooks
 	@echo "🛠️  $(CYAN)Building Go client library...$(RESET)"
@@ -120,7 +123,7 @@ build: ensure-hooks
 	@echo "✅ $(GREEN)Build complete!$(RESET)"
 
 # Run tests
-test: ensure-hooks test-hooks
+test: ensure-hooks test-hooks test-bump-version
 	@echo "🧪 $(CYAN)Running tests...$(RESET)"
 	@TEST_OUTPUT=$$($(GO) test ./... -race -v 2>&1); \
 	TEST_STATUS=$$?; \
