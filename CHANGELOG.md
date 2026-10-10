@@ -16,6 +16,8 @@ and this project adheres to
 
 ### Fixed
 
+- **Go 1.27 lint compatibility.** Pin golangci-lint v2.14.0 so local and CI lint
+  can read Go 1.27.2 export data; v2.13.0 failed during typechecking.
 - **Version bump regression coverage.** An isolated fixture now checks valid,
   repeated, invalid, interactive, and EOF inputs without changing the repo's
   version file. (#87)
