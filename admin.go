@@ -115,6 +115,7 @@ type APIKey struct {
 	KVPermissions         []KVPermissions                  `json:"kv_permissions,omitempty"`
 	CreatedAt             *int64                           `json:"created_at,omitempty"`
 	ExpiresAt             *int64                           `json:"expires_at,omitempty"`
+	RippleWarning         *string                          `json:"ripple_warning,omitempty"`
 }
 
 // CreateAPIKeyRequest defaults to a non-admin key with no collection grants.

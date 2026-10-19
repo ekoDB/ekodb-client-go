@@ -41,6 +41,9 @@ works for non-admin keys. It preserves `SelectFields`, `ExcludeFields`, and
 `WritableFields`, including nil versus empty slices. Legacy action arrays
 normalize to read/write objects.
 
+Check `key.RippleWarning` before installing a new key: a non-nil warning means
+registration succeeded locally but replication to peers failed.
+
 ```go
 _, err = admin.UpdateAPIKeyCollectionPermissions(ekodb.UpdateAPIKeyCollectionPermissionsRequest{
     APIKey: key.Key,
