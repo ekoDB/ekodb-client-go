@@ -3,6 +3,7 @@ package ekodb
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"testing"
 )
@@ -25,26 +26,15 @@ func TestAdminLive(t *testing.T) {
 		t.Fatal("could not generate disposable label")
 	}
 	label := "sdk-go-admin-" + hex.EncodeToString(unique)
-	created, err := admin.CreateAPIKey(CreateAPIKeyRequest{Label: label, CollectionPermissions: map[string][]APIKeyAction{"sdk_admin_probe": {APIKeyRead}}})
-	if err != nil {
-		t.Fatal(err)
-	}
 	t.Cleanup(func() {
-		if err := admin.RevokeAPIKey(created.Key); err != nil {
+		if err := cleanupAdminLiveKey(admin, label, apiKey); err != nil {
 			t.Errorf("Disposable key cleanup failed; revoke label %s: %v", label, err)
-			return
-		}
-		keys, err := admin.ListAPIKeys()
-		if err != nil {
-			t.Errorf("Could not verify disposable cleanup for label %s: %v", label, err)
-			return
-		}
-		for _, key := range keys {
-			if key.Label != nil && *key.Label == label {
-				t.Errorf("Disposable key remains for label %s", label)
-			}
 		}
 	})
+	created, err := admin.CreateAPIKey(CreateAPIKeyRequest{Label: label, CollectionPermissions: map[string][]APIKeyAction{"sdk_admin_probe": {APIKeyRead}}})
+	if err != nil {
+		t.Fatalf("Disposable creation failed for label %s: %v", label, err)
+	}
 	if created.IsAdmin {
 		t.Fatal("disposable key unexpectedly admin")
 	}
@@ -90,4 +80,39 @@ func TestAdminLive(t *testing.T) {
 	if !after.CollectionPermissions["sdk_admin_probe"].Write {
 		t.Fatal("permission update not reflected in fresh token")
 	}
+}
+
+// Recover by the unique test label even when registration's response is lost.
+func cleanupAdminLiveKey(admin *AdminClient, label, ownerKey string) error {
+	keys, err := admin.ListAPIKeys()
+	if err != nil {
+		return err
+	}
+	var matches []APIKey
+	for _, key := range keys {
+		if key.Label != nil && *key.Label == label {
+			matches = append(matches, key)
+		}
+	}
+	if len(matches) > 1 {
+		return fmt.Errorf("multiple keys match the disposable label")
+	}
+	for _, key := range matches {
+		if key.Key == ownerKey {
+			return fmt.Errorf("refusing to revoke the owner key")
+		}
+		if err := admin.RevokeAPIKey(key.Key); err != nil {
+			return err
+		}
+	}
+	keys, err = admin.ListAPIKeys()
+	if err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if key.Label != nil && *key.Label == label {
+			return fmt.Errorf("disposable key remains")
+		}
+	}
+	return nil
 }

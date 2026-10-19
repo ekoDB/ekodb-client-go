@@ -286,3 +286,51 @@ func TestAdminValidationBeforeHTTP(t *testing.T) {
 		t.Fatal("empty target accepted")
 	}
 }
+
+func TestAdminRegistrationPreservesPropagationWarning(t *testing.T) {
+	client := adminTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, strings.Replace(adminKeyJSON, `"expires_at":null}`, `"expires_at":null,"ripple_warning":"Propagation incomplete"}`, 1))
+	})
+	key, err := client.CreateAPIKey(CreateAPIKeyRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key.RippleWarning == nil || *key.RippleWarning != "Propagation incomplete" {
+		t.Fatal("registration warning lost")
+	}
+}
+
+func TestAdminDisposableCleanupAfterAmbiguousCreation(t *testing.T) {
+	present := false
+	deletions := 0
+	const label = "sdk-go-admin-cleanup-test"
+	client := adminTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/api/auth/register":
+			present = true
+			_, _ = io.WriteString(w, `malformed response after creating key`)
+		case r.Method == "GET" && r.URL.Path == "/api/auth/keys":
+			unrelated := strings.Replace(strings.Replace(adminKeyJSON, `"label":"disposable"`, `"label":"unrelated"`, 1), `"key":"new-secret"`, `"key":"unrelated-secret"`, 1)
+			if present {
+				_, _ = io.WriteString(w, "["+unrelated+","+strings.Replace(adminKeyJSON, `"label":"disposable"`, `"label":"`+label+`"`, 1)+"]")
+			} else {
+				_, _ = io.WriteString(w, "["+unrelated+"]")
+			}
+		case r.Method == "DELETE" && r.URL.Path == "/api/auth/keys/new-secret":
+			present = false
+			deletions++
+			w.WriteHeader(204)
+		default:
+			t.Error("unexpected cleanup request")
+		}
+	})
+	if _, err := client.CreateAPIKey(CreateAPIKeyRequest{Label: label}); err == nil {
+		t.Fatal("malformed create response accepted")
+	}
+	if err := cleanupAdminLiveKey(client, label, "admin-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if present || deletions != 1 {
+		t.Fatal("ambiguous key creation was not cleaned up exactly once")
+	}
+}
