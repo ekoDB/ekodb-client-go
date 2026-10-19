@@ -14,6 +14,9 @@ go get github.com/ekoDB/ekodb-client-go
 
 ## 🚀 Quick Start
 
+For key creation, listing, revocation and permission management, use the
+separate [`AdminClient`](docs/admin.md) in this same module.
+
 ### Basic Usage
 
 ```go

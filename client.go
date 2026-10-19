@@ -93,6 +93,7 @@ type ClientConfig struct {
 
 // Client represents an ekoDB client
 type Client struct {
+	redactErrors  bool // Secret-bearing admin requests never expose remote errors or URLs.
 	baseURL       string
 	apiKey        string
 	token         string
@@ -131,6 +132,14 @@ func NewClient(baseURL, apiKey string) (*Client, error) {
 
 // NewClientWithConfig creates a new ekoDB client with configuration
 func NewClientWithConfig(config ClientConfig) (*Client, error) {
+	client := newUninitializedClient(config)
+	if err := client.refreshToken(); err != nil {
+		return nil, fmt.Errorf("failed to get auth token: %w", err)
+	}
+	return client, nil
+}
+
+func newUninitializedClient(config ClientConfig) *Client {
 	// Set defaults
 	if config.Timeout == 0 {
 		config.Timeout = 30 * time.Second
@@ -161,12 +170,7 @@ func NewClientWithConfig(config ClientConfig) (*Client, error) {
 		},
 	}
 
-	// Automatically get token
-	if err := client.refreshToken(); err != nil {
-		return nil, fmt.Errorf("failed to get auth token: %w", err)
-	}
-
-	return client, nil
+	return client
 }
 
 // GetRateLimitInfo returns the current rate limit information
@@ -238,22 +242,31 @@ func (c *Client) refreshTokenIfStale(staleToken string) error {
 
 	resp, err := c.httpClient.Post(c.baseURL+"/api/auth/token", "application/json", bytes.NewBuffer(body))
 	if err != nil {
+		if c.redactErrors {
+			return fmt.Errorf("admin authentication failed")
+		}
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
+		if c.redactErrors {
+			return &HTTPError{StatusCode: resp.StatusCode, Message: "admin authentication failed"}
+		}
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("auth failed with status: %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		if c.redactErrors {
+			return fmt.Errorf("invalid admin authentication response")
+		}
 		return err
 	}
 
 	token, ok := result["token"].(string)
-	if !ok {
+	if !ok || token == "" {
 		return fmt.Errorf("invalid token response")
 	}
 
@@ -422,6 +435,9 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 
 	req, err := http.NewRequest(method, c.baseURL+path, body)
 	if err != nil {
+		if c.redactErrors {
+			return nil, fmt.Errorf("invalid admin request")
+		}
 		return nil, err
 	}
 
@@ -433,6 +449,9 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		if c.redactErrors {
+			return nil, fmt.Errorf("admin request failed")
+		}
 		// Handle network errors with retry, using exponential backoff with full
 		// jitter (instead of a fixed delay) so concurrent clients don't retry in
 		// lockstep and a flapping server isn't hammered.
@@ -448,7 +467,15 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		if c.redactErrors {
+			return nil, fmt.Errorf("admin response could not be read")
+		}
 		return nil, err
+	}
+	// Keep status codes useful without retaining any server-provided text.
+	errorMessage := string(responseBody)
+	if c.redactErrors {
+		errorMessage = "admin request failed"
 	}
 
 	// Extract rate limit info from successful responses
@@ -476,13 +503,13 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 
 		return nil, &RateLimitError{
 			RetryAfterSecs: retryAfter,
-			Message:        string(responseBody),
+			Message:        errorMessage,
 		}
 	}
 
 	// Handle unauthorized (401) or token errors - try refreshing token
 	if resp.StatusCode == http.StatusUnauthorized ||
-		(resp.StatusCode == http.StatusInternalServerError && bytes.Contains(responseBody, []byte("Invalid token"))) {
+		(!c.redactErrors && resp.StatusCode == http.StatusInternalServerError && bytes.Contains(responseBody, []byte("Invalid token"))) {
 		if attempt == 0 { // Only try token refresh once
 			log.Printf("Authentication failed, refreshing token...")
 			if err := c.refreshTokenIfStale(usedToken); err != nil {
@@ -492,7 +519,7 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 			return c.makeRequestWithRetry(method, path, data, attempt+1)
 		}
 		// Authentication is still failing after a token refresh attempt; return a clear auth error.
-		return nil, fmt.Errorf("authentication failed after token refresh (status %d): %s", resp.StatusCode, string(responseBody))
+		return nil, fmt.Errorf("authentication failed after token refresh (status %d): %s", resp.StatusCode, errorMessage)
 	}
 
 	// Handle service unavailable (503)
@@ -506,7 +533,7 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 	// Handle other errors
 	return nil, &HTTPError{
 		StatusCode: resp.StatusCode,
-		Message:    string(responseBody),
+		Message:    errorMessage,
 	}
 }
 
