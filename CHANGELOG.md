@@ -10,6 +10,13 @@ and this project adheres to
 
 ### Added
 
+- Three-state field-restriction edits for admin permission updates: omitted
+  pointers preserve, pointers to nil slices clear, and slices replace exactly.
+  Gate updates on authenticated server 0.79.2 or later, retain unknown metadata
+  including nested KV grants, and test the shared recorded contract plus
+  concurrent version caching. Extend disposable live coverage and require the
+  canonical five-SDK parity audit for Codex, Claude and Copilot. (#104)
+
 - Separate `AdminClient` for API-key creation, listing, revocation,
   current-token permissions and single-collection grant updates. Defaults to
   non-admin creation, preserves field restrictions on reads, redacts
