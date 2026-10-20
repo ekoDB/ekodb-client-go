@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"reflect"
 	"testing"
 )
 
@@ -69,6 +70,18 @@ func TestAdminLive(t *testing.T) {
 	request := UpdateAPIKeyCollectionPermissionsRequest{APIKey: created.Key, Collection: "sdk_admin_probe", Read: true, Write: true, SelectFields: &selected, ExcludeFields: &excluded, WritableFields: &writable}
 	if _, err = admin.UpdateAPIKeyCollectionPermissions(request); err != nil {
 		t.Fatal(err)
+	}
+	firstClient, err := NewAdminClient(baseURL, created.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := firstClient.GetPermissions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := first.CollectionPermissions["sdk_admin_probe"]
+	if !initial.Read || !initial.Write || !reflect.DeepEqual(initial.SelectFields, selected) || !reflect.DeepEqual(initial.ExcludeFields, excluded) || !reflect.DeepEqual(initial.WritableFields, writable) {
+		t.Fatal("initial field restrictions not reflected in fresh token")
 	}
 	var clear []string
 	empty := []string{}
