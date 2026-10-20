@@ -53,13 +53,28 @@ _, err = admin.UpdateAPIKeyCollectionPermissions(ekodb.UpdateAPIKeyCollectionPer
 })
 ```
 
-Updates replace one collection grant. Server 0.79.0 (`2af52800`) accepts only
-read/write flags on PUT and resets field restrictions to null. The typed update
-request has no field-restriction fields. Read existing grants before replacing a
-restricted grant. The current server also leaves its in-memory key cache stale
-after a PUT, so a newly authenticated token still carries the previous grant.
-The opt-in live test fails here. Server correction and a passing rerun are
-required before using permission updates for rotation or access control.
+Updates replace the read/write flags for one collection grant. Restriction edits
+require server **0.79.2 or later**, verified through authenticated `/api/health`
+and cached per admin client. Old, prerelease, malformed or unreadable versions
+fail before PUT. Earlier servers remove restrictions and can leave grants stale.
+
+For `SelectFields`, `ExcludeFields` and `WritableFields`, a nil pointer omits
+the field and preserves its previous value; a pointer to a nil slice sends null
+and clears it; a pointer to a slice replaces it, including an empty slice:
+
+```go
+var clear []string
+empty := []string{}
+_, err = admin.UpdateAPIKeyCollectionPermissions(ekodb.UpdateAPIKeyCollectionPermissionsRequest{
+    APIKey: key.Key, Collection: "jobs", Read: true, Write: false,
+    // SelectFields omitted: preserve it.
+    ExcludeFields: &clear, // null: clear the restriction.
+    WritableFields: &empty, // []: exact empty replacement.
+})
+```
+
+The response `Metadata` maps preserve unknown fields. Freshly authenticate the
+scoped key to verify a changed grant; an existing JWT can retain its old claims.
 
 `NewAdminClientWithConfig(AdminClientConfig{...})` accepts `BaseURL`, `APIKey`,
 and `Timeout` (default 30 seconds). The facade reuses the data SDK's
@@ -87,8 +102,10 @@ non-admin denial, then revokes its key and checks cleanup:
 EKODB_ADMIN_LIVE=1 go test -v -run '^TestAdminLive$' -count=1 ./...
 ```
 
-The paired SDK test environment ran server 0.79.0 (`2af52800`). Its protocol
-probe accepted registration permission arrays and rejected objects with 400. The
-SDK sends both an admin Bearer JWT and the admin key in the registration body
-for deployed-server compatibility. Registration never probes alternate formats
-by retrying a create. Field-restriction writes require separate server support.
+The recorded 0.79.2 fixture covers omitted, null, empty and replacement field
+states, including fresh-token grants. Its vendored copy permits offline tests
+without a sibling checkout. The matching `examples/go/client_admin.go` in the
+public client repository is read-only by default and can run the authorized
+disposable lifecycle with `EKODB_ADMIN_LIVE=1`. Creation uses both an admin
+Bearer JWT and the admin key in the body for deployed-server compatibility;
+registration never retries alternative formats.
