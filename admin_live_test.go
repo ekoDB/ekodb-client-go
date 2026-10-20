@@ -35,7 +35,7 @@ func TestAdminLive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Disposable creation failed for label %s: %v", label, err)
 	}
-	if created.IsAdmin {
+	if created.IsAdmin || created.Key == apiKey {
 		t.Fatal("disposable key unexpectedly admin")
 	}
 	keys, err := admin.ListAPIKeys()
@@ -65,8 +65,18 @@ func TestAdminLive(t *testing.T) {
 	if _, err = scoped.ListAPIKeys(); err == nil {
 		t.Fatal("non-admin key unexpectedly listed keys")
 	}
-	_, err = admin.UpdateAPIKeyCollectionPermissions(UpdateAPIKeyCollectionPermissionsRequest{APIKey: created.Key, Collection: "sdk_admin_probe", Read: true, Write: true})
-	if err != nil {
+	selected, excluded, writable := []string{"public"}, []string{"secret"}, []string{"public"}
+	request := UpdateAPIKeyCollectionPermissionsRequest{APIKey: created.Key, Collection: "sdk_admin_probe", Read: true, Write: true, SelectFields: &selected, ExcludeFields: &excluded, WritableFields: &writable}
+	if _, err = admin.UpdateAPIKeyCollectionPermissions(request); err != nil {
+		t.Fatal(err)
+	}
+	var clear []string
+	empty := []string{}
+	request.Write = false
+	request.SelectFields = nil
+	request.ExcludeFields = &clear
+	request.WritableFields = &empty
+	if _, err = admin.UpdateAPIKeyCollectionPermissions(request); err != nil {
 		t.Fatal(err)
 	}
 	refreshed, err := NewAdminClient(baseURL, created.Key)
@@ -77,7 +87,8 @@ func TestAdminLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !after.CollectionPermissions["sdk_admin_probe"].Write {
+	grant := after.CollectionPermissions["sdk_admin_probe"]
+	if !grant.Read || grant.Write || len(grant.SelectFields) != 1 || grant.SelectFields[0] != "public" || grant.ExcludeFields != nil || grant.WritableFields == nil || len(grant.WritableFields) != 0 {
 		t.Fatal("permission update not reflected in fresh token")
 	}
 }
