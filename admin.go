@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,7 +21,61 @@ type AdminClientConfig struct {
 }
 
 // AdminClient provides API-key administration separately from data operations.
-type AdminClient struct{ client *Client }
+type AdminClient struct {
+	client       *Client
+	versionOnce  sync.Once
+	versionError error
+}
+
+// MinServerVersionForPermissionEdits rejects releases that erase field restrictions.
+const MinServerVersionForPermissionEdits = "0.79.2"
+
+func (a *AdminClient) requirePermissionEdits() error {
+	a.versionOnce.Do(func() {
+		a.versionError = fmt.Errorf("permission updates need ekoDB 0.79.2 or later because earlier servers remove a grant's field restrictions when it is updated")
+		data, err := a.client.makeRequest(http.MethodGet, "/api/health", nil)
+		if err != nil {
+			return
+		}
+		var health struct {
+			Version string `json:"version"`
+		}
+		if json.Unmarshal(data, &health) != nil {
+			return
+		}
+		match := regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`).FindStringSubmatch(health.Version)
+		if match == nil {
+			return
+		}
+		minimum := make([]uint64, 3)
+		for i, part := range strings.Split(MinServerVersionForPermissionEdits, ".") {
+			n, err := strconv.ParseUint(part, 10, 64)
+			if err != nil || i >= len(minimum) {
+				return
+			}
+			minimum[i] = n
+		}
+		parts := make([]uint64, 3)
+		for i := range parts {
+			n, err := strconv.ParseUint(match[i+1], 10, 64)
+			if err != nil {
+				return
+			}
+			parts[i] = n
+		}
+		for i := range parts {
+			if parts[i] > minimum[i] {
+				a.versionError = nil
+				return
+			}
+			if parts[i] < minimum[i] {
+				return
+			}
+		}
+		a.versionError = nil
+	})
+	return a.versionError
+}
 
 // NewAdminClient authenticates an admin facade. Non-admin keys may use GetPermissions.
 func NewAdminClient(baseURL, apiKey string) (*AdminClient, error) {
@@ -49,11 +106,12 @@ const (
 // A nil slice represents an absent/null restriction. Empty slices remain
 // distinct from nil, preserving the server's field-permission semantics.
 type CollectionPermissions struct {
-	Read           bool     `json:"read"`
-	Write          bool     `json:"write"`
-	SelectFields   []string `json:"select_fields"`
-	ExcludeFields  []string `json:"exclude_fields"`
-	WritableFields []string `json:"writable_fields"`
+	Read           bool                       `json:"read"`
+	Write          bool                       `json:"write"`
+	SelectFields   []string                   `json:"select_fields"`
+	ExcludeFields  []string                   `json:"exclude_fields"`
+	WritableFields []string                   `json:"writable_fields"`
+	Metadata       map[string]json.RawMessage `json:"-"`
 }
 
 // UnmarshalJSON accepts legacy action arrays and modern permission objects.
@@ -88,18 +146,28 @@ func (p *CollectionPermissions) UnmarshalJSON(data []byte) error {
 	}
 	value.plain.Read, value.plain.Write = *value.Read, *value.Write
 	*p = CollectionPermissions(*value.plain)
+	var extra map[string]json.RawMessage
+	if json.Unmarshal(data, &extra) != nil {
+		return invalidAdminResponse()
+	}
+	for _, field := range []string{"read", "write", "select_fields", "exclude_fields", "writable_fields"} {
+		delete(extra, field)
+	}
+	p.Metadata = extra
 	return nil
 }
 
 // KVPermissions is a server-returned key-prefix grant.
 type KVPermissions struct {
-	Prefix string `json:"prefix"`
-	Read   bool   `json:"read"`
-	Write  bool   `json:"write"`
+	Metadata map[string]json.RawMessage `json:"-"`
+	Prefix   string                     `json:"prefix"`
+	Read     bool                       `json:"read"`
+	Write    bool                       `json:"write"`
 }
 
 // APIKeyPermissions describes the calling token's grants.
 type APIKeyPermissions struct {
+	Metadata              map[string]json.RawMessage       `json:"-"`
 	IsAdmin               bool                             `json:"is_admin"`
 	CollectionPermissions map[string]CollectionPermissions `json:"collection_permissions"`
 	KVPermissions         []KVPermissions                  `json:"kv_permissions,omitempty"`
@@ -107,6 +175,7 @@ type APIKeyPermissions struct {
 
 // APIKey contains a secret. Never log this value.
 type APIKey struct {
+	Metadata              map[string]json.RawMessage       `json:"-"`
 	Key                   string                           `json:"key"`
 	Label                 *string                          `json:"label,omitempty"`
 	Description           *string                          `json:"description,omitempty"`
@@ -132,6 +201,31 @@ type UpdateAPIKeyCollectionPermissionsRequest struct {
 	Collection string `json:"collection"`
 	Read       bool   `json:"read"`
 	Write      bool   `json:"write"`
+	// nil pointer keeps, pointer to nil slice clears, pointer to a slice replaces.
+	SelectFields   *[]string `json:"select_fields,omitempty"`
+	ExcludeFields  *[]string `json:"exclude_fields,omitempty"`
+	WritableFields *[]string `json:"writable_fields,omitempty"`
+}
+
+// UnmarshalJSON preserves explicit null rather than collapsing it to omission.
+func (r *UpdateAPIKeyCollectionPermissionsRequest) UnmarshalJSON(data []byte) error {
+	type plain UpdateAPIKeyCollectionPermissionsRequest
+	var value plain
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	for name, target := range map[string]**[]string{"select_fields": &value.SelectFields, "exclude_fields": &value.ExcludeFields, "writable_fields": &value.WritableFields} {
+		if raw, present := fields[name]; present && strings.TrimSpace(string(raw)) == "null" {
+			var clear []string
+			*target = &clear
+		}
+	}
+	*r = UpdateAPIKeyCollectionPermissionsRequest(value)
+	return nil
 }
 
 func invalidAdminResponse() error { return fmt.Errorf("invalid admin response") }
@@ -234,12 +328,124 @@ func (a *AdminClient) GetPermissions() (*APIKeyPermissions, error) {
 // UpdateAPIKeyCollectionPermissions replaces one target key's collection grant.
 // Returns the server's key record; verify effective grants separately.
 func (a *AdminClient) UpdateAPIKeyCollectionPermissions(request UpdateAPIKeyCollectionPermissionsRequest) (*APIKey, error) {
-	if request.APIKey == "" || request.Collection == "" {
+	if strings.TrimSpace(request.APIKey) == "" || strings.TrimSpace(request.Collection) == "" {
 		return nil, fmt.Errorf("an API key and collection are required")
+	}
+	for _, edit := range []*[]string{request.SelectFields, request.ExcludeFields, request.WritableFields} {
+		if edit != nil {
+			for _, field := range *edit {
+				if strings.TrimSpace(field) == "" {
+					return nil, fmt.Errorf("invalid collection permission update")
+				}
+			}
+		}
+	}
+	if err := a.requirePermissionEdits(); err != nil {
+		return nil, err
 	}
 	data, err := a.client.makeRequest(http.MethodPut, "/api/auth/permissions", request)
 	if err != nil {
 		return nil, err
 	}
 	return decodeAdminKey(data)
+}
+
+func extraAdminFields(data []byte, known ...string) (map[string]json.RawMessage, error) {
+	var extra map[string]json.RawMessage
+	if json.Unmarshal(data, &extra) != nil {
+		return nil, invalidAdminResponse()
+	}
+	for _, field := range known {
+		delete(extra, field)
+	}
+	return extra, nil
+}
+func (k *APIKey) UnmarshalJSON(data []byte) error {
+	type plain APIKey
+	var value plain
+	if json.Unmarshal(data, &value) != nil {
+		return invalidAdminResponse()
+	}
+	extra, err := extraAdminFields(data, "key", "label", "description", "is_admin", "collection_permissions", "kv_permissions", "created_at", "expires_at", "ripple_warning")
+	if err != nil {
+		return err
+	}
+	value.Metadata = extra
+	*k = APIKey(value)
+	return nil
+}
+func (k *APIKeyPermissions) UnmarshalJSON(data []byte) error {
+	type plain APIKeyPermissions
+	var value plain
+	if json.Unmarshal(data, &value) != nil {
+		return invalidAdminResponse()
+	}
+	extra, err := extraAdminFields(data, "is_admin", "collection_permissions", "kv_permissions")
+	if err != nil {
+		return err
+	}
+	value.Metadata = extra
+	*k = APIKeyPermissions(value)
+	return nil
+}
+func (p CollectionPermissions) MarshalJSON() ([]byte, error) {
+	type plain CollectionPermissions
+	base, err := json.Marshal(plain(p))
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err = json.Unmarshal(base, &fields); err != nil {
+		return nil, err
+	}
+	for name, value := range p.Metadata {
+		if _, known := fields[name]; !known {
+			fields[name] = value
+		}
+	}
+	return json.Marshal(fields)
+}
+
+func adminJSONWithMetadata(value any, metadata map[string]json.RawMessage) ([]byte, error) {
+	base, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err = json.Unmarshal(base, &fields); err != nil {
+		return nil, err
+	}
+	for name, extra := range metadata {
+		if _, known := fields[name]; !known {
+			fields[name] = extra
+		}
+	}
+	return json.Marshal(fields)
+}
+func (k APIKey) MarshalJSON() ([]byte, error) {
+	type plain APIKey
+	return adminJSONWithMetadata(plain(k), k.Metadata)
+}
+func (k APIKeyPermissions) MarshalJSON() ([]byte, error) {
+	type plain APIKeyPermissions
+	return adminJSONWithMetadata(plain(k), k.Metadata)
+}
+
+func (k *KVPermissions) UnmarshalJSON(data []byte) error {
+	type plain KVPermissions
+	var value plain
+	if json.Unmarshal(data, &value) != nil {
+		return invalidAdminResponse()
+	}
+	extra, err := extraAdminFields(data, "prefix", "read", "write")
+	if err != nil {
+		return err
+	}
+	value.Metadata = extra
+	*k = KVPermissions(value)
+	return nil
+}
+func (k KVPermissions) MarshalJSON() ([]byte, error) {
+	type plain KVPermissions
+	return adminJSONWithMetadata(plain(k), k.Metadata)
 }

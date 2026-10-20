@@ -35,6 +35,10 @@ func adminTestClient(t *testing.T, handler http.HandlerFunc) *AdminClient {
 		if r.Header.Get("Authorization") != "Bearer jwt-secret" || r.Header.Get("Accept") != "application/json" || r.Header.Get("Content-Type") != "application/json" {
 			t.Error("invalid admin headers")
 		}
+		if r.URL.Path == "/api/health" {
+			_, _ = io.WriteString(w, `{"version":"0.79.2"}`)
+			return
+		}
 		handler(w, r)
 	}))
 	t.Cleanup(server.Close)

@@ -1,0 +1,449 @@
+{
+  "status": "recorded against server 0.79.2 using a disposable key; credentials redacted",
+  "server_version": "0.79.2",
+  "minimum_server_version": "0.79.2",
+  "registration": {
+    "collection_permissions": {
+      "users": [
+        "read"
+      ]
+    },
+    "response_collection_permissions": {
+      "users": [
+        "read"
+      ]
+    }
+  },
+  "initial_grant": {
+    "read": true,
+    "write": false,
+    "select_fields": [
+      "name",
+      "email"
+    ],
+    "exclude_fields": [
+      "secret"
+    ],
+    "writable_fields": [
+      "name"
+    ]
+  },
+  "permission_edits": [
+    {
+      "name": "select_fields omitted",
+      "request": {
+        "api_key": "target-secret",
+        "collection": "users",
+        "read": false,
+        "write": true
+      },
+      "response": {
+        "key": "target-secret",
+        "is_admin": false,
+        "collection_permissions": {
+          "users": {
+            "read": false,
+            "write": true,
+            "select_fields": [
+              "name",
+              "email"
+            ],
+            "exclude_fields": [
+              "secret"
+            ],
+            "writable_fields": [
+              "name"
+            ]
+          }
+        }
+      },
+      "fresh_token_grant": {
+        "read": false,
+        "write": true,
+        "select_fields": [
+          "name",
+          "email"
+        ],
+        "exclude_fields": [
+          "secret"
+        ],
+        "writable_fields": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "select_fields null",
+      "request": {
+        "api_key": "target-secret",
+        "collection": "users",
+        "read": false,
+        "write": true,
+        "select_fields": null
+      },
+      "response": {
+        "key": "target-secret",
+        "is_admin": false,
+        "collection_permissions": {
+          "users": {
+            "read": false,
+            "write": true,
+            "select_fields": null,
+            "exclude_fields": [
+              "secret"
+            ],
+            "writable_fields": [
+              "name"
+            ]
+          }
+        }
+      },
+      "fresh_token_grant": {
+        "read": false,
+        "write": true,
+        "select_fields": null,
+        "exclude_fields": [
+          "secret"
+        ],
+        "writable_fields": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "select_fields array",
+      "request": {
+        "api_key": "target-secret",
+        "collection": "users",
+        "read": false,
+        "write": true,
+        "select_fields": [
+          "email"
+        ]
+      },
+      "response": {
+        "key": "target-secret",
+        "is_admin": false,
+        "collection_permissions": {
+          "users": {
+            "read": false,
+            "write": true,
+            "select_fields": [
+              "email"
+            ],
+            "exclude_fields": [
+              "secret"
+            ],
+            "writable_fields": [
+              "name"
+            ]
+          }
+        }
+      },
+      "fresh_token_grant": {
+        "read": false,
+        "write": true,
+        "select_fields": [
+          "email"
+        ],
+        "exclude_fields": [
+          "secret"
+        ],
+        "writable_fields": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "exclude_fields omitted",
+      "request": {
+        "api_key": "target-secret",
+        "collection": "users",
+        "read": false,
+        "write": true
+      },
+      "response": {
+        "key": "target-secret",
+        "is_admin": false,
+        "collection_permissions": {
+          "users": {
+            "read": false,
+            "write": true,
+            "select_fields": [
+              "name",
+              "email"
+            ],
+            "exclude_fields": [
+              "secret"
+            ],
+            "writable_fields": [
+              "name"
+            ]
+          }
+        }
+      },
+      "fresh_token_grant": {
+        "read": false,
+        "write": true,
+        "select_fields": [
+          "name",
+          "email"
+        ],
+        "exclude_fields": [
+          "secret"
+        ],
+        "writable_fields": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "exclude_fields null",
+      "request": {
+        "api_key": "target-secret",
+        "collection": "users",
+        "read": false,
+        "write": true,
+        "exclude_fields": null
+      },
+      "response": {
+        "key": "target-secret",
+        "is_admin": false,
+        "collection_permissions": {
+          "users": {
+            "read": false,
+            "write": true,
+            "select_fields": [
+              "name",
+              "email"
+            ],
+            "exclude_fields": null,
+            "writable_fields": [
+              "name"
+            ]
+          }
+        }
+      },
+      "fresh_token_grant": {
+        "read": false,
+        "write": true,
+        "select_fields": [
+          "name",
+          "email"
+        ],
+        "exclude_fields": null,
+        "writable_fields": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "exclude_fields array",
+      "request": {
+        "api_key": "target-secret",
+        "collection": "users",
+        "read": false,
+        "write": true,
+        "exclude_fields": []
+      },
+      "response": {
+        "key": "target-secret",
+        "is_admin": false,
+        "collection_permissions": {
+          "users": {
+            "read": false,
+            "write": true,
+            "select_fields": [
+              "name",
+              "email"
+            ],
+            "exclude_fields": [],
+            "writable_fields": [
+              "name"
+            ]
+          }
+        }
+      },
+      "fresh_token_grant": {
+        "read": false,
+        "write": true,
+        "select_fields": [
+          "name",
+          "email"
+        ],
+        "exclude_fields": [],
+        "writable_fields": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "writable_fields omitted",
+      "request": {
+        "api_key": "target-secret",
+        "collection": "users",
+        "read": false,
+        "write": true
+      },
+      "response": {
+        "key": "target-secret",
+        "is_admin": false,
+        "collection_permissions": {
+          "users": {
+            "read": false,
+            "write": true,
+            "select_fields": [
+              "name",
+              "email"
+            ],
+            "exclude_fields": [
+              "secret"
+            ],
+            "writable_fields": [
+              "name"
+            ]
+          }
+        }
+      },
+      "fresh_token_grant": {
+        "read": false,
+        "write": true,
+        "select_fields": [
+          "name",
+          "email"
+        ],
+        "exclude_fields": [
+          "secret"
+        ],
+        "writable_fields": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "writable_fields null",
+      "request": {
+        "api_key": "target-secret",
+        "collection": "users",
+        "read": false,
+        "write": true,
+        "writable_fields": null
+      },
+      "response": {
+        "key": "target-secret",
+        "is_admin": false,
+        "collection_permissions": {
+          "users": {
+            "read": false,
+            "write": true,
+            "select_fields": [
+              "name",
+              "email"
+            ],
+            "exclude_fields": [
+              "secret"
+            ],
+            "writable_fields": null
+          }
+        }
+      },
+      "fresh_token_grant": {
+        "read": false,
+        "write": true,
+        "select_fields": [
+          "name",
+          "email"
+        ],
+        "exclude_fields": [
+          "secret"
+        ],
+        "writable_fields": null
+      }
+    },
+    {
+      "name": "writable_fields array",
+      "request": {
+        "api_key": "target-secret",
+        "collection": "users",
+        "read": false,
+        "write": true,
+        "writable_fields": [
+          "email"
+        ]
+      },
+      "response": {
+        "key": "target-secret",
+        "is_admin": false,
+        "collection_permissions": {
+          "users": {
+            "read": false,
+            "write": true,
+            "select_fields": [
+              "name",
+              "email"
+            ],
+            "exclude_fields": [
+              "secret"
+            ],
+            "writable_fields": [
+              "email"
+            ]
+          }
+        }
+      },
+      "fresh_token_grant": {
+        "read": false,
+        "write": true,
+        "select_fields": [
+          "name",
+          "email"
+        ],
+        "exclude_fields": [
+          "secret"
+        ],
+        "writable_fields": [
+          "email"
+        ]
+      }
+    },
+    {
+      "name": "mixed clear, empty array and replacement",
+      "request": {
+        "api_key": "target-secret",
+        "collection": "users",
+        "read": false,
+        "write": true,
+        "select_fields": null,
+        "exclude_fields": [],
+        "writable_fields": [
+          "email"
+        ]
+      },
+      "response": {
+        "key": "target-secret",
+        "is_admin": false,
+        "collection_permissions": {
+          "users": {
+            "read": false,
+            "write": true,
+            "select_fields": null,
+            "exclude_fields": [],
+            "writable_fields": [
+              "email"
+            ]
+          }
+        }
+      },
+      "fresh_token_grant": {
+        "read": false,
+        "write": true,
+        "select_fields": null,
+        "exclude_fields": [],
+        "writable_fields": [
+          "email"
+        ]
+      }
+    }
+  ],
+  "remaining_disposable_keys": 0
+}
