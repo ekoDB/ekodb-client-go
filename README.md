@@ -6,6 +6,13 @@
 
 Official Go client library for ekoDB - a high-performance document database.
 
+## Requirements
+
+Go **1.27.3 or newer** is required. Use a supported Go release with current
+security patches. The HTTP and WebSocket clients use Go's TLS stack; rebuild
+applications with a patched compiler to pick up the certificate-verification fix
+in [GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809).
+
 ## 📦 Installation
 
 ```bash
