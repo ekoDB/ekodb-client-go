@@ -41,6 +41,81 @@ func callNamedPermission(client *AdminClient, facet, method, name string) error 
 	return err
 }
 
+func TestAdminMalformedUTF8PermissionNamesFailBeforeHTTP(t *testing.T) {
+	for _, name := range []struct{ label, value string }{
+		{"invalid_leading_byte", "\xff"},
+		{"embedded_invalid_byte", "tenant\xff"},
+		{"lone_continuation", "\x80"},
+		{"truncated_two_byte", "\xc2"},
+		{"truncated_three_byte", "\xe2\x82"},
+		{"overlong_separator", "\xc0\xaf"},
+		{"encoded_surrogate", "\xed\xa0\x80"},
+		{"out_of_range", "\xf4\x90\x80\x80"},
+	} {
+		for _, facet := range []string{"collections", "kv"} {
+			for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+				t.Run(name.label+"/"+facet+"/"+method, func(t *testing.T) {
+					var requests atomic.Int32
+					client := keyPermissionTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+						requests.Add(1)
+						if r.URL.Path == "/api/auth/keys/me/permissions" {
+							_, _ = io.WriteString(w, modernAdminPermissions)
+						} else if method == http.MethodGet {
+							_, _ = io.WriteString(w, `{"read":true,"write":false}`)
+						} else {
+							_, _ = io.WriteString(w, `{"before":null,"after":null}`)
+						}
+					})
+					err := callNamedPermission(client, facet, method, name.value)
+					if err == nil || err.Error() != "a valid permission facet is required" {
+						t.Error("malformed UTF-8 was not rejected as an invalid facet")
+					}
+					if requests.Load() != 0 {
+						t.Error("malformed UTF-8 reached the capability probe or permission HTTP request")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestAdminLiteralReplacementCharacterPermissionNamesReachHTTP(t *testing.T) {
+	const name = "tenant\uFFFD"
+	for _, facet := range []string{"collections", "kv"} {
+		for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+			t.Run(facet+"/"+method, func(t *testing.T) {
+				var probes, requests atomic.Int32
+				client := keyPermissionTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == "/api/auth/keys/me/permissions" {
+						probes.Add(1)
+						_, _ = io.WriteString(w, modernAdminPermissions)
+						return
+					}
+					requests.Add(1)
+					prefix := "/api/auth/keys/me/permissions/" + facet + "/"
+					if r.Method != method || r.URL.Path != prefix+name || r.URL.EscapedPath() != prefix+"tenant%EF%BF%BD" || r.URL.RawQuery != "" {
+						t.Error("literal replacement character did not retain its valid UTF-8 encoding")
+					}
+					grant := `{"read":true,"write":false}`
+					if method == http.MethodGet {
+						_, _ = io.WriteString(w, grant)
+					} else if method == http.MethodDelete {
+						_, _ = fmt.Fprintf(w, `{"before":%s,"after":null}`, grant)
+					} else {
+						_, _ = fmt.Fprintf(w, `{"before":null,"after":%s}`, grant)
+					}
+				})
+				if err := callNamedPermission(client, facet, method, name); err != nil {
+					t.Fatal(err)
+				}
+				if probes.Load() != 1 || requests.Load() != 1 {
+					t.Fatal("valid Unicode did not reach exactly one probe and permission request")
+				}
+			})
+		}
+	}
+}
+
 func TestAdminPermissionNamesMatchSharedContract(t *testing.T) {
 	var fixture struct {
 		Accepted, Rejected []struct{ Name, Value string }

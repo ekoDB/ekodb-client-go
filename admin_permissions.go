@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // PermissionChange is the before/after result of a key-addressed grant edit.
@@ -132,7 +133,7 @@ func validatePermissionTarget(keyID string) error {
 }
 
 func validatePermissionFacet(facet string) error {
-	if facet == "" || facet == "." || facet == ".." {
+	if !utf8.ValidString(facet) || facet == "" || facet == "." || facet == ".." {
 		return fmt.Errorf("a valid permission facet is required")
 	}
 	for _, r := range facet {
