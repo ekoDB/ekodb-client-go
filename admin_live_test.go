@@ -3,6 +3,7 @@ package ekodb
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"reflect"
@@ -128,6 +129,47 @@ func TestAdminLive(t *testing.T) {
 	}
 	if modern {
 		verifyAdminLiveFacets(t, admin, scoped, created.ID, "sdk_admin_probe", "sdk-go-admin:"+hex.EncodeToString(unique)+"/")
+		verifyAdminLiveNameContract(t, admin, created.ID)
+	}
+}
+
+func verifyAdminLiveNameContract(t *testing.T, admin *AdminClient, keyID string) {
+	t.Helper()
+	data, err := os.ReadFile("test-fixtures/admin-permission-names.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Accepted []struct{ Name, Value string }
+	}
+	if json.Unmarshal(data, &fixture) != nil || len(fixture.Accepted) == 0 {
+		t.Fatal("invalid accepted-name fixture")
+	}
+	for _, name := range fixture.Accepted {
+		change, err := admin.PutAPIKeyCollectionPermissions(UpdateAPIKeyCollectionPermissionsRequest{KeyID: keyID, Collection: name.Value, Read: true})
+		if err != nil || change.After == nil || !change.After.Read {
+			t.Fatalf("accepted collection PUT failed for %s: %v", name.Name, err)
+		}
+		grant, err := admin.GetAPIKeyCollectionPermissions(keyID, name.Value)
+		if err != nil || !grant.Read {
+			t.Fatalf("accepted collection GET failed for %s: %v", name.Name, err)
+		}
+		change, err = admin.DeleteAPIKeyCollectionPermissions(keyID, name.Value)
+		if err != nil || change.After != nil {
+			t.Fatalf("accepted collection DELETE failed for %s: %v", name.Name, err)
+		}
+		kv, err := admin.PutAPIKeyKVPermissions(UpdateAPIKeyKVPermissionsRequest{KeyID: keyID, Prefix: name.Value, Read: true})
+		if err != nil || kv.After == nil || !kv.After.Read {
+			t.Fatalf("accepted KV PUT failed for %s: %v", name.Name, err)
+		}
+		kvGrant, err := admin.GetAPIKeyKVPermissions(keyID, name.Value)
+		if err != nil || !kvGrant.Read {
+			t.Fatalf("accepted KV GET failed for %s: %v", name.Name, err)
+		}
+		kv, err = admin.DeleteAPIKeyKVPermissions(keyID, name.Value)
+		if err != nil || kv.After != nil {
+			t.Fatalf("accepted KV DELETE failed for %s: %v", name.Name, err)
+		}
 	}
 }
 

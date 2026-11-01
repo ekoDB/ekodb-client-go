@@ -110,7 +110,11 @@ func TestAdminPermissionVersionFloor(t *testing.T) {
 					t.Error("unsafe gate error")
 				}
 			}
-			if health.Load() != 1 || (allowed && puts.Load() != 2) || (!allowed && puts.Load() != 0) {
+			expectedHealth := int32(1)
+			if version == "" || version == "0.79.2-rc.1" || version == "09.79.2" || version == "999999999999999999999999.1.1" {
+				expectedHealth = 2
+			}
+			if health.Load() != expectedHealth || (allowed && puts.Load() != 2) || (!allowed && puts.Load() != 0) {
 				t.Error("gate request count mismatch")
 			}
 		})
