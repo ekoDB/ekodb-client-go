@@ -23,7 +23,8 @@ type AdminClientConfig struct {
 // AdminClient provides API-key administration separately from data operations.
 type AdminClient struct {
 	client              *Client
-	versionOnce         sync.Once
+	versionMu           sync.Mutex
+	versionKnown        bool
 	versionError        error
 	permissionMu        sync.Mutex
 	permissionKnown     bool
@@ -38,50 +39,56 @@ const MinServerVersionForPermissionEdits = "0.80.0"
 const MinLegacyServerVersionForPermissionEdits = "0.79.2"
 
 func (a *AdminClient) requirePermissionEdits() error {
-	a.versionOnce.Do(func() {
-		a.versionError = fmt.Errorf("permission updates need ekoDB 0.79.2 or later because earlier servers remove a grant's field restrictions when it is updated")
-		data, err := a.client.makeRequest(http.MethodGet, "/api/health", nil)
+	a.versionMu.Lock()
+	defer a.versionMu.Unlock()
+	if a.versionKnown {
+		return a.versionError
+	}
+	requirement := fmt.Errorf("permission updates need ekoDB 0.79.2 or later because earlier servers remove a grant's field restrictions when it is updated")
+	data, err := a.client.makeRequest(http.MethodGet, "/api/health", nil)
+	if err != nil {
+		return err
+	}
+	var health map[string]json.RawMessage
+	if json.Unmarshal(data, &health) != nil {
+		return invalidAdminResponse()
+	}
+	var version string
+	if json.Unmarshal(health["version"], &version) != nil {
+		return requirement
+	}
+	match := regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`).FindStringSubmatch(version)
+	if match == nil {
+		return requirement
+	}
+	minimum := make([]uint64, 3)
+	for i, part := range strings.Split(MinLegacyServerVersionForPermissionEdits, ".") {
+		n, err := strconv.ParseUint(part, 10, 64)
+		if err != nil || i >= len(minimum) {
+			return requirement
+		}
+		minimum[i] = n
+	}
+	parts := make([]uint64, 3)
+	for i := range parts {
+		n, err := strconv.ParseUint(match[i+1], 10, 64)
 		if err != nil {
-			return
+			return requirement
 		}
-		var health struct {
-			Version string `json:"version"`
+		parts[i] = n
+	}
+	a.versionKnown, a.versionError = true, requirement
+	for i := range parts {
+		if parts[i] > minimum[i] {
+			a.versionError = nil
+			return nil
 		}
-		if json.Unmarshal(data, &health) != nil {
-			return
+		if parts[i] < minimum[i] {
+			return a.versionError
 		}
-		match := regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`).FindStringSubmatch(health.Version)
-		if match == nil {
-			return
-		}
-		minimum := make([]uint64, 3)
-		for i, part := range strings.Split(MinLegacyServerVersionForPermissionEdits, ".") {
-			n, err := strconv.ParseUint(part, 10, 64)
-			if err != nil || i >= len(minimum) {
-				return
-			}
-			minimum[i] = n
-		}
-		parts := make([]uint64, 3)
-		for i := range parts {
-			n, err := strconv.ParseUint(match[i+1], 10, 64)
-			if err != nil {
-				return
-			}
-			parts[i] = n
-		}
-		for i := range parts {
-			if parts[i] > minimum[i] {
-				a.versionError = nil
-				return
-			}
-			if parts[i] < minimum[i] {
-				return
-			}
-		}
-		a.versionError = nil
-	})
-	return a.versionError
+	}
+	a.versionError = nil
+	return nil
 }
 
 // NewAdminClient authenticates an admin facade. Non-admin keys may use GetPermissions.

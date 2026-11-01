@@ -57,19 +57,30 @@ caches a successful capability decision per client. Only 404 or 405 selects the
 legacy generation. Forbidden responses, transient failures, malformed successes,
 and authentication failures never silently downgrade to the older routes. A
 definite 401 permits one token re-exchange, including a token minted before a
-server upgrade.
+server upgrade. A 404/405 from that token refresh propagates as an
+authentication failure; it cannot select or cache the legacy generation.
 
 The capability probe takes precedence over the version string: a server
 reporting `0.79.2` or `0.80.0-rc.N` that serves the new routes is supported.
 `MinServerVersionForPermissionEdits` documents the new release as `0.80.0`;
 `MinLegacyServerVersionForPermissionEdits` is `0.79.2`. The legacy edit API
 still checks authenticated health and refuses releases that can erase
-restrictions.
+restrictions. Only successfully read, parseable stable versions are cached.
+Failed or unreadable health reads remain retryable and preserve sanitized
+transport/JSON errors. A valid older stable version remains cached and refused.
 
 Modern permission methods accept a server-generated key ID (32 lowercase hex
 characters) or `me`. A secret key value is rejected before HTTP. Collection
 names and KV prefixes are encoded as one path segment, including colon, slash,
 space, plus, and the `*` prefix granting the whole KV namespace.
+
+Facet names reject empty strings, `.` and `..`, Unicode category Cc controls,
+and exactly U+00AD, U+061C, U+180E, U+200B–U+200F, U+2028–U+202E, U+2060–U+2064,
+U+2066–U+2069 and U+FEFF. Other valid Unicode characters remain accepted,
+including format characters outside this list and supplementary-plane
+characters. The canonical name cases are vendored as
+`test-fixtures/admin-permission-names.json` so this module can test standalone.
+KV list filters remain query values, separate from named facet validation.
 
 - `GetAPIKeyPermissions(keyID)` reads aggregate permissions.
 - `ListAPIKeyCollectionPermissions(keyID)` and

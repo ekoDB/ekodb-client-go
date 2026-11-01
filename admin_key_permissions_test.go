@@ -370,7 +370,7 @@ func TestAdminModernPermissionValidationBeforeHTTP(t *testing.T) {
 			t.Fatal("invalid target accepted")
 		}
 	}
-	for _, facet := range []string{"", " ", "bad\nname", "hidden\u200bname", ".", ".."} {
+	for _, facet := range []string{"", "bad\nname", "hidden\u200bname", ".", ".."} {
 		if _, err := client.DeleteAPIKeyCollectionPermissions("me", facet); err == nil {
 			t.Fatal("invalid collection accepted")
 		}
