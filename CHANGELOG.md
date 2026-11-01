@@ -28,6 +28,9 @@ and this project adheres to
   idempotence, invalid input, interactive input and EOF.
 - Match the explicit permission-facet Unicode contract using the shared name
   fixture, including accepted format characters and supplementary-plane names.
+- Reject malformed UTF-8 collection names and KV permission prefixes before
+  capability probes or permission requests, while preserving valid Unicode
+  replacement characters.
 - Retry failed legacy health reads without losing sanitized error details; cache
   only successfully read stable versions.
 - Restrict legacy capability fallback to direct permission-request 404/405
