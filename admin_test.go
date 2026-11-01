@@ -35,6 +35,10 @@ func adminTestClient(t *testing.T, handler http.HandlerFunc) *AdminClient {
 		if r.Header.Get("Authorization") != "Bearer jwt-secret" || r.Header.Get("Accept") != "application/json" || r.Header.Get("Content-Type") != "application/json" {
 			t.Error("invalid admin headers")
 		}
+		if r.URL.Path == "/api/auth/keys/me/permissions" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		if r.URL.Path == "/api/health" {
 			_, _ = io.WriteString(w, `{"version":"0.79.2"}`)
 			return
@@ -78,7 +82,7 @@ func TestAdminWireContract(t *testing.T) {
 			return err
 		}},
 		{"update", "PUT", "/api/auth/permissions", `{"api_key":"target-secret","collection":"users","read":false,"write":true}`, adminKeyJSON, 200, func(a *AdminClient) error {
-			_, err := a.UpdateAPIKeyCollectionPermissions(UpdateAPIKeyCollectionPermissionsRequest{APIKey: "target-secret", Collection: "users", Write: true})
+			_, err := a.LegacyUpdateAPIKeyCollectionPermissions(LegacyUpdateAPIKeyCollectionPermissionsRequest{APIKey: "target-secret", Collection: "users", Write: true})
 			return err
 		}},
 		{"revoke-200", "DELETE", "/api/auth/keys/secret%2F%20%3F%23%25+&=%E9%9B%AA", "", `{"status":"success"}`, 200, func(a *AdminClient) error { return a.RevokeAPIKey("secret/ ?#%+&=雪") }},
@@ -285,7 +289,7 @@ func TestAdminValidationBeforeHTTP(t *testing.T) {
 	if err = client.RevokeAPIKey(""); err == nil {
 		t.Fatal("empty key accepted")
 	}
-	_, err = client.UpdateAPIKeyCollectionPermissions(UpdateAPIKeyCollectionPermissionsRequest{})
+	_, err = client.LegacyUpdateAPIKeyCollectionPermissions(LegacyUpdateAPIKeyCollectionPermissionsRequest{})
 	if err == nil {
 		t.Fatal("empty target accepted")
 	}
