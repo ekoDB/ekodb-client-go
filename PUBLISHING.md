@@ -15,6 +15,11 @@ repositories release:
    and prints the suggested release-cap subject.
 3. Commit the generated metadata using the printed subject verbatim and push the
    completed branch for the normal draft-PR review process.
+4. Rebase-merge the release cap to `main`.
+
+The [release workflow](.github/workflows/release.yml) requires the cap subject
+intact: a squash appends the PR number and a merge commit replaces the subject,
+making the release a silent, green no-op.
 
 `.github/workflows/release.yml` then tags `vX.Y.Z`, publishes the GitHub Release
 from the changelog block, and runs `scripts/index-release.sh` so the tag shows
