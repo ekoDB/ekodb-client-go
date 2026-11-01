@@ -8,11 +8,30 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Server-generated API-key IDs and key-addressed collection/KV permission reads,
+  PUT, PATCH and DELETE. Typed before/after changes preserve field restrictions,
+  unknown metadata and optional KV prefixes on facet responses.
+
+### Changed
+
+- Permission updates now take `KeyID` and return `CollectionPermissionChange`.
+  Use the explicitly named legacy request and method for secret-valued 0.79.2
+  updates. A cached authenticated route probe selects the generation, including
+  prerelease servers whose version string still reports the older release.
+
 ### Fixed
 
 - Generate UTC changelog headings and the suggested release-cap subject from
   `make bump-version`, with isolated regression checks for metadata generation,
   idempotence, invalid input, interactive input and EOF.
+- Match the explicit permission-facet Unicode contract using the shared name
+  fixture, including accepted format characters and supplementary-plane names.
+- Retry failed legacy health reads without losing sanitized error details; cache
+  only successfully read stable versions.
+- Restrict legacy capability fallback to direct permission-request 404/405
+  responses, allowing failed token refreshes to propagate and recover.
 
 ## [0.31.1] - 2026-10-23
 
