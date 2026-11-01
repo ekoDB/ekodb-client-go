@@ -88,6 +88,7 @@ func (r *UpdateAPIKeyCollectionPermissionsRequest) UnmarshalJSON(data []byte) er
 	if err := preserveNullRestrictions(data, &value.SelectFields, &value.ExcludeFields, &value.WritableFields); err != nil {
 		return err
 	}
+	value.KeyID, value.Collection = r.KeyID, r.Collection
 	*r = UpdateAPIKeyCollectionPermissionsRequest(value)
 	return nil
 }
@@ -101,6 +102,7 @@ func (r *PatchAPIKeyCollectionPermissionsRequest) UnmarshalJSON(data []byte) err
 	if err := preserveNullRestrictions(data, &value.SelectFields, &value.ExcludeFields, &value.WritableFields); err != nil {
 		return err
 	}
+	value.KeyID, value.Collection = r.KeyID, r.Collection
 	*r = PatchAPIKeyCollectionPermissionsRequest(value)
 	return nil
 }
