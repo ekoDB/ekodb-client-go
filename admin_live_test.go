@@ -22,6 +22,13 @@ func TestAdminLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	health, err := admin.client.HealthStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version, ok := health.Detail["version"].(string); ok {
+		t.Logf("server version: %s", version)
+	}
 	unique := make([]byte, 16)
 	if _, err = rand.Read(unique); err != nil {
 		t.Fatal("could not generate disposable label")
@@ -36,6 +43,18 @@ func TestAdminLive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Disposable creation failed for label %s: %v", label, err)
 	}
+	modern, err := admin.UsesKeyPermissionRoutes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modern && (len(created.ID) != 32 || !permissionKeyID.MatchString(created.ID)) {
+		t.Fatal("registration omitted a valid key ID")
+	}
+	if modern {
+		t.Log("permission route generation: key-addressed")
+	} else {
+		t.Log("permission route generation: legacy")
+	}
 	if created.IsAdmin || created.Key == apiKey {
 		t.Fatal("disposable key unexpectedly admin")
 	}
@@ -47,6 +66,9 @@ func TestAdminLive(t *testing.T) {
 	for _, key := range keys {
 		if key.Label != nil && *key.Label == label {
 			matches++
+			if modern && key.ID != created.ID {
+				t.Fatal("key listing omitted or changed the registered key ID")
+			}
 		}
 	}
 	if matches != 1 {
@@ -67,8 +89,8 @@ func TestAdminLive(t *testing.T) {
 		t.Fatal("non-admin key unexpectedly listed keys")
 	}
 	selected, excluded, writable := []string{"public"}, []string{"secret"}, []string{"public"}
-	request := UpdateAPIKeyCollectionPermissionsRequest{APIKey: created.Key, Collection: "sdk_admin_probe", Read: true, Write: true, SelectFields: &selected, ExcludeFields: &excluded, WritableFields: &writable}
-	if _, err = admin.UpdateAPIKeyCollectionPermissions(request); err != nil {
+	request := UpdateAPIKeyCollectionPermissionsRequest{KeyID: created.ID, Collection: "sdk_admin_probe", Read: true, Write: true, SelectFields: &selected, ExcludeFields: &excluded, WritableFields: &writable}
+	if err = updateAdminLiveCollection(admin, modern, created.Key, request); err != nil {
 		t.Fatal(err)
 	}
 	firstClient, err := NewAdminClient(baseURL, created.Key)
@@ -89,7 +111,7 @@ func TestAdminLive(t *testing.T) {
 	request.SelectFields = nil
 	request.ExcludeFields = &clear
 	request.WritableFields = &empty
-	if _, err = admin.UpdateAPIKeyCollectionPermissions(request); err != nil {
+	if err = updateAdminLiveCollection(admin, modern, created.Key, request); err != nil {
 		t.Fatal(err)
 	}
 	refreshed, err := NewAdminClient(baseURL, created.Key)
@@ -104,6 +126,87 @@ func TestAdminLive(t *testing.T) {
 	if !grant.Read || grant.Write || len(grant.SelectFields) != 1 || grant.SelectFields[0] != "public" || grant.ExcludeFields != nil || grant.WritableFields == nil || len(grant.WritableFields) != 0 {
 		t.Fatal("permission update not reflected in fresh token")
 	}
+	if modern {
+		verifyAdminLiveFacets(t, admin, scoped, created.ID, "sdk_admin_probe", "sdk-go-admin:"+hex.EncodeToString(unique)+"/")
+	}
+}
+
+func verifyAdminLiveFacets(t *testing.T, admin, scoped *AdminClient, keyID, collection, prefix string) {
+	t.Helper()
+	change, err := admin.PutAPIKeyCollectionPermissions(UpdateAPIKeyCollectionPermissionsRequest{KeyID: keyID, Collection: collection, Read: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if change.Before == nil || change.After == nil || !change.After.Read || change.After.SelectFields != nil || change.After.ExcludeFields != nil || change.After.WritableFields != nil {
+		t.Fatal("collection PUT did not replace omitted restrictions")
+	}
+	write := true
+	change, err = admin.PatchAPIKeyCollectionPermissions(PatchAPIKeyCollectionPermissionsRequest{KeyID: keyID, Collection: collection, Write: &write})
+	if err != nil || change.Before == nil || change.After == nil || !change.After.Read || !change.After.Write {
+		t.Fatal("collection PATCH did not retain omitted rights")
+	}
+	read, err := admin.GetAPIKeyCollectionPermissions(keyID, collection)
+	if err != nil || !read.Read || !read.Write {
+		t.Fatal("collection facet readback failed")
+	}
+	collections, err := admin.ListAPIKeyCollectionPermissions(keyID)
+	if err != nil || !collections[collection].Read {
+		t.Fatal("collection facet listing failed")
+	}
+	if _, err = scoped.GetAPIKeyPermissions(keyID); err != nil {
+		t.Fatal("non-admin own-ID permission read failed")
+	}
+	if _, err = scoped.PutAPIKeyCollectionPermissions(UpdateAPIKeyCollectionPermissionsRequest{KeyID: keyID, Collection: collection, Read: true}); err == nil {
+		t.Fatal("non-admin changed its own grants")
+	}
+	change, err = admin.DeleteAPIKeyCollectionPermissions(keyID, collection)
+	if err != nil || change.Before == nil || change.After != nil {
+		t.Fatal("collection DELETE change is incorrect")
+	}
+	if _, err = admin.GetAPIKeyCollectionPermissions(keyID, collection); err == nil {
+		t.Fatal("deleted collection grant remains")
+	}
+	kvChange, err := admin.PutAPIKeyKVPermissions(UpdateAPIKeyKVPermissionsRequest{KeyID: keyID, Prefix: prefix, Read: true, Write: true})
+	if err != nil || kvChange.Before != nil || kvChange.After == nil || !kvChange.After.Read || !kvChange.After.Write {
+		t.Fatal("KV PUT change is incorrect")
+	}
+	kv, err := admin.GetAPIKeyKVPermissions(keyID, prefix)
+	if err != nil || !kv.Read || !kv.Write {
+		t.Fatal("KV facet readback failed")
+	}
+	grants, err := admin.ListAPIKeyKVPermissions(keyID, &prefix)
+	if err != nil || len(grants) != 1 || grants[0].Prefix != prefix {
+		t.Fatal("KV prefix-filter listing failed")
+	}
+	remove := false
+	kvChange, err = admin.PatchAPIKeyKVPermissions(PatchAPIKeyKVPermissionsRequest{KeyID: keyID, Prefix: prefix, Read: &remove, Write: &remove})
+	if err != nil || kvChange.Before == nil || kvChange.After != nil {
+		t.Fatal("KV PATCH did not remove empty rights")
+	}
+	if _, err = admin.GetAPIKeyKVPermissions(keyID, prefix); err == nil {
+		t.Fatal("removed KV grant remains")
+	}
+	kvChange, err = admin.PutAPIKeyKVPermissions(UpdateAPIKeyKVPermissionsRequest{KeyID: keyID, Prefix: "*", Read: true})
+	if err != nil || kvChange.After == nil || !kvChange.After.Read {
+		t.Fatal("KV wildcard grant failed")
+	}
+	kvChange, err = admin.DeleteAPIKeyKVPermissions(keyID, "*")
+	if err != nil || kvChange.Before == nil || kvChange.After != nil {
+		t.Fatal("KV DELETE change is incorrect")
+	}
+	if _, err = admin.GetAPIKeyKVPermissions(keyID, "*"); err == nil {
+		t.Fatal("deleted KV wildcard grant remains")
+	}
+}
+
+// Legacy requests remain explicit: old servers do not expose stable key IDs.
+func updateAdminLiveCollection(admin *AdminClient, modern bool, secret string, request UpdateAPIKeyCollectionPermissionsRequest) error {
+	if modern {
+		_, err := admin.UpdateAPIKeyCollectionPermissions(request)
+		return err
+	}
+	_, err := admin.LegacyUpdateAPIKeyCollectionPermissions(LegacyUpdateAPIKeyCollectionPermissionsRequest{APIKey: secret, Collection: request.Collection, Read: request.Read, Write: request.Write, SelectFields: request.SelectFields, ExcludeFields: request.ExcludeFields, WritableFields: request.WritableFields})
+	return err
 }
 
 // Recover by the unique test label even when registration's response is lost.
@@ -125,7 +228,11 @@ func cleanupAdminLiveKey(admin *AdminClient, label, ownerKey string) error {
 		if key.Key == ownerKey {
 			return fmt.Errorf("refusing to revoke the owner key")
 		}
-		if err := admin.RevokeAPIKey(key.Key); err != nil {
+		target := key.ID
+		if target == "" {
+			target = key.Key
+		}
+		if err := admin.RevokeAPIKey(target); err != nil {
 			return err
 		}
 	}

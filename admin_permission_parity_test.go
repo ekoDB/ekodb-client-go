@@ -29,12 +29,12 @@ func TestAdminRecordedPermissionEdits(t *testing.T) {
 	if err = json.Unmarshal(data, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.Minimum != MinServerVersionForPermissionEdits || len(fixture.Cases) != 10 {
+	if fixture.Minimum != MinLegacyServerVersionForPermissionEdits || len(fixture.Cases) != 10 {
 		t.Fatal("contract release or coverage drift")
 	}
 	for _, test := range fixture.Cases {
 		t.Run(test.Name, func(t *testing.T) {
-			var request UpdateAPIKeyCollectionPermissionsRequest
+			var request LegacyUpdateAPIKeyCollectionPermissionsRequest
 			if err := json.Unmarshal(test.Request, &request); err != nil {
 				t.Fatal(err)
 			}
@@ -53,7 +53,7 @@ func TestAdminRecordedPermissionEdits(t *testing.T) {
 				_, _ = w.Write(test.Response)
 			})
 			for range 2 {
-				key, err := client.UpdateAPIKeyCollectionPermissions(request)
+				key, err := client.LegacyUpdateAPIKeyCollectionPermissions(request)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -83,6 +83,8 @@ func TestAdminPermissionVersionFloor(t *testing.T) {
 				switch r.URL.Path {
 				case "/api/auth/token":
 					_, _ = io.WriteString(w, `{"token":"jwt-secret"}`)
+				case "/api/auth/keys/me/permissions":
+					w.WriteHeader(http.StatusNotFound)
 				case "/api/health":
 					health.Add(1)
 					_ = json.NewEncoder(w).Encode(map[string]string{"version": version})
@@ -100,7 +102,7 @@ func TestAdminPermissionVersionFloor(t *testing.T) {
 			}
 			allowed := version == "0.79.2" || version == "0.79.2+build.1" || version == "0.79.3" || version == "0.80.0" || version == "1.0.0"
 			for range 2 {
-				_, err := client.UpdateAPIKeyCollectionPermissions(UpdateAPIKeyCollectionPermissionsRequest{APIKey: "target-secret", Collection: "users", Read: true})
+				_, err := client.LegacyUpdateAPIKeyCollectionPermissions(LegacyUpdateAPIKeyCollectionPermissionsRequest{APIKey: "target-secret", Collection: "users", Read: true})
 				if (err == nil) != allowed {
 					t.Fatal("version gate outcome mismatch")
 				}
@@ -120,6 +122,8 @@ func TestAdminPermissionConcurrentVersionCache(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/auth/token":
 			_, _ = io.WriteString(w, `{"token":"jwt-secret"}`)
+		case "/api/auth/keys/me/permissions":
+			w.WriteHeader(http.StatusNotFound)
 		case "/api/health":
 			health.Add(1)
 			_, _ = io.WriteString(w, `{"version":"0.79.2"}`)
@@ -135,7 +139,7 @@ func TestAdminPermissionConcurrentVersionCache(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Go(func() {
-			_, err := client.UpdateAPIKeyCollectionPermissions(UpdateAPIKeyCollectionPermissionsRequest{APIKey: "target-secret", Collection: "users"})
+			_, err := client.LegacyUpdateAPIKeyCollectionPermissions(LegacyUpdateAPIKeyCollectionPermissionsRequest{APIKey: "target-secret", Collection: "users"})
 			if err != nil {
 				t.Error(err)
 			}
@@ -149,8 +153,8 @@ func TestAdminPermissionConcurrentVersionCache(t *testing.T) {
 func TestAdminInvalidFieldEditsBeforeHealth(t *testing.T) {
 	client := adminTestClient(t, func(http.ResponseWriter, *http.Request) { t.Error("invalid input reached HTTP") })
 	empty := []string{" "}
-	for _, request := range []UpdateAPIKeyCollectionPermissionsRequest{{APIKey: "target", Collection: "users", SelectFields: &empty}, {APIKey: " ", Collection: "users"}, {APIKey: "target", Collection: " "}} {
-		if _, err := client.UpdateAPIKeyCollectionPermissions(request); err == nil {
+	for _, request := range []LegacyUpdateAPIKeyCollectionPermissionsRequest{{APIKey: "target", Collection: "users", SelectFields: &empty}, {APIKey: " ", Collection: "users"}, {APIKey: "target", Collection: " "}} {
+		if _, err := client.LegacyUpdateAPIKeyCollectionPermissions(request); err == nil {
 			t.Error("invalid edit accepted")
 		}
 	}
