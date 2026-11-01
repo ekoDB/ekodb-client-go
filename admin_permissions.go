@@ -290,6 +290,11 @@ func (a *AdminClient) ListAPIKeyKVPermissions(keyID string, prefix *string) ([]K
 	if json.Unmarshal(data, &permissions) != nil || permissions == nil {
 		return nil, invalidAdminResponse()
 	}
+	for _, grant := range permissions {
+		if grant.Prefix == "" {
+			return nil, invalidAdminResponse()
+		}
+	}
 	return permissions, nil
 }
 

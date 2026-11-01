@@ -456,7 +456,7 @@ func TestAdminPermissionChangeMetadata(t *testing.T) {
 }
 
 func TestAdminMalformedPermissionProbeCanRecover(t *testing.T) {
-	for _, invalid := range []string{`null`, `{}`, `{"admin":false,"collections":{},"kv":null}`, `{"admin":false,"collections":{},"kv":[{"prefix":"x","read":true}]}`} {
+	for _, invalid := range []string{`null`, `{}`, `{"admin":false,"collections":{},"kv":null}`, `{"admin":false,"collections":{},"kv":[{"prefix":"x","read":true}]}`, `{"admin":false,"collections":{},"kv":[{"read":true,"write":false}]}`} {
 		var probes atomic.Int32
 		client := keyPermissionTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/api/auth/keys/me/permissions" {
@@ -476,6 +476,51 @@ func TestAdminMalformedPermissionProbeCanRecover(t *testing.T) {
 		}
 		if probes.Load() != 2 {
 			t.Fatal("failed capability probe was cached")
+		}
+	}
+}
+
+func TestAdminModernPutFixtureClearsOmittedLimits(t *testing.T) {
+	data, err := os.ReadFile("test-fixtures/admin-contract-0.80.0.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Changes []struct {
+			Method, Facet string
+			Body          map[string]json.RawMessage
+			Response      struct{ After map[string]json.RawMessage }
+		} `json:"permission_changes"`
+	}
+	if json.Unmarshal(data, &fixture) != nil {
+		t.Fatal("invalid fixture")
+	}
+	for _, change := range fixture.Changes {
+		if change.Method != "PUT" || change.Facet != "collections" {
+			continue
+		}
+		for _, field := range []string{"select_fields", "exclude_fields", "writable_fields"} {
+			if _, present := change.Body[field]; present {
+				continue
+			}
+			if after, present := change.Response.After[field]; present && string(after) != "null" {
+				t.Errorf("PUT fixture retains omitted %s restriction", field)
+			}
+		}
+	}
+}
+
+func TestAdminKVListRequiresPrefixes(t *testing.T) {
+	for _, body := range []string{`[{"read":true,"write":false}]`, `[{"prefix":"","read":true,"write":false}]`} {
+		client := keyPermissionTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/auth/keys/me/permissions" {
+				_, _ = io.WriteString(w, modernAdminPermissions)
+				return
+			}
+			_, _ = io.WriteString(w, body)
+		})
+		if _, err := client.ListAPIKeyKVPermissions("me", nil); err == nil {
+			t.Fatal("KV list accepted a grant without its required prefix")
 		}
 	}
 }

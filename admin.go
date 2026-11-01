@@ -400,6 +400,13 @@ func (k *APIKeyPermissions) UnmarshalJSON(data []byte) error {
 	if adminField == "admin" && kv == nil {
 		return invalidAdminResponse()
 	}
+	if adminField == "admin" {
+		for _, grant := range kv {
+			if grant.Prefix == "" {
+				return invalidAdminResponse()
+			}
+		}
+	}
 	extra, err := extraAdminFields(data, adminField, collectionField, kvField)
 	if err != nil {
 		return err
