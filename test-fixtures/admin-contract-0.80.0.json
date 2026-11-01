@@ -73,10 +73,8 @@
           "select_fields": [
             "name"
           ],
-          "exclude_fields": [
-            "secret"
-          ],
-          "writable_fields": []
+          "exclude_fields": null,
+          "writable_fields": null
         }
       }
     },
@@ -153,10 +151,8 @@
           "select_fields": [
             "name"
           ],
-          "exclude_fields": [
-            "secret"
-          ],
-          "writable_fields": []
+          "exclude_fields": null,
+          "writable_fields": null
         }
       }
     },
