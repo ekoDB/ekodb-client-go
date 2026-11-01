@@ -1,0 +1,313 @@
+{
+  "status": "synthetic contract cases derived from the documented public API; not a server response capture",
+  "server_version": "0.80.0",
+  "minimum_server_version": "0.80.0",
+  "legacy_minimum_server_version": "0.79.2",
+  "key_id": "0123456789abcdef0123456789abcdef",
+  "key": {
+    "id": "0123456789abcdef0123456789abcdef",
+    "key": "synthetic-target-key-0123456789-abcdef",
+    "is_admin": false,
+    "collection_permissions": {
+      "tenant:a/": {
+        "read": true,
+        "write": false,
+        "select_fields": [
+          "name"
+        ],
+        "exclude_fields": [
+          "secret"
+        ],
+        "writable_fields": []
+      }
+    },
+    "kv_permissions": [
+      {
+        "prefix": "session:",
+        "read": true,
+        "write": false
+      }
+    ]
+  },
+  "permissions": {
+    "admin": false,
+    "collections": {
+      "tenant:a/": {
+        "read": true,
+        "write": false,
+        "select_fields": [
+          "name"
+        ],
+        "exclude_fields": [
+          "secret"
+        ],
+        "writable_fields": []
+      }
+    },
+    "kv": [
+      {
+        "prefix": "session:",
+        "read": true,
+        "write": false
+      }
+    ]
+  },
+  "permission_changes": [
+    {
+      "name": "tenant:a/",
+      "method": "PUT",
+      "facet": "collections",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/collections/tenant%3Aa%2F",
+      "body": {
+        "read": true,
+        "write": false,
+        "select_fields": [
+          "name"
+        ]
+      },
+      "response": {
+        "before": null,
+        "after": {
+          "read": true,
+          "write": false,
+          "select_fields": [
+            "name"
+          ],
+          "exclude_fields": [
+            "secret"
+          ],
+          "writable_fields": []
+        }
+      }
+    },
+    {
+      "name": "tenant:a/",
+      "method": "PATCH",
+      "facet": "collections",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/collections/tenant%3Aa%2F",
+      "body": {
+        "exclude_fields": null,
+        "writable_fields": []
+      },
+      "response": {
+        "before": {
+          "read": true,
+          "write": false,
+          "select_fields": [
+            "name"
+          ],
+          "exclude_fields": [
+            "secret"
+          ],
+          "writable_fields": []
+        },
+        "after": {
+          "read": true,
+          "write": false,
+          "select_fields": [
+            "name"
+          ],
+          "exclude_fields": null,
+          "writable_fields": []
+        }
+      }
+    },
+    {
+      "name": "tenant:a/",
+      "method": "DELETE",
+      "facet": "collections",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/collections/tenant%3Aa%2F",
+      "body": null,
+      "response": {
+        "before": {
+          "read": true,
+          "write": false,
+          "select_fields": [
+            "name"
+          ],
+          "exclude_fields": [
+            "secret"
+          ],
+          "writable_fields": []
+        },
+        "after": null
+      }
+    },
+    {
+      "name": "a space+",
+      "method": "PUT",
+      "facet": "collections",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/collections/a%20space%2B",
+      "body": {
+        "read": true,
+        "write": false,
+        "select_fields": [
+          "name"
+        ]
+      },
+      "response": {
+        "before": null,
+        "after": {
+          "read": true,
+          "write": false,
+          "select_fields": [
+            "name"
+          ],
+          "exclude_fields": [
+            "secret"
+          ],
+          "writable_fields": []
+        }
+      }
+    },
+    {
+      "name": "a space+",
+      "method": "PATCH",
+      "facet": "collections",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/collections/a%20space%2B",
+      "body": {
+        "exclude_fields": null,
+        "writable_fields": []
+      },
+      "response": {
+        "before": {
+          "read": true,
+          "write": false,
+          "select_fields": [
+            "name"
+          ],
+          "exclude_fields": [
+            "secret"
+          ],
+          "writable_fields": []
+        },
+        "after": {
+          "read": true,
+          "write": false,
+          "select_fields": [
+            "name"
+          ],
+          "exclude_fields": null,
+          "writable_fields": []
+        }
+      }
+    },
+    {
+      "name": "a space+",
+      "method": "DELETE",
+      "facet": "collections",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/collections/a%20space%2B",
+      "body": null,
+      "response": {
+        "before": {
+          "read": true,
+          "write": false,
+          "select_fields": [
+            "name"
+          ],
+          "exclude_fields": [
+            "secret"
+          ],
+          "writable_fields": []
+        },
+        "after": null
+      }
+    },
+    {
+      "name": "tenant:a/",
+      "method": "PUT",
+      "facet": "kv",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/kv/tenant%3Aa%2F",
+      "body": {
+        "read": true,
+        "write": false
+      },
+      "response": {
+        "before": null,
+        "after": {
+          "read": true,
+          "write": false
+        }
+      }
+    },
+    {
+      "name": "tenant:a/",
+      "method": "PATCH",
+      "facet": "kv",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/kv/tenant%3Aa%2F",
+      "body": {
+        "read": false,
+        "write": false
+      },
+      "response": {
+        "before": {
+          "read": true,
+          "write": false
+        },
+        "after": null
+      }
+    },
+    {
+      "name": "tenant:a/",
+      "method": "DELETE",
+      "facet": "kv",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/kv/tenant%3Aa%2F",
+      "body": null,
+      "response": {
+        "before": {
+          "read": true,
+          "write": false
+        },
+        "after": null
+      }
+    },
+    {
+      "name": "*",
+      "method": "PUT",
+      "facet": "kv",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/kv/%2A",
+      "body": {
+        "read": true,
+        "write": false
+      },
+      "response": {
+        "before": null,
+        "after": {
+          "read": true,
+          "write": false
+        }
+      }
+    },
+    {
+      "name": "*",
+      "method": "PATCH",
+      "facet": "kv",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/kv/%2A",
+      "body": {
+        "read": false,
+        "write": false
+      },
+      "response": {
+        "before": {
+          "read": true,
+          "write": false
+        },
+        "after": null
+      }
+    },
+    {
+      "name": "*",
+      "method": "DELETE",
+      "facet": "kv",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/kv/%2A",
+      "body": null,
+      "response": {
+        "before": {
+          "read": true,
+          "write": false
+        },
+        "after": null
+      }
+    }
+  ]
+}
