@@ -2,7 +2,6 @@ package ekodb
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -133,11 +132,13 @@ func validatePermissionTarget(keyID string) error {
 }
 
 func validatePermissionFacet(facet string) error {
-	if strings.TrimSpace(facet) == "" || facet == "." || facet == ".." {
+	if facet == "" || facet == "." || facet == ".." {
 		return fmt.Errorf("a valid permission facet is required")
 	}
 	for _, r := range facet {
-		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+		if unicode.IsControl(r) || r == '\u00ad' || r == '\u061c' || r == '\u180e' ||
+			(r >= '\u200b' && r <= '\u200f') || (r >= '\u2028' && r <= '\u202e') ||
+			(r >= '\u2060' && r <= '\u2064') || (r >= '\u2066' && r <= '\u2069') || r == '\ufeff' {
 			return fmt.Errorf("a valid permission facet is required")
 		}
 	}
@@ -170,8 +171,8 @@ func (a *AdminClient) permissionRoutes() (bool, []byte, error) {
 		a.permissionKnown, a.keyPermissionRoutes = true, true
 		return true, data, nil
 	}
-	var httpError *HTTPError
-	if errors.As(err, &httpError) && (httpError.StatusCode == http.StatusNotFound || httpError.StatusCode == http.StatusMethodNotAllowed) {
+	httpError, direct := err.(*HTTPError)
+	if direct && (httpError.StatusCode == http.StatusNotFound || httpError.StatusCode == http.StatusMethodNotAllowed) {
 		a.permissionKnown = true
 		return false, nil, nil
 	}

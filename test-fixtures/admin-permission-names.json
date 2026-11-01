@@ -1,0 +1,190 @@
+{
+  "accepted": [
+    {
+      "name": "ordinary_namespace",
+      "value": "tenant:a/"
+    },
+    {
+      "name": "space_only",
+      "value": " "
+    },
+    {
+      "name": "reserved_uri_characters",
+      "value": "tenant +/?#%*"
+    },
+    {
+      "name": "unlisted_format_0600",
+      "value": "a\u0600b"
+    },
+    {
+      "name": "unlisted_format_0605",
+      "value": "a\u0605b"
+    },
+    {
+      "name": "unlisted_format_06dd",
+      "value": "a\u06ddb"
+    },
+    {
+      "name": "unlisted_format_2065",
+      "value": "a\u2065b"
+    },
+    {
+      "name": "unlisted_format_206a",
+      "value": "a\u206ab"
+    },
+    {
+      "name": "unlisted_format_206f",
+      "value": "a\u206fb"
+    },
+    {
+      "name": "unlisted_format_fff9",
+      "value": "a\ufff9b"
+    },
+    {
+      "name": "unlisted_format_fffb",
+      "value": "a\ufffbb"
+    },
+    {
+      "name": "supplementary_format_e0001",
+      "value": "a\udb40\udc01b"
+    },
+    {
+      "name": "supplementary_emoji",
+      "value": "tenant\ud83d\ude80"
+    }
+  ],
+  "rejected": [
+    {
+      "name": "empty",
+      "value": ""
+    },
+    {
+      "name": "dot",
+      "value": "."
+    },
+    {
+      "name": "dotdot",
+      "value": ".."
+    },
+    {
+      "name": "blocked_u0000",
+      "value": "a\u0000b"
+    },
+    {
+      "name": "blocked_u001f",
+      "value": "a\u001fb"
+    },
+    {
+      "name": "blocked_u007f",
+      "value": "a\u007fb"
+    },
+    {
+      "name": "blocked_u0085",
+      "value": "a\u0085b"
+    },
+    {
+      "name": "blocked_u009f",
+      "value": "a\u009fb"
+    },
+    {
+      "name": "blocked_u00ad",
+      "value": "a\u00adb"
+    },
+    {
+      "name": "blocked_u061c",
+      "value": "a\u061cb"
+    },
+    {
+      "name": "blocked_u180e",
+      "value": "a\u180eb"
+    },
+    {
+      "name": "blocked_u200b",
+      "value": "a\u200bb"
+    },
+    {
+      "name": "blocked_u200c",
+      "value": "a\u200cb"
+    },
+    {
+      "name": "blocked_u200d",
+      "value": "a\u200db"
+    },
+    {
+      "name": "blocked_u200e",
+      "value": "a\u200eb"
+    },
+    {
+      "name": "blocked_u200f",
+      "value": "a\u200fb"
+    },
+    {
+      "name": "blocked_u2028",
+      "value": "a\u2028b"
+    },
+    {
+      "name": "blocked_u2029",
+      "value": "a\u2029b"
+    },
+    {
+      "name": "blocked_u202a",
+      "value": "a\u202ab"
+    },
+    {
+      "name": "blocked_u202b",
+      "value": "a\u202bb"
+    },
+    {
+      "name": "blocked_u202c",
+      "value": "a\u202cb"
+    },
+    {
+      "name": "blocked_u202d",
+      "value": "a\u202db"
+    },
+    {
+      "name": "blocked_u202e",
+      "value": "a\u202eb"
+    },
+    {
+      "name": "blocked_u2060",
+      "value": "a\u2060b"
+    },
+    {
+      "name": "blocked_u2061",
+      "value": "a\u2061b"
+    },
+    {
+      "name": "blocked_u2062",
+      "value": "a\u2062b"
+    },
+    {
+      "name": "blocked_u2063",
+      "value": "a\u2063b"
+    },
+    {
+      "name": "blocked_u2064",
+      "value": "a\u2064b"
+    },
+    {
+      "name": "blocked_u2066",
+      "value": "a\u2066b"
+    },
+    {
+      "name": "blocked_u2067",
+      "value": "a\u2067b"
+    },
+    {
+      "name": "blocked_u2068",
+      "value": "a\u2068b"
+    },
+    {
+      "name": "blocked_u2069",
+      "value": "a\u2069b"
+    },
+    {
+      "name": "blocked_ufeff",
+      "value": "a\ufeffb"
+    }
+  ]
+}
