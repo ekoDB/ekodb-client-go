@@ -17,9 +17,13 @@ repositories release:
    completed branch for the normal draft-PR review process.
 4. Rebase-merge the release cap to `main`.
 
-The [release workflow](.github/workflows/release.yml) requires the cap subject
-intact: a squash appends the PR number and a merge commit replaces the subject,
-making the release a silent, green no-op.
+The [release workflow](.github/workflows/release.yml) requires an exact cap
+subject. A squash that appends the PR number changes it and does not trigger a
+release. The
+[shared cap selector](https://github.com/ekoDB/ekodb-workflows-public/blob/main/scripts/release-cap-at-commit.sh)
+also recognizes a cap at the second parent of a two-parent merge, so that form
+can publish; rebase-merge remains the repository convention and supported
+release path.
 
 `.github/workflows/release.yml` then tags `vX.Y.Z`, publishes the GitHub Release
 from the changelog block, and runs `scripts/index-release.sh` so the tag shows

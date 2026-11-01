@@ -5,9 +5,10 @@ name: release
 # is the module's manifest, edited in the cap commit like the changelog; the
 # cap subject is cross-checked against it.
 #
-# The cap must reach main with its subject intact: rebase-merge it (the
-# convention here). A squash appends the PR number and a merge commit replaces
-# the subject, and either makes the cap a silent, green no-op.
+# Rebase-merge release caps to main: this is the repository convention and
+# supported release path. A squash subject with an appended PR number is not
+# a cap. The shared workflow also recognizes a cap at the second parent of a
+# two-parent merge, so that form can publish.
 
 on:
   push:
