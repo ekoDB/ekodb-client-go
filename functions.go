@@ -25,6 +25,50 @@ type UserFunction struct {
 	ID                *string                        `json:"id,omitempty"`
 	CreatedAt         *time.Time                     `json:"created_at,omitempty"`
 	UpdatedAt         *time.Time                     `json:"updated_at,omitempty"`
+	// CreatedBy is the key (and the subject its token named) that saved the function.
+	// Server-managed and read-only: the server sets it on create, keeps it across
+	// updates and replaces any value sent. Nil for a function saved before the server
+	// recorded authors.
+	CreatedBy *Principal `json:"created_by,omitempty"`
+	// RunAs chooses whose grants every step of the function runs with: RunAsCaller
+	// (the calling key's grants) or RunAsAuthor (the recorded author's). Leave unset
+	// to let the server apply its default; a server reports nil for a function saved
+	// before the field existed.
+	RunAs *RunAs `json:"run_as,omitempty"`
+}
+
+// RunAs names whose grants the steps of a stored function run with.
+type RunAs string
+
+const (
+	// RunAsCaller runs the steps with the calling key's grants.
+	RunAsCaller RunAs = "caller"
+	// RunAsAuthor runs the steps with the grants of the key recorded as the author.
+	RunAsAuthor RunAs = "author"
+)
+
+// UnmarshalJSON refuses any value other than the two names.
+func (r *RunAs) UnmarshalJSON(data []byte) error {
+	var name string
+	if err := json.Unmarshal(data, &name); err != nil {
+		return err
+	}
+	if name != string(RunAsCaller) && name != string(RunAsAuthor) {
+		return fmt.Errorf("run_as must be %q or %q", RunAsCaller, RunAsAuthor)
+	}
+	*r = RunAs(name)
+	return nil
+}
+
+// Principal is the key, and the subject its token named, that created a function or a
+// schedule. Read-only: the server records it.
+type Principal struct {
+	// KeyID is the key's non-secret id, never the key itself.
+	KeyID string `json:"key_id"`
+	// KeyLabel is the key's label, when it was registered with one.
+	KeyLabel *string `json:"key_label,omitempty"`
+	// Subject is the subject the token was minted for, when it named one.
+	Subject *string `json:"subject,omitempty"`
 }
 
 // TransactionConfig controls whether a stored function executes atomically.

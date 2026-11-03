@@ -130,6 +130,53 @@ KV PUT needs at least one true right. PATCH can remove a grant by leaving both
 rights false. DELETE sends no body. A change takes effect in the key's next
 token; an already-minted token can retain its old grants until expiry.
 
+## Stored-function call grants
+
+A non-admin key can be allowed to call stored functions. A grant is a `Pattern`
+with one right, `FunctionCall`: an exact function label, a label prefix ending
+in one `*` (`report_*`), or `*` for every function. `*` is valid only as the
+last character; a pattern is non-empty, at most `MaxFunctionPatternBytes` (256)
+bytes, and holds no control or invisible formatting character. Every method
+checks these rules before sending a request and encodes the pattern as one path
+segment (`*` is `%2A`). A key holds no empty grant: put gives one and delete
+removes it.
+
+```go
+key, err := admin.CreateAPIKey(ekodb.CreateAPIKeyRequest{
+    Label: "report-runner",
+    FunctionPermissions: map[string][]ekodb.FunctionAction{
+        "report_*": {ekodb.FunctionCall}, // an empty slice grants nothing
+    },
+})
+grants, err := admin.ListAPIKeyFunctionPermissions(key.ID)
+change, err := admin.PutAPIKeyFunctionPermissions(key.ID, "nightly_close")
+_ = change.After // &FunctionPermissions{Pattern: "nightly_close"}
+grant, err := admin.GetAPIKeyFunctionPermissions(key.ID, "nightly_close")
+_, err = admin.DeleteAPIKeyFunctionPermissions(key.ID, "nightly_close")
+```
+
+`CreateAPIKeyRequest.FunctionPermissions` is omitted from the request when
+empty. A registration response echoes the request map, while key listings and
+`GetPermissions()` return a list of grants; all read as `FunctionPermissions`
+sorted by pattern. `APIKey.FunctionPermissions` is nil when the response carries
+none, and `APIKeyPermissions.FunctionPermissions` is empty for a server that
+predates function grants. Changes return `FunctionPermissionChange` with
+`Before` and `After` (nil for none) and preserve extra metadata such as
+`ripple_warning`. Deleting a grant the key does not hold is a 404; a non-admin
+caller is refused with 403, reported as an `*HTTPError`. A removed grant stays
+usable through a token already issued until it expires. These methods need
+key-addressed permission routes and never accept a key value as the target.
+
+Stored-function definitions gain `UserFunction.RunAs` (`RunAsCaller` or
+`RunAsAuthor`; other values fail to decode) and the read-only, server-recorded
+`UserFunction.CreatedBy` (`Principal`: `KeyID`, optional `KeyLabel` and
+`Subject`). A function saved before the server recorded these reads as nil.
+Schedules are untyped maps, so the server-recorded `created_by` is returned
+unchanged. A function call refused for want of a grant is an `*HTTPError` with
+status 403. The shared contract is
+[`admin-function-permissions-contract.json`](../test-fixtures/admin-function-permissions-contract.json),
+vendored unchanged from the public client contract.
+
 ## Explicit 0.79.2 compatibility
 
 The older generation has no equivalent for every modern facet operation. Modern

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -116,6 +117,15 @@ const (
 	APIKeyWrite APIKeyAction = "write"
 )
 
+// FunctionAction is the one right a function grant carries.
+type FunctionAction string
+
+// FunctionCall is the right to call the stored functions a grant covers.
+const FunctionCall FunctionAction = "call"
+
+// MaxFunctionPatternBytes is the longest function grant pattern the server accepts.
+const MaxFunctionPatternBytes = 256
+
 // CollectionPermissions preserves field restrictions, including empty lists.
 // A nil slice represents an absent/null restriction. Empty slices remain
 // distinct from nil, preserving the server's field-permission semantics.
@@ -179,12 +189,23 @@ type KVPermissions struct {
 	Write    bool                       `json:"write"`
 }
 
+// FunctionPermissions is a server-returned stored-function call grant. Pattern is a
+// function label, a label prefix ending in one "*", or "*". Holding the grant is the
+// right to call.
+type FunctionPermissions struct {
+	Metadata map[string]json.RawMessage `json:"-"`
+	Pattern  string                     `json:"pattern"`
+}
+
 // APIKeyPermissions describes the calling token's grants.
 type APIKeyPermissions struct {
 	Metadata              map[string]json.RawMessage       `json:"-"`
 	IsAdmin               bool                             `json:"is_admin"`
 	CollectionPermissions map[string]CollectionPermissions `json:"collection_permissions"`
 	KVPermissions         []KVPermissions                  `json:"kv_permissions,omitempty"`
+	// FunctionPermissions is empty when the key holds no function grant, and when
+	// the server predates function grants.
+	FunctionPermissions []FunctionPermissions `json:"function_permissions,omitempty"`
 }
 
 // APIKey contains a secret. Never log this value.
@@ -197,9 +218,13 @@ type APIKey struct {
 	IsAdmin               bool                             `json:"is_admin"`
 	CollectionPermissions map[string]CollectionPermissions `json:"collection_permissions"`
 	KVPermissions         []KVPermissions                  `json:"kv_permissions,omitempty"`
-	CreatedAt             *int64                           `json:"created_at,omitempty"`
-	ExpiresAt             *int64                           `json:"expires_at,omitempty"`
-	RippleWarning         *string                          `json:"ripple_warning,omitempty"`
+	// FunctionPermissions is nil when the response carries none. Registration echoes
+	// the request map and key listings return grants; both read as grants sorted by
+	// pattern, and a pattern registered with no rights grants nothing.
+	FunctionPermissions []FunctionPermissions `json:"function_permissions,omitempty"`
+	CreatedAt           *int64                `json:"created_at,omitempty"`
+	ExpiresAt           *int64                `json:"expires_at,omitempty"`
+	RippleWarning       *string               `json:"ripple_warning,omitempty"`
 }
 
 // CreateAPIKeyRequest defaults to a non-admin key with no collection grants.
@@ -208,6 +233,10 @@ type CreateAPIKeyRequest struct {
 	Description           string                    `json:"description,omitempty"`
 	IsAdmin               bool                      `json:"is_admin"`
 	CollectionPermissions map[string][]APIKeyAction `json:"collection_permissions"`
+	// FunctionPermissions grants calls to stored functions: a function label, a label
+	// prefix ending in one "*", or "*", each with []FunctionAction{FunctionCall}. A
+	// pattern given an empty slice grants nothing. Omitted from the request when empty.
+	FunctionPermissions map[string][]FunctionAction `json:"function_permissions,omitempty"`
 }
 
 // LegacyUpdateAPIKeyCollectionPermissionsRequest replaces one collection grant.
@@ -281,6 +310,19 @@ func (a *AdminClient) CreateAPIKey(request CreateAPIKeyRequest) (*APIKey, error)
 		}
 		if actions == nil {
 			return nil, fmt.Errorf("registration requires read/write action arrays")
+		}
+	}
+	for pattern, rights := range request.FunctionPermissions {
+		if err := validateFunctionPattern(pattern); err != nil {
+			return nil, err
+		}
+		if rights == nil {
+			return nil, fmt.Errorf("registration requires call action arrays")
+		}
+		for _, right := range rights {
+			if right != FunctionCall {
+				return nil, fmt.Errorf("registration requires call action arrays")
+			}
 		}
 	}
 	body := struct {
@@ -374,26 +416,75 @@ func extraAdminFields(data []byte, known ...string) (map[string]json.RawMessage,
 }
 func (k *APIKey) UnmarshalJSON(data []byte) error {
 	type plain APIKey
-	var value plain
+	// The outer field shadows the embedded one so the grants can arrive as a list or
+	// as the registration map.
+	var value struct {
+		plain
+		FunctionPermissions json.RawMessage `json:"function_permissions"`
+	}
 	if json.Unmarshal(data, &value) != nil {
 		return invalidAdminResponse()
 	}
-	extra, err := extraAdminFields(data, "id", "key", "label", "description", "is_admin", "collection_permissions", "kv_permissions", "created_at", "expires_at", "ripple_warning")
+	functions, err := decodeFunctionGrants(value.FunctionPermissions)
 	if err != nil {
 		return err
 	}
-	value.Metadata = extra
-	*k = APIKey(value)
+	extra, err := extraAdminFields(data, "id", "key", "label", "description", "is_admin", "collection_permissions", "kv_permissions", "function_permissions", "created_at", "expires_at", "ripple_warning")
+	if err != nil {
+		return err
+	}
+	value.Metadata, value.plain.FunctionPermissions = extra, functions
+	*k = APIKey(value.plain)
 	return nil
+}
+
+// decodeFunctionGrants reads the three shapes a key's function grants arrive in:
+// absent or null (nil), a list of grants, or the registration map pattern -> ["call"]
+// (sorted by pattern; a pattern with no rights grants nothing).
+func decodeFunctionGrants(raw json.RawMessage) ([]FunctionPermissions, error) {
+	text := strings.TrimSpace(string(raw))
+	switch {
+	case text == "" || text == "null":
+		return nil, nil
+	case strings.HasPrefix(text, "["):
+		grants := []FunctionPermissions{}
+		if json.Unmarshal(raw, &grants) != nil {
+			return nil, invalidAdminResponse()
+		}
+		return grants, nil
+	case strings.HasPrefix(text, "{"):
+		var registered map[string][]FunctionAction
+		if json.Unmarshal(raw, &registered) != nil {
+			return nil, invalidAdminResponse()
+		}
+		patterns := make([]string, 0, len(registered))
+		for pattern, rights := range registered {
+			for _, right := range rights {
+				if right != FunctionCall {
+					return nil, invalidAdminResponse()
+				}
+			}
+			if len(rights) > 0 {
+				patterns = append(patterns, pattern)
+			}
+		}
+		sort.Strings(patterns)
+		grants := make([]FunctionPermissions, 0, len(patterns))
+		for _, pattern := range patterns {
+			grants = append(grants, FunctionPermissions{Pattern: pattern})
+		}
+		return grants, nil
+	}
+	return nil, invalidAdminResponse()
 }
 func (k *APIKeyPermissions) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(data, &fields) != nil || fields == nil {
 		return invalidAdminResponse()
 	}
-	adminField, collectionField, kvField := "is_admin", "collection_permissions", "kv_permissions"
+	adminField, collectionField, kvField, functionField := "is_admin", "collection_permissions", "kv_permissions", "function_permissions"
 	if _, modern := fields["admin"]; modern {
-		adminField, collectionField, kvField = "admin", "collections", "kv"
+		adminField, collectionField, kvField, functionField = "admin", "collections", "kv", "functions"
 	}
 	var admin *bool
 	var collections map[string]CollectionPermissions
@@ -414,11 +505,20 @@ func (k *APIKeyPermissions) UnmarshalJSON(data []byte) error {
 			}
 		}
 	}
-	extra, err := extraAdminFields(data, adminField, collectionField, kvField)
+	functions, err := decodeFunctionGrants(fields[functionField])
 	if err != nil {
 		return err
 	}
-	*k = APIKeyPermissions{IsAdmin: *admin, CollectionPermissions: collections, KVPermissions: kv, Metadata: extra}
+	for _, grant := range functions {
+		if grant.Pattern == "" {
+			return invalidAdminResponse()
+		}
+	}
+	extra, err := extraAdminFields(data, adminField, collectionField, kvField, functionField)
+	if err != nil {
+		return err
+	}
+	*k = APIKeyPermissions{IsAdmin: *admin, CollectionPermissions: collections, KVPermissions: kv, FunctionPermissions: functions, Metadata: extra}
 	return nil
 }
 func (p CollectionPermissions) MarshalJSON() ([]byte, error) {
@@ -487,4 +587,23 @@ func (k *KVPermissions) UnmarshalJSON(data []byte) error {
 func (k KVPermissions) MarshalJSON() ([]byte, error) {
 	type plain KVPermissions
 	return adminJSONWithMetadata(plain(k), k.Metadata)
+}
+
+func (f *FunctionPermissions) UnmarshalJSON(data []byte) error {
+	type plain FunctionPermissions
+	var value plain
+	if json.Unmarshal(data, &value) != nil || value.Pattern == "" {
+		return invalidAdminResponse()
+	}
+	extra, err := extraAdminFields(data, "pattern")
+	if err != nil {
+		return err
+	}
+	value.Metadata = extra
+	*f = FunctionPermissions(value)
+	return nil
+}
+func (f FunctionPermissions) MarshalJSON() ([]byte, error) {
+	type plain FunctionPermissions
+	return adminJSONWithMetadata(plain(f), f.Metadata)
 }
