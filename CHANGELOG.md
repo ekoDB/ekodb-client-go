@@ -16,6 +16,9 @@ and this project adheres to
   Patterns are validated before HTTP (non-empty, at most 256 bytes, no control
   or invisible character, `*` only last), and a server that predates the grants
   reads as none.
+- Bare `.` and `..` patterns are rejected (an SDK-side rule: a bare dot segment
+  is not safely routable and is not percent-encoded around; the server currently
+  accepts them).
 - `UserFunction.RunAs` (`caller` or `author`) and the read-only, server-recorded
   `UserFunction.CreatedBy`.
 - Shared `admin-function-permissions-contract.json` fixture, vendored unchanged
