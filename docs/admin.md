@@ -136,7 +136,9 @@ A non-admin key can be allowed to call stored functions. A grant is a `Pattern`
 with one right, `FunctionCall`: an exact function label, a label prefix ending
 in one `*` (`report_*`), or `*` for every function. `*` is valid only as the
 last character; a pattern is non-empty, at most `MaxFunctionPatternBytes` (256)
-bytes, and holds no control or invisible formatting character. Every method
+bytes, and holds no control or invisible formatting character. The bare segments
+`.` and `..` are also rejected (an SDK-side rule: a bare dot segment is not
+safely routable, and the client does not percent-encode around it). Every method
 checks these rules before sending a request and encodes the pattern as one path
 segment (`*` is `%2A`). A key holds no empty grant: put gives one and delete
 removes it.

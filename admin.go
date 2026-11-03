@@ -459,6 +459,9 @@ func decodeFunctionGrants(raw json.RawMessage) ([]FunctionPermissions, error) {
 		}
 		patterns := make([]string, 0, len(registered))
 		for pattern, rights := range registered {
+			if pattern == "" {
+				return nil, invalidAdminResponse()
+			}
 			for _, right := range rights {
 				if right != FunctionCall {
 					return nil, invalidAdminResponse()
@@ -508,11 +511,6 @@ func (k *APIKeyPermissions) UnmarshalJSON(data []byte) error {
 	functions, err := decodeFunctionGrants(fields[functionField])
 	if err != nil {
 		return err
-	}
-	for _, grant := range functions {
-		if grant.Pattern == "" {
-			return invalidAdminResponse()
-		}
 	}
 	extra, err := extraAdminFields(data, adminField, collectionField, kvField, functionField)
 	if err != nil {
