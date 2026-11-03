@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Stored-function call grants: `CreateAPIKeyRequest.FunctionPermissions`,
+  `FunctionPermissions` on key records and the aggregate permission read, and
+  `List`/`Get`/`Put`/`DeleteAPIKeyFunctionPermissions` addressed by key id.
+  Patterns are validated before HTTP (non-empty, at most 256 bytes, no control
+  or invisible character, `*` only last), and a server that predates the grants
+  reads as none.
+- `UserFunction.RunAs` (`caller` or `author`) and the read-only, server-recorded
+  `UserFunction.CreatedBy`.
+- Shared `admin-function-permissions-contract.json` fixture, vendored unchanged
+  from the public client contract.
+
 ## [0.32.0] - 2026-11-02
 
 ### Added
