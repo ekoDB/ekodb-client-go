@@ -1,0 +1,212 @@
+{
+  "status": "synthetic contract cases derived from the documented public API; not a server response capture",
+  "key_id": "0123456789abcdef0123456789abcdef",
+  "registration_request": {
+    "label": "report-runner",
+    "is_admin": false,
+    "collection_permissions": {},
+    "function_permissions": {
+      "report_*": ["call"],
+      "nightly_close": ["call"],
+      "audit_only": []
+    },
+    "api_key": "synthetic-admin-key-0123456789-abcdef"
+  },
+  "registration_response": {
+    "id": "0123456789abcdef0123456789abcdef",
+    "key": "synthetic-target-key-0123456789-abcdef",
+    "is_admin": false,
+    "label": "report-runner",
+    "description": null,
+    "collection_permissions": {},
+    "kv_permissions": null,
+    "function_permissions": {
+      "report_*": ["call"],
+      "nightly_close": ["call"],
+      "audit_only": []
+    },
+    "created_at": 1790000000,
+    "expires_at": null
+  },
+  "registration_response_without_function_permissions": {
+    "id": "0123456789abcdef0123456789abcdef",
+    "key": "synthetic-target-key-0123456789-abcdef",
+    "is_admin": false,
+    "label": null,
+    "description": null,
+    "collection_permissions": {},
+    "kv_permissions": null,
+    "function_permissions": null,
+    "created_at": 1790000000,
+    "expires_at": null
+  },
+  "expected_registered_patterns": ["nightly_close", "report_*"],
+  "key_list_record": {
+    "id": "0123456789abcdef0123456789abcdef",
+    "key": "synthetic-target-key-0123456789-abcdef",
+    "is_admin": false,
+    "label": "report-runner",
+    "description": null,
+    "collection_permissions": {},
+    "kv_permissions": [],
+    "function_permissions": [
+      { "pattern": "nightly_close" },
+      { "pattern": "report_*" }
+    ],
+    "created_at": 1790000000,
+    "expires_at": null
+  },
+  "permissions": {
+    "admin": false,
+    "collections": {},
+    "kv": [],
+    "functions": [{ "pattern": "nightly_close" }, { "pattern": "report_*" }]
+  },
+  "permissions_without_functions": {
+    "admin": false,
+    "collections": {},
+    "kv": []
+  },
+  "function_grants": [{ "pattern": "nightly_close" }, { "pattern": "report_*" }],
+  "function_grant_changes": [
+    {
+      "name": "prefix grant is created",
+      "method": "PUT",
+      "pattern": "report_*",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/functions/report_%2A",
+      "body": { "call": true },
+      "status": 200,
+      "response": { "before": null, "after": { "pattern": "report_*" } }
+    },
+    {
+      "name": "repeating a grant keeps it",
+      "method": "PUT",
+      "pattern": "report_*",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/functions/report_%2A",
+      "body": { "call": true },
+      "status": 200,
+      "response": {
+        "before": { "pattern": "report_*" },
+        "after": { "pattern": "report_*" }
+      }
+    },
+    {
+      "name": "every-function grant is created",
+      "method": "PUT",
+      "pattern": "*",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/functions/%2A",
+      "body": { "call": true },
+      "status": 200,
+      "response": { "before": null, "after": { "pattern": "*" } }
+    },
+    {
+      "name": "label with reserved characters is encoded",
+      "method": "PUT",
+      "pattern": "billing:close month",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/functions/billing%3Aclose%20month",
+      "body": { "call": true },
+      "status": 200,
+      "response": {
+        "before": null,
+        "after": { "pattern": "billing:close month" }
+      }
+    },
+    {
+      "name": "grant is removed",
+      "method": "DELETE",
+      "pattern": "report_*",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/functions/report_%2A",
+      "body": null,
+      "status": 200,
+      "response": { "before": { "pattern": "report_*" }, "after": null }
+    },
+    {
+      "name": "replication warning is preserved as metadata",
+      "method": "PUT",
+      "pattern": "nightly_close",
+      "path": "/api/auth/keys/0123456789abcdef0123456789abcdef/permissions/functions/nightly_close",
+      "body": { "call": true },
+      "status": 200,
+      "response": {
+        "before": null,
+        "after": { "pattern": "nightly_close" },
+        "ripple_warning": "synthetic propagation warning"
+      }
+    }
+  ],
+  "rejected_patterns": [
+    { "name": "empty", "value": "" },
+    { "name": "star in the middle", "value": "re*port" },
+    { "name": "two stars", "value": "report_**" },
+    { "name": "leading star with text", "value": "*report" },
+    { "name": "control character", "value": "report\u0000" },
+    { "name": "zero width space", "value": "report​_*" },
+    { "name": "too long", "length": 257 }
+  ],
+  "accepted_pattern_length": 256,
+  "refusals": [
+    {
+      "name": "missing grant is not found",
+      "method": "DELETE",
+      "pattern": "report_*",
+      "status": 404
+    },
+    {
+      "name": "non-admin key is forbidden",
+      "method": "PUT",
+      "pattern": "report_*",
+      "status": 403
+    }
+  ],
+  "function_call_refusal": {
+    "status": 403,
+    "body": {
+      "error": "No call permission for function nightly_close"
+    }
+  },
+  "function_definition": {
+    "id": "0123456789abcdef0123456789abcdef",
+    "label": "nightly_close",
+    "name": "Nightly close",
+    "version": "1.0",
+    "parameters": {},
+    "functions": [],
+    "tags": [],
+    "created_by": {
+      "key_id": "0123456789abcdef0123456789abcdef",
+      "key_label": "report-runner",
+      "subject": "alice"
+    },
+    "run_as": "author"
+  },
+  "function_definition_unrecorded": {
+    "id": "fedcba9876543210fedcba9876543210",
+    "label": "legacy_close",
+    "name": "Legacy close",
+    "version": "1.0",
+    "parameters": {},
+    "functions": [],
+    "tags": [],
+    "created_by": null,
+    "run_as": null
+  },
+  "function_save_request": {
+    "label": "nightly_close",
+    "name": "Nightly close",
+    "parameters": {},
+    "functions": [],
+    "tags": [],
+    "run_as": "caller"
+  },
+  "schedule_record": {
+    "id": "0123456789abcdef0123456789abcdef",
+    "name": "close",
+    "function_label": "nightly_close",
+    "enabled": true,
+    "created_by": {
+      "key_id": "0123456789abcdef0123456789abcdef",
+      "key_label": "report-runner",
+      "subject": null
+    }
+  }
+}

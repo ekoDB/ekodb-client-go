@@ -21,6 +21,7 @@ type PermissionChange[T any] struct {
 
 type CollectionPermissionChange = PermissionChange[CollectionPermissions]
 type KVPermissionChange = PermissionChange[KVPermissions]
+type FunctionPermissionChange = PermissionChange[FunctionPermissions]
 
 func (c *PermissionChange[T]) UnmarshalJSON(data []byte) error {
 	type plain PermissionChange[T]
@@ -319,6 +320,77 @@ func (a *AdminClient) GetAPIKeyKVPermissions(keyID, prefix string) (*KVPermissio
 		return nil, invalidAdminResponse()
 	}
 	return &permissions, nil
+}
+
+// validateFunctionPattern applies the rules the server enforces before any request:
+// a label, a label prefix ending in one "*", or "*"; non-empty, at most
+// MaxFunctionPatternBytes bytes, no control or invisible formatting character, and
+// "*" nowhere but last.
+func validateFunctionPattern(pattern string) error {
+	if len(pattern) > MaxFunctionPatternBytes || strings.Contains(strings.TrimSuffix(pattern, "*"), "*") || validatePermissionFacet(pattern) != nil {
+		return fmt.Errorf("a valid function pattern is required")
+	}
+	return nil
+}
+
+func (a *AdminClient) ListAPIKeyFunctionPermissions(keyID string) ([]FunctionPermissions, error) {
+	path, err := a.permissionPath(keyID, "functions", "")
+	if err != nil {
+		return nil, err
+	}
+	data, err := a.client.makeRequest(http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var permissions []FunctionPermissions
+	if json.Unmarshal(data, &permissions) != nil || permissions == nil {
+		return nil, invalidAdminResponse()
+	}
+	return permissions, nil
+}
+
+func (a *AdminClient) GetAPIKeyFunctionPermissions(keyID, pattern string) (*FunctionPermissions, error) {
+	if err := validateFunctionPattern(pattern); err != nil {
+		return nil, err
+	}
+	path, err := a.permissionPath(keyID, "functions", pattern)
+	if err != nil {
+		return nil, err
+	}
+	data, err := a.client.makeRequest(http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var permissions FunctionPermissions
+	if json.Unmarshal(data, &permissions) != nil {
+		return nil, invalidAdminResponse()
+	}
+	return &permissions, nil
+}
+
+func (a *AdminClient) functionPermissionEdit(method, keyID, pattern string, body any) (*FunctionPermissionChange, error) {
+	if err := validateFunctionPattern(pattern); err != nil {
+		return nil, err
+	}
+	path, err := a.permissionPath(keyID, "functions", pattern)
+	if err != nil {
+		return nil, err
+	}
+	data, err := a.client.makeRequest(method, path, body)
+	if err != nil {
+		return nil, err
+	}
+	return decodePermissionChange[FunctionPermissions](data)
+}
+
+// PutAPIKeyFunctionPermissions gives the key the right to call the functions pattern covers.
+func (a *AdminClient) PutAPIKeyFunctionPermissions(keyID, pattern string) (*FunctionPermissionChange, error) {
+	return a.functionPermissionEdit(http.MethodPut, keyID, pattern, map[string]bool{"call": true})
+}
+
+// DeleteAPIKeyFunctionPermissions removes the key's grant on exactly pattern.
+func (a *AdminClient) DeleteAPIKeyFunctionPermissions(keyID, pattern string) (*FunctionPermissionChange, error) {
+	return a.functionPermissionEdit(http.MethodDelete, keyID, pattern, nil)
 }
 
 func decodePermissionChange[T any](data []byte) (*PermissionChange[T], error) {
