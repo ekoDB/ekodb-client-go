@@ -46,6 +46,17 @@ type functionGrantFixture struct {
 	Unrecorded   json.RawMessage `json:"function_definition_unrecorded"`
 	SaveRequest  json.RawMessage `json:"function_save_request"`
 	ScheduleItem json.RawMessage `json:"schedule_record"`
+	ReplyValues  struct {
+		Accepted []struct {
+			Name     string
+			Value    json.RawMessage
+			Patterns []string
+		}
+		Rejected []struct {
+			Name  string
+			Value json.RawMessage
+		}
+	} `json:"function_permissions_reply_values"`
 }
 
 func loadFunctionGrantFixture(t *testing.T) functionGrantFixture {
@@ -351,6 +362,103 @@ func TestFunctionGrantRoutesNeedKeyAddressedServers(t *testing.T) {
 	})
 	if _, err := client.PutAPIKeyFunctionPermissions("me", "report_*"); err == nil {
 		t.Fatal("legacy servers have no function grant routes")
+	}
+}
+
+// withField returns the JSON object record with field set to value.
+func withField(t *testing.T, record json.RawMessage, field string, value json.RawMessage) string {
+	t.Helper()
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(record, &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields[field] = value
+	out, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
+// replyShapeClients answers a key listing, a modern aggregate read and (on a second client
+// whose probe answers 404) the legacy aggregate read, each carrying value as its function grants.
+func replyShapeClients(t *testing.T, fixture functionGrantFixture, value json.RawMessage) (modern, legacy *AdminClient, legacyPaths *[]recordedRequest) {
+	t.Helper()
+	listing := "[" + withField(t, fixture.KeyListRecord, "function_permissions", value) + "]"
+	modern, _ = functionGrantClient(t, withField(t, fixture.Permissions, "functions", value), func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/auth/keys" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = io.WriteString(w, listing)
+	})
+	legacyBody := `{"is_admin":false,"collection_permissions":{},"kv_permissions":[],"function_permissions":` + string(value) + `}`
+	legacy, legacyPaths = functionGrantClient(t, "", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/auth/permissions" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = io.WriteString(w, legacyBody)
+	})
+	return modern, legacy, legacyPaths
+}
+
+func TestFunctionGrantRepliesAcceptAndRefuseTheSharedShapes(t *testing.T) {
+	fixture := loadFunctionGrantFixture(t)
+	if len(fixture.ReplyValues.Accepted) == 0 || len(fixture.ReplyValues.Rejected) == 0 {
+		t.Fatal("the fixture carries no reply shapes")
+	}
+	for _, c := range fixture.ReplyValues.Accepted {
+		t.Run("accepts "+c.Name, func(t *testing.T) {
+			modern, legacy, legacyPaths := replyShapeClients(t, fixture, c.Value)
+			keys, err := modern.ListAPIKeys()
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			if got := patternsOf(keys[0].FunctionPermissions); !reflect.DeepEqual(got, c.Patterns) {
+				t.Fatalf("listing patterns %v, want %v", got, c.Patterns)
+			}
+			permissions, err := modern.GetPermissions()
+			if err != nil {
+				t.Fatalf("aggregate: %v", err)
+			}
+			if got := patternsOf(permissions.FunctionPermissions); !reflect.DeepEqual(got, c.Patterns) {
+				t.Fatalf("aggregate patterns %v, want %v", got, c.Patterns)
+			}
+			if keyRoutes, err := legacy.UsesKeyPermissionRoutes(); err != nil || keyRoutes {
+				t.Fatalf("the legacy server must read as legacy: %v %v", keyRoutes, err)
+			}
+			permissions, err = legacy.GetPermissions()
+			if err != nil {
+				t.Fatalf("legacy aggregate: %v", err)
+			}
+			if got := patternsOf(permissions.FunctionPermissions); !reflect.DeepEqual(got, c.Patterns) {
+				t.Fatalf("legacy aggregate patterns %v, want %v", got, c.Patterns)
+			}
+			if n := len(*legacyPaths); n == 0 || (*legacyPaths)[n-1].Path != "/api/auth/permissions" {
+				t.Fatalf("the legacy read did not reach /api/auth/permissions: %v", *legacyPaths)
+			}
+		})
+	}
+	for _, c := range fixture.ReplyValues.Rejected {
+		t.Run("refuses "+c.Name, func(t *testing.T) {
+			modern, legacy, legacyPaths := replyShapeClients(t, fixture, c.Value)
+			if _, err := modern.ListAPIKeys(); err == nil {
+				t.Fatal("listing accepted it")
+			}
+			if _, err := modern.GetPermissions(); err == nil {
+				t.Fatal("aggregate accepted it")
+			}
+			if keyRoutes, err := legacy.UsesKeyPermissionRoutes(); err != nil || keyRoutes {
+				t.Fatalf("the legacy server must read as legacy: %v %v", keyRoutes, err)
+			}
+			if _, err := legacy.GetPermissions(); err == nil {
+				t.Fatal("legacy aggregate accepted it")
+			}
+			if n := len(*legacyPaths); n == 0 || (*legacyPaths)[n-1].Path != "/api/auth/permissions" {
+				t.Fatalf("the legacy read did not reach /api/auth/permissions: %v", *legacyPaths)
+			}
+		})
 	}
 }
 
