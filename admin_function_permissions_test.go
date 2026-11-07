@@ -450,10 +450,18 @@ func TestEveryFunctionWriteRefusesAnUnknownRunAsBeforeSending(t *testing.T) {
 	}
 	for _, valid := range []RunAs{RunAsCaller, RunAsAuthor} {
 		v := valid
-		var recorded recordedRequest
 		definition := UserFunction{Label: "f", Name: "F", Parameters: map[string]ParameterDefinition{}, Functions: []FunctionStageConfig{}, RunAs: &v}
-		if err := functionClientAgainst(t, 200, []byte(`{"status":"success","id":"f1"}`), &recorded).UpdateUserFunction("f", definition); err != nil || recorded.Method != "PUT" {
-			t.Fatalf("run_as %q must be sent: %v %+v", v, err, recorded)
+		writes := map[string]func(*Client) error{
+			"SaveFunction":       func(c *Client) error { _, err := c.SaveFunction(definition); return err },
+			"UpdateFunction":     func(c *Client) error { return c.UpdateFunction("f", definition) },
+			"SaveUserFunction":   func(c *Client) error { _, err := c.SaveUserFunction(definition); return err },
+			"UpdateUserFunction": func(c *Client) error { return c.UpdateUserFunction("f", definition) },
+		}
+		for name, write := range writes {
+			var recorded recordedRequest
+			if err := write(functionClientAgainst(t, 200, []byte(`{"status":"success","id":"f1"}`), &recorded)); err != nil || !strings.Contains(recorded.Body, `"run_as":"`+string(v)+`"`) {
+				t.Fatalf("%s must send run_as %q: %v %+v", name, v, err, recorded)
+			}
 		}
 	}
 }
