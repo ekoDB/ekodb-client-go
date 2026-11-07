@@ -16,9 +16,9 @@ and this project adheres to
   Patterns are validated before HTTP (non-empty, at most 256 bytes, no control
   or invisible character, `*` only last), and a server that predates the grants
   reads as none.
-- Bare `.` and `..` patterns are rejected (an SDK-side rule: a bare dot segment
-  is not safely routable and is not percent-encoded around; the server currently
-  accepts them).
+- Bare `.` and `..` patterns are rejected before sending: a bare dot segment
+  cannot be addressed in a URL path, and the server refuses them as grant
+  patterns too (since ekoDB 0.81.1).
 - `UserFunction.RunAs` (`caller` or `author`) and the read-only, server-recorded
   `UserFunction.CreatedBy`. Any other `run_as` value is refused both when a
   definition is decoded and before one is sent: `SaveFunction`,
