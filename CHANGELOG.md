@@ -20,9 +20,13 @@ and this project adheres to
   is not safely routable and is not percent-encoded around; the server currently
   accepts them).
 - `UserFunction.RunAs` (`caller` or `author`) and the read-only, server-recorded
-  `UserFunction.CreatedBy`.
+  `UserFunction.CreatedBy`. Any other `run_as` value is refused both when a
+  definition is decoded and before one is sent: `SaveFunction`,
+  `UpdateFunction`, `SaveUserFunction` and `UpdateUserFunction` return an error
+  without making a request, whichever body encoding the client uses.
 - Shared `admin-function-permissions-contract.json` fixture, vendored unchanged
-  from the public client contract.
+  from the public client contract. Its rejected patterns include bare `.` and
+  `..`, so the function-grant methods are tested against them directly.
 
 ## [0.32.0] - 2026-11-02
 
