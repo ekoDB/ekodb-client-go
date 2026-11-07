@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- A function-grant reply whose registration map gives a pattern `null` rights
+  (`{"report_*": null}`) is refused as a malformed response, as the Rust,
+  Python, TypeScript and Kotlin clients refuse it. Previously the pattern was
+  silently dropped. An explicit empty rights list still grants nothing.
+- The vendored `test-fixtures/admin-function-permissions-contract.json` is
+  byte-identical to the shared contract again, including its accepted and
+  refused reply shapes. A new test reads every shape on the key listing and on
+  the modern and legacy aggregate permission reads.
+
 ## [0.33.0] - 2026-11-07
 
 ### Added
