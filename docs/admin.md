@@ -170,12 +170,13 @@ usable through a token already issued until it expires. These methods need
 key-addressed permission routes and never accept a key value as the target.
 
 Stored-function definitions gain `UserFunction.RunAs` (`RunAsCaller` or
-`RunAsAuthor`; other values fail to decode) and the read-only, server-recorded
-`UserFunction.CreatedBy` (`Principal`: `KeyID`, optional `KeyLabel` and
-`Subject`). A function saved before the server recorded these reads as nil.
-Schedules are untyped maps, so the server-recorded `created_by` is returned
-unchanged. A function call refused for want of a grant is an `*HTTPError` with
-status 403. The shared contract is
+`RunAsAuthor`; any other value fails to decode, and the four save and update
+methods refuse it before sending a definition) and the read-only,
+server-recorded `UserFunction.CreatedBy` (`Principal`: `KeyID`, optional
+`KeyLabel` and `Subject`). A function saved before the server recorded these
+reads as nil. Schedules are untyped maps, so the server-recorded `created_by` is
+returned unchanged. A function call refused for want of a grant is an
+`*HTTPError` with status 403. The shared contract is
 [`admin-function-permissions-contract.json`](../test-fixtures/admin-function-permissions-contract.json),
 vendored unchanged from the public client contract.
 

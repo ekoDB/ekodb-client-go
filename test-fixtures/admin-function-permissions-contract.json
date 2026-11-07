@@ -141,6 +141,8 @@
     { "name": "leading star with text", "value": "*report" },
     { "name": "control character", "value": "report\u0000" },
     { "name": "zero width space", "value": "report​_*" },
+    { "name": "bare dot segment", "value": "." },
+    { "name": "bare dot-dot segment", "value": ".." },
     { "name": "too long", "length": 257 }
   ],
   "accepted_pattern_length": 256,
