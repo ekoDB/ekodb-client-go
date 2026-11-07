@@ -426,6 +426,38 @@ func TestFunctionDefinitionsCarryRunAsAndCreatedBy(t *testing.T) {
 	}
 }
 
+func TestEveryFunctionWriteRefusesAnUnknownRunAsBeforeSending(t *testing.T) {
+	root := RunAs("root")
+	empty := RunAs("")
+	for _, value := range []*RunAs{&root, &empty} {
+		definition := UserFunction{Label: "f", Name: "F", Parameters: map[string]ParameterDefinition{}, Functions: []FunctionStageConfig{}, RunAs: value}
+		writes := map[string]func(*Client) error{
+			"SaveFunction":       func(c *Client) error { _, err := c.SaveFunction(definition); return err },
+			"UpdateFunction":     func(c *Client) error { return c.UpdateFunction("f", definition) },
+			"SaveUserFunction":   func(c *Client) error { _, err := c.SaveUserFunction(definition); return err },
+			"UpdateUserFunction": func(c *Client) error { return c.UpdateUserFunction("f", definition) },
+		}
+		for name, write := range writes {
+			var recorded recordedRequest
+			err := write(functionClientAgainst(t, 200, []byte(`{"status":"success","id":"f1"}`), &recorded))
+			if err == nil || !strings.Contains(err.Error(), "run_as") {
+				t.Fatalf("%s with run_as %q: expected a run_as error, got %v", name, *value, err)
+			}
+			if recorded.Method != "" {
+				t.Fatalf("%s with run_as %q reached the server: %+v", name, *value, recorded)
+			}
+		}
+	}
+	for _, valid := range []RunAs{RunAsCaller, RunAsAuthor} {
+		v := valid
+		var recorded recordedRequest
+		definition := UserFunction{Label: "f", Name: "F", Parameters: map[string]ParameterDefinition{}, Functions: []FunctionStageConfig{}, RunAs: &v}
+		if err := functionClientAgainst(t, 200, []byte(`{"status":"success","id":"f1"}`), &recorded).UpdateUserFunction("f", definition); err != nil || recorded.Method != "PUT" {
+			t.Fatalf("run_as %q must be sent: %v %+v", v, err, recorded)
+		}
+	}
+}
+
 func TestRefusedFunctionCallIsTheClientsNormalHTTPError(t *testing.T) {
 	fixture := loadFunctionGrantFixture(t)
 	_, err := functionClientAgainst(t, fixture.CallRefusal.Status, fixture.CallRefusal.Body, nil).CallFunction("nightly_close", nil)

@@ -47,16 +47,31 @@ const (
 	RunAsAuthor RunAs = "author"
 )
 
+// Valid reports whether r is one of the two names the server accepts.
+func (r RunAs) Valid() bool {
+	return r == RunAsCaller || r == RunAsAuthor
+}
+
 // UnmarshalJSON refuses any value other than the two names.
 func (r *RunAs) UnmarshalJSON(data []byte) error {
 	var name string
 	if err := json.Unmarshal(data, &name); err != nil {
 		return err
 	}
-	if name != string(RunAsCaller) && name != string(RunAsAuthor) {
+	if !RunAs(name).Valid() {
 		return fmt.Errorf("run_as must be %q or %q", RunAsCaller, RunAsAuthor)
 	}
 	*r = RunAs(name)
+	return nil
+}
+
+// checkRunAs refuses a definition whose run_as is set to anything but the two names,
+// before it is sent. It runs in every write method rather than in a MarshalJSON
+// because the client can encode a request body as MessagePack, which never calls one.
+func checkRunAs(function UserFunction) error {
+	if function.RunAs != nil && !function.RunAs.Valid() {
+		return fmt.Errorf("run_as must be %q or %q, got %q", RunAsCaller, RunAsAuthor, string(*function.RunAs))
+	}
 	return nil
 }
 
@@ -1656,6 +1671,9 @@ type StageStats struct {
 
 // SaveFunction creates a new function
 func (c *Client) SaveFunction(function UserFunction) (string, error) {
+	if err := checkRunAs(function); err != nil {
+		return "", err
+	}
 	respBody, err := c.makeRequest("POST", "/api/functions", function)
 	if err != nil {
 		return "", err
@@ -1713,6 +1731,9 @@ func (c *Client) ListFunctions(tags []string) ([]UserFunction, error) {
 
 // UpdateFunction updates an existing function by ID
 func (c *Client) UpdateFunction(id string, function UserFunction) error {
+	if err := checkRunAs(function); err != nil {
+		return err
+	}
 	_, err := c.makeRequest("PUT", fmt.Sprintf("/api/functions/%s", url.PathEscape(id)), function)
 	return err
 }
@@ -1749,6 +1770,9 @@ func (c *Client) CallFunction(labelOrID string, params map[string]interface{}) (
 
 // SaveUserFunction creates a new reusable user function
 func (c *Client) SaveUserFunction(userFunction UserFunction) (string, error) {
+	if err := checkRunAs(userFunction); err != nil {
+		return "", err
+	}
 	respBody, err := c.makeRequest("POST", "/api/functions", userFunction)
 	if err != nil {
 		return "", err
@@ -1806,6 +1830,9 @@ func (c *Client) ListUserFunctions(tags []string) ([]UserFunction, error) {
 
 // UpdateUserFunction updates an existing user function by label
 func (c *Client) UpdateUserFunction(label string, userFunction UserFunction) error {
+	if err := checkRunAs(userFunction); err != nil {
+		return err
+	}
 	_, err := c.makeRequest("PUT", fmt.Sprintf("/api/functions/%s", url.PathEscape(label)), userFunction)
 	return err
 }
