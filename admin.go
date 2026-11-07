@@ -440,7 +440,8 @@ func (k *APIKey) UnmarshalJSON(data []byte) error {
 
 // decodeFunctionGrants reads the three shapes a key's function grants arrive in:
 // absent or null (nil), a list of grants, or the registration map pattern -> ["call"]
-// (sorted by pattern; a pattern with no rights grants nothing).
+// (sorted by pattern; a pattern with an empty rights list grants nothing). An empty
+// pattern, or a null rights value in the map, is refused, as every other SDK does.
 func decodeFunctionGrants(raw json.RawMessage) ([]FunctionPermissions, error) {
 	text := strings.TrimSpace(string(raw))
 	switch {
@@ -453,21 +454,22 @@ func decodeFunctionGrants(raw json.RawMessage) ([]FunctionPermissions, error) {
 		}
 		return grants, nil
 	case strings.HasPrefix(text, "{"):
-		var registered map[string][]FunctionAction
+		// A pointer keeps a null rights value (malformed) apart from an explicit [].
+		var registered map[string]*[]FunctionAction
 		if json.Unmarshal(raw, &registered) != nil {
 			return nil, invalidAdminResponse()
 		}
 		patterns := make([]string, 0, len(registered))
 		for pattern, rights := range registered {
-			if pattern == "" {
+			if pattern == "" || rights == nil {
 				return nil, invalidAdminResponse()
 			}
-			for _, right := range rights {
+			for _, right := range *rights {
 				if right != FunctionCall {
 					return nil, invalidAdminResponse()
 				}
 			}
-			if len(rights) > 0 {
+			if len(*rights) > 0 {
 				patterns = append(patterns, pattern)
 			}
 		}

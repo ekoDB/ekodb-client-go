@@ -210,5 +210,41 @@
       "key_label": "report-runner",
       "subject": null
     }
+  },
+  "function_permissions_reply_values": {
+    "accepted": [
+      { "name": "null reads as no grants", "value": null, "patterns": [] },
+      {
+        "name": "list of grants",
+        "value": [{ "pattern": "nightly_close" }, { "pattern": "report_*" }],
+        "patterns": ["nightly_close", "report_*"]
+      },
+      {
+        "name": "registration map, sorted, empty rights grant nothing",
+        "value": {
+          "report_*": ["call"],
+          "nightly_close": ["call"],
+          "audit_only": []
+        },
+        "patterns": ["nightly_close", "report_*"]
+      }
+    ],
+    "rejected": [
+      {
+        "name": "empty pattern in the registration map",
+        "value": { "": ["call"] }
+      },
+      {
+        "name": "empty pattern with no rights in the registration map",
+        "value": { "": [] }
+      },
+      { "name": "empty pattern in the list", "value": [{ "pattern": "" }] },
+      { "name": "right other than call", "value": { "report_*": ["read"] } },
+      {
+        "name": "null rights in the registration map",
+        "value": { "report_*": null }
+      },
+      { "name": "neither a list nor a map", "value": 7 }
+    ]
   }
 }
