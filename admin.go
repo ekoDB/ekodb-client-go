@@ -440,8 +440,9 @@ func (k *APIKey) UnmarshalJSON(data []byte) error {
 
 // decodeFunctionGrants reads the three shapes a key's function grants arrive in:
 // absent or null (nil), a list of grants, or the registration map pattern -> ["call"]
-// (sorted by pattern; a pattern with an empty rights list grants nothing). An empty
-// pattern, or a null rights value in the map, is refused, as every other SDK does.
+// (a pattern with an empty rights list grants nothing). Both forms read as grants
+// sorted by pattern in code-point order. An empty pattern, or a null rights value in
+// the map, is refused, as every other SDK does.
 func decodeFunctionGrants(raw json.RawMessage) ([]FunctionPermissions, error) {
 	text := strings.TrimSpace(string(raw))
 	switch {
@@ -452,6 +453,9 @@ func decodeFunctionGrants(raw json.RawMessage) ([]FunctionPermissions, error) {
 		if json.Unmarshal(raw, &grants) != nil {
 			return nil, invalidAdminResponse()
 		}
+		// Go strings compare by UTF-8 bytes, which is Unicode code-point order:
+		// the order every SDK returns, in both reply shapes.
+		sort.SliceStable(grants, func(i, j int) bool { return grants[i].Pattern < grants[j].Pattern })
 		return grants, nil
 	case strings.HasPrefix(text, "{"):
 		// A pointer keeps a null rights value (malformed) apart from an explicit [].
