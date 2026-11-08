@@ -18,6 +18,11 @@ and this project adheres to
   byte-identical to the shared contract again, including its accepted and
   refused reply shapes. A new test reads every shape on the key listing and on
   the modern and legacy aggregate permission reads.
+- Function grants read sorted by pattern in Unicode code-point order whichever
+  shape the reply uses. A list reply used to keep the server's order while the
+  registration map was sorted. The vendored fixture gains the shared contract's
+  out-of-order list and a pattern pair whose code-point order differs from its
+  UTF-16 order, in both shapes.
 
 ## [0.33.0] - 2026-11-07
 
