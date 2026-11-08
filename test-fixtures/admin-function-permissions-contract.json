@@ -220,6 +220,21 @@
         "patterns": ["nightly_close", "report_*"]
       },
       {
+        "name": "list out of order reads sorted by pattern",
+        "value": [{ "pattern": "report_*" }, { "pattern": "nightly_close" }],
+        "patterns": ["nightly_close", "report_*"]
+      },
+      {
+        "name": "list sorts by code point, not UTF-16 unit",
+        "value": [{ "pattern": "😀_report" }, { "pattern": "Ａ_close" }],
+        "patterns": ["Ａ_close", "😀_report"]
+      },
+      {
+        "name": "registration map sorts by code point, not UTF-16 unit",
+        "value": { "😀_report": ["call"], "Ａ_close": ["call"] },
+        "patterns": ["Ａ_close", "😀_report"]
+      },
+      {
         "name": "registration map, sorted, empty rights grant nothing",
         "value": {
           "report_*": ["call"],
