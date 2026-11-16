@@ -95,7 +95,7 @@ func TestUpdateSchemaConstraintsRequestShape(t *testing.T) {
 		"age": {
 			Min: &minVal,
 			Max: &maxVal,
-			// Enums intentionally left unset to prove omitempty drops it.
+			// Enums intentionally left nil to prove it is omitted.
 		},
 	}
 
@@ -173,6 +173,57 @@ func TestUpdateSchemaConstraintsRequestShape(t *testing.T) {
 		if _, present := ageRaw[key]; present {
 			t.Errorf("constraints.age carries unset key %q on the wire; omitempty should have dropped it", key)
 		}
+	}
+}
+
+// TestUpdateSchemaConstraintsEnumsStates proves the three Enums states stay
+// distinct on the wire: nil omits the key, an empty list sends "enums":[]
+// (clearing the field's enums), and values are sent as given.
+func TestUpdateSchemaConstraintsEnumsStates(t *testing.T) {
+	var got capturedRequest
+	server := newCapturingServer(t, &got)
+	defer server.Close()
+	client := createTestClient(t, server)
+
+	constraints := map[string]SchemaConstraintUpdate{
+		"cleared":   {Enums: EnumValues()},
+		"untouched": {Enums: nil},
+		"set":       {Enums: EnumValues("draft", "published")},
+		"literal":   {Enums: &[]interface{}{}},
+	}
+	if err := client.UpdateSchemaConstraints("posts", constraints); err != nil {
+		t.Fatalf("UpdateSchemaConstraints failed: %v", err)
+	}
+
+	var body struct {
+		Constraints map[string]map[string]json.RawMessage `json:"constraints"`
+	}
+	if err := json.Unmarshal(got.body, &body); err != nil {
+		t.Fatalf("request body is not JSON: %v (body=%s)", err, got.body)
+	}
+	for _, field := range []string{"cleared", "literal"} {
+		raw, present := body.Constraints[field]["enums"]
+		if !present {
+			t.Errorf("constraints.%s has no enums key; an empty list must be sent; body=%s", field, got.body)
+		} else if string(raw) != "[]" {
+			t.Errorf("constraints.%s.enums = %s, want []", field, raw)
+		}
+	}
+	if _, present := body.Constraints["untouched"]["enums"]; present {
+		t.Errorf("constraints.untouched carries enums; nil must omit it; body=%s", got.body)
+	}
+	if raw := string(body.Constraints["set"]["enums"]); raw != `["draft","published"]` {
+		t.Errorf("constraints.set.enums = %s, want [\"draft\",\"published\"]", raw)
+	}
+}
+
+func TestEnumValuesWithoutArgumentsIsEmptyNotNil(t *testing.T) {
+	values := EnumValues()
+	if values == nil {
+		t.Fatal("EnumValues() = nil, want a pointer to an empty slice")
+	}
+	if *values == nil || len(*values) != 0 {
+		t.Errorf("*EnumValues() = %#v, want an empty non-nil slice", *values)
 	}
 }
 
