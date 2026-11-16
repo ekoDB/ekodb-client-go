@@ -2,6 +2,7 @@ package ekodb
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 )
@@ -297,5 +298,48 @@ func TestCreateScheduleServerError(t *testing.T) {
 	_, err := client.CreateSchedule(map[string]interface{}{"name": "Bad"})
 	if err == nil {
 		t.Fatal("Expected error for server error")
+	}
+}
+
+// ============================================================================
+// Schedule Stats Tests
+// ============================================================================
+
+func TestGetScheduleStats(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"GET /api/schedules/stats": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"active_schedules": 3})
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	stats, err := client.GetScheduleStats()
+	if err != nil {
+		t.Fatalf("GetScheduleStats failed: %v", err)
+	}
+	if stats.ActiveSchedules != 3 {
+		t.Errorf("ActiveSchedules = %d, want 3", stats.ActiveSchedules)
+	}
+}
+
+func TestGetScheduleStatsForbidden(t *testing.T) {
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"GET /api/schedules/stats": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":"admin required"}`))
+		},
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.GetScheduleStats()
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("GetScheduleStats error = %v, want an *HTTPError", err)
+	}
+	if httpErr.StatusCode != http.StatusForbidden {
+		t.Errorf("StatusCode = %d, want 403", httpErr.StatusCode)
 	}
 }

@@ -86,3 +86,23 @@ func (c *Client) TriggerSchedule(id string) (map[string]interface{}, error) {
 	}
 	return result, nil
 }
+
+// ScheduleStats is the server's schedule summary.
+type ScheduleStats struct {
+	// ActiveSchedules is the number of schedules the server is running.
+	ActiveSchedules int `json:"active_schedules"`
+}
+
+// GetScheduleStats returns the server's schedule summary
+// (GET /api/schedules/stats). It needs an admin key.
+func (c *Client) GetScheduleStats() (*ScheduleStats, error) {
+	respBody, err := c.makeRequest("GET", "/api/schedules/stats", nil)
+	if err != nil {
+		return nil, err
+	}
+	var stats ScheduleStats
+	if err := json.Unmarshal(respBody, &stats); err != nil {
+		return nil, err
+	}
+	return &stats, nil
+}

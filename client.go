@@ -1692,25 +1692,47 @@ func (c *Client) RestoreRecord(collection, id string) error {
 	return err
 }
 
-// RestoreCollection restores all deleted records in a collection from trash
-// Records remain in trash for 30 days before permanent deletion
+// RestoreCollection restores all deleted records in a collection from trash.
+// Records remain in trash for 30 days before permanent deletion.
+//
+// It returns the number of tombstones cleared (the server's cleared_count).
+// That is not the number of records recovered: a tombstone can be cleared
+// while the record's data is gone. Use RestoreCollectionCounts for both counts.
 func (c *Client) RestoreCollection(collection string) (int, error) {
-	path := fmt.Sprintf("/api/trash/%s", url.PathEscape(collection))
-	respBody, err := c.makeRequest("POST", path, nil)
+	result, err := c.RestoreCollectionCounts(collection)
 	if err != nil {
 		return 0, err
 	}
-
-	var result struct {
-		Status       string `json:"status"`
-		Collection   string `json:"collection"`
-		ClearedCount int    `json:"cleared_count"`
-	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return 0, err
-	}
-
 	return result.ClearedCount, nil
+}
+
+// RestoreCollectionResult is what restoring a whole collection from trash
+// reported. The two counts differ: a tombstone can be cleared while the
+// record's data is no longer recoverable, so RecordsRestored can be lower than
+// ClearedCount.
+type RestoreCollectionResult struct {
+	// ClearedCount is the number of tombstones removed (cleared_count).
+	ClearedCount int `json:"cleared_count"`
+	// RecordsRestored is the number of records whose data was recovered
+	// (records_restored). It is nil when the server does not send it, as
+	// servers before 0.72.7 do not.
+	RecordsRestored *int `json:"records_restored"`
+}
+
+// RestoreCollectionCounts restores all deleted records in a collection from
+// trash and returns both counts the server reports.
+func (c *Client) RestoreCollectionCounts(collection string) (*RestoreCollectionResult, error) {
+	path := fmt.Sprintf("/api/trash/%s", url.PathEscape(collection))
+	respBody, err := c.makeRequest("POST", path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result RestoreCollectionResult
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // HealthState is a health status value reported by ekoDB's /api/health.

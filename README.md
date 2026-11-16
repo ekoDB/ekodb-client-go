@@ -152,7 +152,8 @@ func main() {
   read-your-writes via the `TransactionId` option on `Find` / `FindByID`
 - ✅ **KV document linking** - `KVLink` / `KVGetLinks` / `KVUnlink`
 - ✅ **Schedule management** -
-  create/list/get/update/delete/pause/resume/trigger scheduled functions
+  create/list/get/update/delete/pause/resume/trigger scheduled functions, and
+  schedule stats
 - ✅ **Rate limiting with automatic retry** (429, 503, network errors)
 - ✅ **Rate limit tracking** (`X-RateLimit-*` headers)
 - ✅ **Configurable retry behavior**
@@ -528,6 +529,39 @@ client.TriggerSchedule("sched-id")
 
 // Delete
 client.DeleteSchedule("sched-id")
+
+// How many schedules the server is running (admin key)
+stats, _ := client.GetScheduleStats()
+fmt.Println(stats.ActiveSchedules)
+```
+
+### Schema Constraints
+
+`UpdateSchemaConstraints` changes constraints on fields of an existing
+collection. `Enums` keeps three states apart: `nil` leaves the field's enums
+unchanged, `EnumValues()` sends `"enums":[]` and clears them, and
+`EnumValues("draft", "published")` sets them.
+
+```go
+required := true
+err := client.UpdateSchemaConstraints("posts", map[string]ekodb.SchemaConstraintUpdate{
+    "status": {Required: &required, Enums: ekodb.EnumValues("draft", "published")},
+    "tag":    {Enums: ekodb.EnumValues()}, // clear tag's enums
+})
+```
+
+### Restoring a Collection from Trash
+
+`RestoreCollection` returns the number of tombstones cleared.
+`RestoreCollectionCounts` also returns the number of records whose data was
+recovered, which can be lower; it is `nil` on servers before 0.72.7.
+
+```go
+result, _ := client.RestoreCollectionCounts("users")
+fmt.Println(result.ClearedCount)
+if result.RecordsRestored != nil {
+    fmt.Println(*result.RecordsRestored)
+}
 ```
 
 ### WebSocket Chat Streaming

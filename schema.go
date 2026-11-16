@@ -254,20 +254,32 @@ func (c *Client) GetSchema(collection string) (*Schema, error) {
 }
 
 // SchemaConstraintUpdate is a partial update to a single field's schema
-// constraints. Every field is optional (a pointer, or a nil-able slice) so
-// only the constraints actually set by the caller are serialized — an unset
-// field is omitted from the JSON body and left untouched server-side. Field
-// names and semantics mirror the server's schema-constraints-update request
-// contract exactly.
+// constraints. Every field is optional (a pointer) so only the constraints
+// actually set by the caller are serialized — an unset field is omitted from
+// the JSON body and left untouched server-side. Field names and semantics
+// mirror the server's schema-constraints-update request contract exactly.
+//
+// Enums is a pointer to a slice so its three states stay distinct: nil omits
+// the key, a pointer to an empty slice sends "enums":[] (clearing the field's
+// enums), and a pointer to values sends them. Build it with EnumValues.
 type SchemaConstraintUpdate struct {
-	FieldType *string       `json:"field_type,omitempty"`
-	Default   interface{}   `json:"default,omitempty"`
-	Unique    *bool         `json:"unique,omitempty"`
-	Required  *bool         `json:"required,omitempty"`
-	Enums     []interface{} `json:"enums,omitempty"`
-	Max       *float64      `json:"max,omitempty"`
-	Min       *float64      `json:"min,omitempty"`
-	Regex     *string       `json:"regex,omitempty"`
+	FieldType *string        `json:"field_type,omitempty"`
+	Default   interface{}    `json:"default,omitempty"`
+	Unique    *bool          `json:"unique,omitempty"`
+	Required  *bool          `json:"required,omitempty"`
+	Enums     *[]interface{} `json:"enums,omitempty"`
+	Max       *float64       `json:"max,omitempty"`
+	Min       *float64       `json:"min,omitempty"`
+	Regex     *string        `json:"regex,omitempty"`
+}
+
+// EnumValues returns a SchemaConstraintUpdate.Enums value holding values.
+// With no arguments it returns a pointer to an empty slice, which is sent as
+// "enums":[] and clears the field's enums.
+func EnumValues(values ...interface{}) *[]interface{} {
+	list := make([]interface{}, 0, len(values))
+	list = append(list, values...)
+	return &list
 }
 
 // UpdateSchemaConstraints applies a partial update to one or more fields'
