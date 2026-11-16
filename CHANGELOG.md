@@ -21,6 +21,17 @@ and this project adheres to
   and its doc now says so (ekoDB/ekodb-client#394).
 - `EnumValues(values...)` builds a `SchemaConstraintUpdate.Enums` value.
 
+### Fixed
+
+- Docs: `UpdateSchemaConstraints`, the `SchemaConstraintUpdate` comment and the
+  README now say what current servers do with an update. They replace a named
+  field's constraints rather than merging them: every update must carry
+  `Unique`, `Required` and `Enums` (an update without one is refused), `Max`,
+  `Min` and `Regex` are cleared when left unset, and `Default` and `FieldType`
+  change only when set. The 0.26.4 entry's "partial-update semantics" describes
+  what the client serializes, not how current servers apply it; the client's
+  behaviour is unchanged.
+
 ### Changed
 
 - **BREAKING:** `SchemaConstraintUpdate.Enums` is `*[]interface{}`, not
