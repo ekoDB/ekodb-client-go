@@ -1652,6 +1652,73 @@ func TestRestoreCollectionSuccess(t *testing.T) {
 	}
 }
 
+// TestRestoreCollectionCountsReportsBothCounts proves each count comes from
+// its own server field: a tombstone can be cleared while its record's data is
+// gone, so cleared_count and records_restored differ.
+func TestRestoreCollectionCountsReportsBothCounts(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/trash/users": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":           "success",
+				"cleared_count":    5,
+				"records_restored": 3,
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.RestoreCollectionCounts("users")
+	if err != nil {
+		t.Fatalf("RestoreCollectionCounts failed: %v", err)
+	}
+	if result.ClearedCount != 5 {
+		t.Errorf("ClearedCount = %d, want 5", result.ClearedCount)
+	}
+	if result.RecordsRestored == nil || *result.RecordsRestored != 3 {
+		t.Errorf("RecordsRestored = %v, want 3", result.RecordsRestored)
+	}
+	// The plain method still returns the cleared count, not the recovered one.
+	count, err := client.RestoreCollection("users")
+	if err != nil {
+		t.Fatalf("RestoreCollection failed: %v", err)
+	}
+	if count != 5 {
+		t.Errorf("RestoreCollection = %d, want 5", count)
+	}
+}
+
+// TestRestoreCollectionCountsAbsentRecordsRestoredIsNil proves a server that
+// sends only cleared_count (before 0.72.7) leaves RecordsRestored nil rather
+// than guessing it.
+func TestRestoreCollectionCountsAbsentRecordsRestoredIsNil(t *testing.T) {
+	handlers := map[string]http.HandlerFunc{
+		"POST /api/trash/users": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":        "success",
+				"cleared_count": 5,
+			})
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	result, err := client.RestoreCollectionCounts("users")
+	if err != nil {
+		t.Fatalf("RestoreCollectionCounts failed: %v", err)
+	}
+	if result.ClearedCount != 5 {
+		t.Errorf("ClearedCount = %d, want 5", result.ClearedCount)
+	}
+	if result.RecordsRestored != nil {
+		t.Errorf("RecordsRestored = %d, want nil", *result.RecordsRestored)
+	}
+}
+
 // ============================================================================
 // Collection Management Tests
 // ============================================================================

@@ -152,7 +152,8 @@ func main() {
   read-your-writes via the `TransactionId` option on `Find` / `FindByID`
 - ✅ **KV document linking** - `KVLink` / `KVGetLinks` / `KVUnlink`
 - ✅ **Schedule management** -
-  create/list/get/update/delete/pause/resume/trigger scheduled functions
+  create/list/get/update/delete/pause/resume/trigger scheduled functions, and
+  schedule stats
 - ✅ **Rate limiting with automatic retry** (429, 503, network errors)
 - ✅ **Rate limit tracking** (`X-RateLimit-*` headers)
 - ✅ **Configurable retry behavior**
@@ -528,6 +529,42 @@ client.TriggerSchedule("sched-id")
 
 // Delete
 client.DeleteSchedule("sched-id")
+
+// How many schedules the server is running (admin key)
+stats, _ := client.GetScheduleStats()
+fmt.Println(stats.ActiveSchedules)
+```
+
+### Schema Constraints
+
+`UpdateSchemaConstraints` changes constraints on fields of an existing
+collection. Current servers replace a named field's constraints rather than
+merging them: each update must carry `Unique`, `Required` and `Enums`, and
+`Max`, `Min` and `Regex` are cleared when left unset. `Enums` keeps three states
+apart on the wire: `nil` omits the key (which current servers refuse),
+`EnumValues()` sends `"enums":[]` and clears the field's enums, and
+`EnumValues("draft", "published")` sets them.
+
+```go
+yes, no := true, false
+err := client.UpdateSchemaConstraints("posts", map[string]ekodb.SchemaConstraintUpdate{
+    "status": {Unique: &no, Required: &yes, Enums: ekodb.EnumValues("draft", "published")},
+    "tag":    {Unique: &no, Required: &no, Enums: ekodb.EnumValues()}, // clear tag's enums
+})
+```
+
+### Restoring a Collection from Trash
+
+`RestoreCollection` returns the number of tombstones cleared.
+`RestoreCollectionCounts` also returns the number of records whose data was
+recovered, which can be lower; it is `nil` on servers before 0.72.7.
+
+```go
+result, _ := client.RestoreCollectionCounts("users")
+fmt.Println(result.ClearedCount)
+if result.RecordsRestored != nil {
+    fmt.Println(*result.RecordsRestored)
+}
 ```
 
 ### WebSocket Chat Streaming

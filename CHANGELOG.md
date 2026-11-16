@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `GetScheduleStats` reads `GET /api/schedules/stats` and returns
+  `ScheduleStats{ActiveSchedules}`, the number of schedules the server is
+  running. It needs an admin key, like the other schedule calls
+  (ekoDB/ekodb-client#391).
+- `RestoreCollectionCounts` returns both counts a whole-collection restore
+  reports: `ClearedCount` (tombstones removed) and `RecordsRestored` (records
+  whose data was recovered, which can be fewer; `nil` on servers before 0.72.7,
+  which do not send it). `RestoreCollection` keeps returning the cleared count,
+  and its doc now says so (ekoDB/ekodb-client#394).
+- `EnumValues(values...)` builds a `SchemaConstraintUpdate.Enums` value.
+
+### Fixed
+
+- Docs: `UpdateSchemaConstraints`, the `SchemaConstraintUpdate` comment and the
+  README now say what current servers do with an update. They replace a named
+  field's constraints rather than merging them: every update must carry
+  `Unique`, `Required` and `Enums` (an update without one is refused), `Max`,
+  `Min` and `Regex` are cleared when left unset, and `Default` and `FieldType`
+  change only when set. The 0.26.4 entry's "partial-update semantics" describes
+  what the client serializes, not how current servers apply it; the client's
+  behaviour is unchanged.
+
+### Changed
+
+- **BREAKING:** `SchemaConstraintUpdate.Enums` is `*[]interface{}`, not
+  `[]interface{}`. With `omitempty` on a plain slice an empty list was dropped,
+  so a caller could not send `"enums":[]` to clear a field's enums. Now `nil`
+  omits the key, `EnumValues()` (or `&[]interface{}{}`) sends `[]`, and
+  `EnumValues("a", "b")` sends the values. Replace `Enums: []interface{}{...}`
+  with `Enums: ekodb.EnumValues(...)` (#117).
+
 ## [0.33.1] - 2026-11-08
 
 ### Fixed
