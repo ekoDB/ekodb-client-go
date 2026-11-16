@@ -538,15 +538,18 @@ fmt.Println(stats.ActiveSchedules)
 ### Schema Constraints
 
 `UpdateSchemaConstraints` changes constraints on fields of an existing
-collection. `Enums` keeps three states apart: `nil` leaves the field's enums
-unchanged, `EnumValues()` sends `"enums":[]` and clears them, and
+collection. Current servers replace a named field's constraints rather than
+merging them: each update must carry `Unique`, `Required` and `Enums`, and
+`Max`, `Min` and `Regex` are cleared when left unset. `Enums` keeps three states
+apart on the wire: `nil` omits the key (which current servers refuse),
+`EnumValues()` sends `"enums":[]` and clears the field's enums, and
 `EnumValues("draft", "published")` sets them.
 
 ```go
-required := true
+yes, no := true, false
 err := client.UpdateSchemaConstraints("posts", map[string]ekodb.SchemaConstraintUpdate{
-    "status": {Required: &required, Enums: ekodb.EnumValues("draft", "published")},
-    "tag":    {Enums: ekodb.EnumValues()}, // clear tag's enums
+    "status": {Unique: &no, Required: &yes, Enums: ekodb.EnumValues("draft", "published")},
+    "tag":    {Unique: &no, Required: &no, Enums: ekodb.EnumValues()}, // clear tag's enums
 })
 ```
 
