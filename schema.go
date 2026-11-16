@@ -282,11 +282,17 @@ func EnumValues(values ...interface{}) *[]interface{} {
 	return &list
 }
 
-// UpdateSchemaConstraints applies a partial update to one or more fields'
-// schema constraints on an existing collection. Unlike CreateCollection
-// (which sends a full Schema), this PUTs only the constraints that changed:
-// each SchemaConstraintUpdate carries just the attributes the caller set, and
-// the server merges them into the field's existing constraints.
+// UpdateSchemaConstraints updates the constraints of one or more existing
+// fields of a collection. Unlike CreateCollection (which sends a full Schema),
+// it sends only the fields named in constraints, and each SchemaConstraintUpdate
+// serializes only the attributes the caller set.
+//
+// Current servers replace a named field's constraints rather than merging
+// them: each update must carry Unique, Required and Enums, and Max, Min and
+// Regex are cleared when left unset. Default and FieldType are changed only
+// when set. For Enums, nil omits the key, EnumValues() sends an empty list
+// (clearing the field's enums) and EnumValues(values...) sets them; see
+// SchemaConstraintUpdate.
 //
 // It PUTs to /api/schemas/{collection} with body {"constraints": constraints},
 // matching the server's schema-constraints-update request contract.
