@@ -2,6 +2,7 @@ package ekodb
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -1232,18 +1233,32 @@ func TestCollectionExistsFalse(t *testing.T) {
 	}
 }
 
-func TestCountDocuments(t *testing.T) {
-	handlers := map[string]http.HandlerFunc{
-		"POST /api/find/users": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode([]Record{
-				{"id": "1", "name": "Alice"},
-				{"id": "2", "name": "Bob"},
-				{"id": "3", "name": "Carol"},
-			})
-		},
+// countHandler answers POST /api/count/{collection} with status and body,
+// recording each request's escaped path and decoded JSON body. Any other
+// request (a find in particular) fails the test through createTestServer.
+func countHandler(t *testing.T, status int, body string, paths *[]string, bodies *[]map[string]interface{}) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Errorf("Accept = %q, want application/json", got)
+		}
+		var sent map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+			t.Errorf("count request body is not JSON: %v", err)
+		}
+		*paths = append(*paths, r.URL.EscapedPath())
+		*bodies = append(*bodies, sent)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
 	}
-	server := createTestServer(t, handlers)
+}
+
+func TestCountDocumentsReturnsACountAboveOnePageExactly(t *testing.T) {
+	var paths []string
+	var bodies []map[string]interface{}
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/count/users": countHandler(t, http.StatusOK, `{"count":2029}`, &paths, &bodies),
+	})
 	defer server.Close()
 
 	client := createTestClient(t, server)
@@ -1251,8 +1266,122 @@ func TestCountDocuments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CountDocuments failed: %v", err)
 	}
+	if count != 2029 {
+		t.Errorf("CountDocuments returned %d, want 2029", count)
+	}
+	if len(paths) != 1 || paths[0] != "/api/count/users" {
+		t.Errorf("count requests = %v, want one to /api/count/users", paths)
+	}
+	if len(bodies) != 1 || len(bodies[0]) != 0 {
+		t.Errorf("count bodies = %v, want one empty object", bodies)
+	}
+}
+
+func TestCountDocumentsWhereSendsTheFilter(t *testing.T) {
+	var paths []string
+	var bodies []map[string]interface{}
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/count/users": countHandler(t, http.StatusOK, `{"count":1500}`, &paths, &bodies),
+	})
+	defer server.Close()
+
+	filter := NewQueryBuilder().Eq("status", "active").Build()["filter"]
+	client := createTestClient(t, server)
+	count, err := client.CountDocumentsWhere("users", filter)
+	if err != nil {
+		t.Fatalf("CountDocumentsWhere failed: %v", err)
+	}
+	if count != 1500 {
+		t.Errorf("CountDocumentsWhere returned %d, want 1500", count)
+	}
+
+	want, err := json.Marshal(map[string]interface{}{"filter": filter})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := json.Marshal(bodies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "["+string(want)+"]" {
+		t.Errorf("count bodies = %s, want [%s]", got, want)
+	}
+}
+
+func TestCountDocumentsOnAServerWithoutTheRouteIsUnsupported(t *testing.T) {
+	var paths []string
+	var bodies []map[string]interface{}
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/count/users": countHandler(t, http.StatusNotFound, `Not Found`, &paths, &bodies),
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.CountDocuments("users")
+
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("CountDocuments error = %v, want *HTTPError", err)
+	}
+	if httpErr.StatusCode != http.StatusNotFound {
+		t.Errorf("StatusCode = %d, want 404", httpErr.StatusCode)
+	}
+	want := "count requires ekoDB server 0.84.0 or later (POST /api/count is not available on this server)"
+	if httpErr.Message != want || httpErr.Message != countUnsupportedMessage {
+		t.Errorf("Message = %q, want %q", httpErr.Message, want)
+	}
+	// One count request, and no find after it (a find would fail the test as
+	// an unexpected request).
+	if len(paths) != 1 {
+		t.Errorf("count requests = %v, want exactly one", paths)
+	}
+}
+
+func TestCountDocumentsWhereReturnsA403AsHTTPError(t *testing.T) {
+	var paths []string
+	var bodies []map[string]interface{}
+	body := `{"error":"No read permission for field salary"}`
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/count/users": countHandler(t, http.StatusForbidden, body, &paths, &bodies),
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	_, err := client.CountDocumentsWhere("users", NewQueryBuilder().Gt("salary", 100).Build()["filter"])
+
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("CountDocumentsWhere error = %v, want *HTTPError", err)
+	}
+	if httpErr.StatusCode != http.StatusForbidden {
+		t.Errorf("StatusCode = %d, want 403", httpErr.StatusCode)
+	}
+	if !strings.Contains(httpErr.Message, "No read permission for field salary") {
+		t.Errorf("Message = %q, want the server's error text", httpErr.Message)
+	}
+	if len(paths) != 1 {
+		t.Errorf("count requests = %v, want exactly one", paths)
+	}
+}
+
+func TestCountDocumentsEscapesTheCollectionName(t *testing.T) {
+	var paths []string
+	var bodies []map[string]interface{}
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/count/team/a b": countHandler(t, http.StatusOK, `{"count":3}`, &paths, &bodies),
+	})
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	count, err := client.CountDocuments("team/a b")
+	if err != nil {
+		t.Fatalf("CountDocuments failed: %v", err)
+	}
 	if count != 3 {
 		t.Errorf("CountDocuments returned %d, want 3", count)
+	}
+	if len(paths) != 1 || paths[0] != "/api/count/team%2Fa%20b" {
+		t.Errorf("count requests = %v, want one to /api/count/team%%2Fa%%20b", paths)
 	}
 }
 
