@@ -3990,3 +3990,85 @@ func TestFindByIDNoOptionsHasNoQueryParam(t *testing.T) {
 		t.Errorf("FindByID without options emitted query %q, want empty", got.rawQuery)
 	}
 }
+
+// TestCountDocumentsRefusesAResponseWithoutAnIntegerCount pins that a count
+// response whose count is missing, null, a string or a fraction is an error,
+// never a count of 0. Control: an integer count is returned.
+func TestCountDocumentsRefusesAResponseWithoutAnIntegerCount(t *testing.T) {
+	for _, body := range []string{`{}`, `{"count":null}`, `{"count":"5"}`, `{"count":2.5}`} {
+		t.Run(body, func(t *testing.T) {
+			var paths []string
+			var bodies []map[string]interface{}
+			server := createTestServer(t, map[string]http.HandlerFunc{
+				"POST /api/count/users": countHandler(t, http.StatusOK, body, &paths, &bodies),
+			})
+			defer server.Close()
+			client := createTestClient(t, server)
+			count, err := client.CountDocuments("users")
+			if err == nil {
+				t.Fatalf("a response of %s returned a count of %d", body, count)
+			}
+		})
+	}
+
+	var paths []string
+	var bodies []map[string]interface{}
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/count/users": countHandler(t, http.StatusOK, `{"count":7}`, &paths, &bodies),
+	})
+	defer server.Close()
+	client := createTestClient(t, server)
+	if count, err := client.CountDocuments("users"); err != nil || count != 7 {
+		t.Fatalf("control: got %d, %v; want 7", count, err)
+	}
+}
+
+// TestCountDocumentsInRedactionModeCarriesNoServerText pins that a count
+// response without a count is reported without the server's text when errors
+// are redacted.
+func TestCountDocumentsInRedactionModeCarriesNoServerText(t *testing.T) {
+	var paths []string
+	var bodies []map[string]interface{}
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/count/users": countHandler(t, http.StatusOK, `{"secret_marker":1}`, &paths, &bodies),
+	})
+	defer server.Close()
+	client := createTestClient(t, server)
+	client.redactErrors = true
+	_, err := client.CountDocuments("users")
+	if err == nil {
+		t.Fatal("a response without a count was accepted")
+	}
+	if strings.Contains(err.Error(), "secret_marker") {
+		t.Fatalf("the redacted error carries server text: %v", err)
+	}
+}
+
+// TestCountDocumentsUsesJSONForAMessagePackClient pins that the count route is
+// always sent and read as JSON, even by a client whose format is MessagePack.
+func TestCountDocumentsUsesJSONForAMessagePackClient(t *testing.T) {
+	var paths []string
+	var bodies []map[string]interface{}
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/count/users": func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("Content-Type"); got != "application/json" {
+				t.Errorf("Content-Type = %q, want application/json", got)
+			}
+			countHandler(t, http.StatusOK, `{"count":3}`, &paths, &bodies)(w, r)
+		},
+	})
+	defer server.Close()
+	client, err := NewClientWithConfig(ClientConfig{
+		BaseURL:     server.URL,
+		APIKey:      "test-api-key",
+		ShouldRetry: false,
+		Timeout:     5 * time.Second,
+		Format:      MessagePack,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := client.CountDocuments("users"); err != nil || count != 3 {
+		t.Fatalf("got %d, %v; want 3", count, err)
+	}
+}
