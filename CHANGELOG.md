@@ -23,6 +23,16 @@ and this project adheres to
 
 ### Fixed
 
+- **Document counts are exact past one page (ekoDB/ekodb-client#405).**
+  `CountDocuments` now sends `POST /api/count/{collection}`, new in ekoDB server
+  0.84.0, and returns the server's `count`, instead of the length of a
+  `Limit(100000)` find, which stopped at 100,000 and which a host with a lower
+  maximum limit refused with 400. The new
+  `CountDocumentsWhere(collection, filter)` counts the matches of a query
+  expression. A server without the route answers 404, which is returned as
+  `*HTTPError` with `StatusCode` 404 and the `Message`
+  `count requires ekoDB server 0.84.0 or later (POST /api/count is not available on this server)`;
+  the client never falls back to counting a page of records.
 - **Calls on an existing transaction surface the server's error and are never
   re-sent (ekoDB/ekodb-client#406).** A failed `CommitTransaction`,
   `RollbackTransaction`, `CreateSavepoint`, `RollbackToSavepoint` or
