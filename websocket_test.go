@@ -2701,3 +2701,102 @@ func TestWebSocketCloseAbortsStuckDial(t *testing.T) {
 		t.Fatal("Close() did not abort the stuck dial; it blocked past prompt cancellation")
 	}
 }
+
+// TestWebSocketTextSearchSendsSearchFields pins the TextSearch options the server can parse: the
+// field list is search_fields, not fields (ekoDB/ekodb-client-go#125).
+func TestWebSocketTextSearchSendsSearchFields(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := ws.TextSearch("docs", "alpha", []string{"title"}, 5)
+		errCh <- err
+	}()
+
+	msg := readMessage(t, serverConn)
+	if msg["type"] != "TextSearch" {
+		t.Fatalf("expected TextSearch, got %v", msg["type"])
+	}
+	options := msg["payload"].(map[string]interface{})["options"].(map[string]interface{})
+	fields, ok := options["search_fields"].([]interface{})
+	if !ok || len(fields) != 1 || fields[0] != "title" {
+		t.Fatalf("expected search_fields [title], got %v", options)
+	}
+	if _, present := options["fields"]; present {
+		t.Fatalf("the server does not read fields: %v", options)
+	}
+	if options["limit"] != float64(5) {
+		t.Fatalf("expected limit 5, got %v", options["limit"])
+	}
+
+	mustWriteJSON(t, serverConn, map[string]interface{}{
+		"type":    "Success",
+		"payload": map[string]interface{}{"message_id": msg["messageId"], "data": []interface{}{}},
+	})
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+// TestWebSocketCreateCollectionWithoutSchemaSendsEmptyFields pins the schema sent when none is
+// given: a schema with an empty fields object, which the server can parse
+// (ekoDB/ekodb-client-go#125).
+func TestWebSocketCreateCollectionWithoutSchemaSendsEmptyFields(t *testing.T) {
+	wsURL, connCh, server := setupTestWSServer(t)
+	defer server.Close()
+
+	client := &Client{token: "test-token"}
+	ws, err := client.WebSocket(wsURL)
+	if err != nil {
+		t.Fatalf("failed to create WebSocket client: %v", err)
+	}
+	defer ws.Close()
+
+	serverConn := <-connCh
+	defer serverConn.Close()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- ws.CreateCollection("things") }()
+
+	msg := readMessage(t, serverConn)
+	if msg["type"] != "CreateCollection" {
+		t.Fatalf("expected CreateCollection, got %v", msg["type"])
+	}
+	schema, ok := msg["payload"].(map[string]interface{})["schema"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected a schema object, got %v", msg["payload"])
+	}
+	fields, ok := schema["fields"].(map[string]interface{})
+	if !ok || len(fields) != 0 {
+		t.Fatalf("expected an empty fields object, got %v", schema)
+	}
+
+	mustWriteJSON(t, serverConn, map[string]interface{}{
+		"type":    "Success",
+		"payload": map[string]interface{}{"message_id": msg["messageId"], "data": nil},
+	})
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+}
