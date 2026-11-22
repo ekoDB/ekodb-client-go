@@ -23,21 +23,25 @@ and this project adheres to
 
 ### Fixed
 
-- **Transaction calls surface the server's error and are never re-sent
-  (ekoDB/ekodb-client#406).** A failed transaction call (`BeginTransaction`,
-  `GetTransactionStatus`, `CommitTransaction`, `RollbackTransaction`,
-  `CreateSavepoint`, `RollbackToSavepoint`, `ReleaseSavepoint`) returns
-  `*HTTPError` whose `Message` is the server's `error` text instead of the raw
-  response body (the raw body when the body is not that JSON) and whose new
-  `Retryable` field is the server's `retryable` flag (`false` when absent).
-  `Retryable == true` means begin a new transaction and run the work again. The
-  client no longer re-sends a transaction call, whatever the status, the flag or
-  a network error. Before, it re-sent every 503 and 429 and every network error;
-  a failed commit has already discarded its transaction when the server answers,
-  so the re-send came back as a 404 that hid the original cause. A `401` still
-  refreshes the token and is sent again once, and a `500` whose body mentions an
-  invalid token is no longer taken as a reason to refresh and re-send a
-  transaction call.
+- **Calls on an existing transaction surface the server's error and are never
+  re-sent (ekoDB/ekodb-client#406).** A failed `CommitTransaction`,
+  `RollbackTransaction`, `CreateSavepoint`, `RollbackToSavepoint` or
+  `ReleaseSavepoint` returns `*HTTPError` whose `Message` is the server's
+  `error` text instead of the raw response body (the raw body when the body is
+  not that JSON; `"admin request failed"` on the redacting client behind an
+  `AdminClient`) and whose new `Retryable` field is the server's `retryable`
+  flag (`false` when absent or not a boolean). `Retryable == true` means begin a
+  new transaction and run the work again. The client no longer re-sends those
+  five calls, whatever the status, the flag or a network error. Before, it
+  re-sent every 503 and 429 and every network error; a failed commit has already
+  discarded its transaction when the server answers, so the re-send came back as
+  a 404 that hid the original cause. A `401` still refreshes the token and is
+  sent again once, and a `500` whose body mentions an invalid token is no longer
+  taken as a reason to refresh and re-send one of those calls.
+  `BeginTransaction` and `GetTransactionStatus` are unchanged: a refused begin
+  started no transaction and a status read changes nothing, so both keep the
+  normal retry policy and error types (a begin still throttled after its retries
+  returns `*RateLimitError`).
 
 - Docs: `UpdateSchemaConstraints`, the `SchemaConstraintUpdate` comment and the
   README now say what current servers do with an update. They replace a named
