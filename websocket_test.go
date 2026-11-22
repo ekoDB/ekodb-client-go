@@ -2736,6 +2736,9 @@ func TestWebSocketTextSearchSendsSearchFields(t *testing.T) {
 	if _, present := options["fields"]; present {
 		t.Fatalf("the server does not read fields: %v", options)
 	}
+	if options["language"] != "english" {
+		t.Fatalf("expected language english, which the server requires, got %v", options["language"])
+	}
 	if options["limit"] != float64(5) {
 		t.Fatalf("expected limit 5, got %v", options["limit"])
 	}
