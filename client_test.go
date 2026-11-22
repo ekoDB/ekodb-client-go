@@ -1189,26 +1189,67 @@ func TestDeleteCollectionSuccess(t *testing.T) {
 	}
 }
 
-// TestDeleteCollectionEscapesTheName pins that the collection name is sent as
-// one escaped path segment, so a "/" in it cannot reach another route
-// (ekoDB/ekodb-client-go#121).
+// TestDeleteCollectionEscapesTheName pins that the collection name is sent as one escaped path
+// segment, so a "/", "?", "#" or "%" in it cannot change the request target, and that a name that
+// needs no escaping is sent as it is (ekoDB/ekodb-client-go#121). The wire path is asserted
+// (EscapedPath), not the decoded one.
 func TestDeleteCollectionEscapesTheName(t *testing.T) {
 	var escaped string
-	handlers := map[string]http.HandlerFunc{
-		"DELETE /api/collections/team/a b": func(w http.ResponseWriter, r *http.Request) {
-			escaped = r.URL.EscapedPath()
-			w.WriteHeader(http.StatusOK)
-		},
-	}
-	server := createTestServer(t, handlers)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/token" {
+			mockTokenHandler(t)(w, r)
+			return
+		}
+		escaped = r.URL.EscapedPath()
+		w.WriteHeader(http.StatusOK)
+	}))
 	defer server.Close()
-
 	client := createTestClient(t, server)
-	if err := client.DeleteCollection("team/a b"); err != nil {
-		t.Fatalf("DeleteCollection failed: %v", err)
+
+	for _, tc := range []struct{ name, want string }{
+		{"team/a b", "/api/collections/team%2Fa%20b"},
+		{"a?b#c%d", "/api/collections/a%3Fb%23c%25d"},
+		{"a.b", "/api/collections/a.b"},
+	} {
+		escaped = ""
+		if err := client.DeleteCollection(tc.name); err != nil {
+			t.Fatalf("DeleteCollection(%q) failed: %v", tc.name, err)
+		}
+		if escaped != tc.want {
+			t.Errorf("DeleteCollection(%q) sent %q, want %q", tc.name, escaped, tc.want)
+		}
 	}
-	if escaped != "/api/collections/team%2Fa%20b" {
-		t.Fatalf("the request path was %q, want /api/collections/team%%2Fa%%20b", escaped)
+}
+
+// An empty name, "." and ".." are refused with an error and no request is sent: the escape
+// leaves dots alone, so a dot segment would otherwise address another route. A name that only
+// contains dots is a name, and is sent.
+func TestDeleteCollectionRefusesDotSegmentsAndEmptyNames(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/token" {
+			mockTokenHandler(t)(w, r)
+			return
+		}
+		requests++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	client := createTestClient(t, server)
+
+	for _, name := range []string{"", ".", ".."} {
+		if err := client.DeleteCollection(name); err == nil {
+			t.Errorf("DeleteCollection(%q) was accepted", name)
+		}
+	}
+	if requests != 0 {
+		t.Fatalf("%d request(s) were sent for refused names", requests)
+	}
+	if err := client.DeleteCollection("a.b"); err != nil {
+		t.Fatalf("DeleteCollection(\"a.b\") = %v, want it sent", err)
+	}
+	if requests != 1 {
+		t.Fatalf("%d request(s) for the control name, want 1", requests)
 	}
 }
 
