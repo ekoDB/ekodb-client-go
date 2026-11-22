@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 // A call on an existing transaction (commit, rollback, or a savepoint call)
@@ -106,6 +108,37 @@ func requireHTTPError(t *testing.T, err error) *HTTPError {
 func TestCommitConflictIsRetryableAndSentOnce(t *testing.T) {
 	server, paths := transactionFailureServer(t, http.StatusConflict, "application/json",
 		`{"error":"write conflict on users/1","transaction_id":"tx-1","retryable":true}`)
+	defer server.Close()
+	client := retryingTestClient(t, server)
+
+	httpErr := requireHTTPError(t, client.CommitTransaction("tx-1"))
+	if httpErr.StatusCode != http.StatusConflict {
+		t.Errorf("StatusCode = %d, want 409", httpErr.StatusCode)
+	}
+	if httpErr.Message != "write conflict on users/1" {
+		t.Errorf("Message = %q, want the server's error text", httpErr.Message)
+	}
+	if !httpErr.Retryable {
+		t.Error("Retryable = false, want true")
+	}
+	if got := paths(); len(got) != 1 {
+		t.Errorf("transaction requests = %v, want exactly one commit", got)
+	}
+}
+
+// A transaction failure answered as MessagePack carries the server's message and retryable
+// flag the way the JSON answer does (ekoDB/ekodb-client-go#122): the body is decoded before
+// the transaction error is built.
+func TestCommitConflictAnsweredAsMessagePackIsRetryable(t *testing.T) {
+	packed, err := msgpack.Marshal(map[string]interface{}{
+		"error":          "write conflict on users/1",
+		"transaction_id": "tx-1",
+		"retryable":      true,
+	})
+	if err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	server, paths := transactionFailureServer(t, http.StatusConflict, "application/msgpack", string(packed))
 	defer server.Close()
 	client := retryingTestClient(t, server)
 

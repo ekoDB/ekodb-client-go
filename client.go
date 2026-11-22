@@ -572,12 +572,14 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 
 // errorBodyText returns a failed response's body as text. The server encodes an
 // error in the format the request's Accept asks for, so on a MessagePack route
-// the body is MessagePack. A body whose Content-Type names MessagePack and that
-// decodes as a map is rendered as JSON, so it reads like the JSON answer for the
-// same failure; any other body is returned as it is
+// the body is MessagePack. A body whose Content-Type names MessagePack (in any
+// letter case) and that decodes as a map is rendered as JSON, so it reads like
+// the JSON answer for the same failure; any other body, including a MessagePack
+// one that is not a map, is returned as it is. An error body is an object with
+// string keys, so a map that does not decode is not an error body
 // (ekoDB/ekodb-client-go#122).
 func errorBodyText(contentType string, body []byte) []byte {
-	if !strings.Contains(contentType, "msgpack") {
+	if !strings.Contains(strings.ToLower(contentType), "msgpack") {
 		return body
 	}
 	var decoded map[string]interface{}
