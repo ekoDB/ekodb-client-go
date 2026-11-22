@@ -154,7 +154,9 @@ func main() {
 - ✅ **Schedule management** -
   create/list/get/update/delete/pause/resume/trigger scheduled functions, and
   schedule stats
-- ✅ **Rate limiting with automatic retry** (429, 503, network errors)
+- ✅ **Rate limiting with automatic retry** (429, 503, network errors); calls on
+  an existing transaction (commit, rollback, the savepoint calls) are never
+  retried, see [Transaction Methods](#transaction-methods)
 - ✅ **Rate limit tracking** (`X-RateLimit-*` headers)
 - ✅ **Configurable retry behavior**
 - ✅ **Retry-After header support**
@@ -359,15 +361,22 @@ results, err := client.Find("users", query)
 - `RollbackToSavepoint(transactionID, name string) error`
 - `ReleaseSavepoint(transactionID, name string) error`
 
-Every transaction call returns an `*HTTPError` on failure: `StatusCode`, the
+The calls that act on an existing transaction (`CommitTransaction`,
+`RollbackTransaction`, `CreateSavepoint`, `RollbackToSavepoint` and
+`ReleaseSavepoint`) return an `*HTTPError` on failure: `StatusCode`, the
 server's error text as `Message` (the raw body when it is not the JSON error)
-and the server's retryable flag as `Retryable` (`false` when absent).
-`Retryable == true` means begin a new transaction and run the work again. The
-client never re-sends a transaction call, whatever the status or flag: a failed
-commit has already discarded its transaction when the server answers, so a
-re-sent commit could only come back 404 and hide the real cause. Only a 401 is
-sent again, once, after refreshing the token. A network error on a transaction
-call is not retried either.
+and the server's retryable flag as `Retryable` (`false` when absent or not a
+boolean). `Retryable == true` means begin a new transaction and run the work
+again. The client never re-sends these calls, whatever the status or flag: a
+failed commit has already discarded its transaction when the server answers, so
+a re-sent commit could only come back 404 and hide the real cause. Only a 401 is
+sent again, once, after refreshing the token. A network error on these calls is
+not retried either.
+
+`BeginTransaction` and `GetTransactionStatus` keep the normal retry policy and
+error types: a begin refused with 429 or 503 started no transaction, and a
+status read changes nothing, so both are retried like any other call, and a 429
+that outlasts the retries returns `*RateLimitError`.
 
 ```go
 var httpErr *ekodb.HTTPError
