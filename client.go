@@ -1796,6 +1796,10 @@ func (c *Client) countMatching(collection string, filter interface{}) (int, erro
 		return 0, err
 	}
 	if result.Count == nil {
+		// In redaction mode an error carries no server text.
+		if c.redactErrors {
+			return 0, fmt.Errorf("count response has no count field")
+		}
 		return 0, fmt.Errorf("count response has no count field: %s", respBody)
 	}
 	return *result.Count, nil
