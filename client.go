@@ -1748,10 +1748,15 @@ func (c *Client) ListUserCollections() ([]string, error) {
 	return result.Collections, nil
 }
 
-// DeleteCollection deletes a collection
+// DeleteCollection deletes a collection. The name is one path segment: it is
+// escaped, so a "/" in it cannot reach another route, and an empty name, "." or
+// ".." is refused before any request is sent, because url.PathEscape leaves
+// dots alone and a dot segment would resolve to another route
+// (ekoDB/ekodb-client-go#121).
 func (c *Client) DeleteCollection(collection string) error {
-	// The name is one path segment: escaped, a "/" in it cannot reach another
-	// route (ekoDB/ekodb-client-go#121).
+	if collection == "" || collection == "." || collection == ".." {
+		return fmt.Errorf("collection name %q is not a usable path segment", collection)
+	}
 	_, err := c.makeRequest("DELETE", "/api/collections/"+url.PathEscape(collection), nil)
 	return err
 }
