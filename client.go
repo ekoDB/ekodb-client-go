@@ -487,16 +487,19 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 		}
 		return nil, err
 	}
-	// Keep status codes useful without retaining any server-provided text.
-	errorMessage := string(responseBody)
-	if c.redactErrors {
-		errorMessage = "admin request failed"
-	}
-
 	// Extract rate limit info from successful responses
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		c.extractRateLimitInfo(resp)
 		return responseBody, nil
+	}
+
+	// On a MessagePack route the error body is MessagePack: it is read as JSON
+	// text, so the error carries the server's message (ekoDB/ekodb-client-go#122).
+	responseBody = errorBodyText(resp.Header.Get("Content-Type"), responseBody)
+	// Keep status codes useful without retaining any server-provided text.
+	errorMessage := string(responseBody)
+	if c.redactErrors {
+		errorMessage = "admin request failed"
 	}
 
 	// A call on an existing transaction is never re-sent, whatever the status
@@ -565,6 +568,27 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 		StatusCode: resp.StatusCode,
 		Message:    errorMessage,
 	}
+}
+
+// errorBodyText returns a failed response's body as text. The server encodes an
+// error in the format the request's Accept asks for, so on a MessagePack route
+// the body is MessagePack. A body whose Content-Type names MessagePack and that
+// decodes as a map is rendered as JSON, so it reads like the JSON answer for the
+// same failure; any other body is returned as it is
+// (ekoDB/ekodb-client-go#122).
+func errorBodyText(contentType string, body []byte) []byte {
+	if !strings.Contains(contentType, "msgpack") {
+		return body
+	}
+	var decoded map[string]interface{}
+	if err := msgpack.Unmarshal(body, &decoded); err != nil || decoded == nil {
+		return body
+	}
+	rendered, err := json.Marshal(decoded)
+	if err != nil {
+		return body
+	}
+	return rendered
 }
 
 // transactionRoutePrefix is the prefix of the routes that name an existing
