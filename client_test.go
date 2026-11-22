@@ -1189,6 +1189,29 @@ func TestDeleteCollectionSuccess(t *testing.T) {
 	}
 }
 
+// TestDeleteCollectionEscapesTheName pins that the collection name is sent as
+// one escaped path segment, so a "/" in it cannot reach another route
+// (ekoDB/ekodb-client-go#121).
+func TestDeleteCollectionEscapesTheName(t *testing.T) {
+	var escaped string
+	handlers := map[string]http.HandlerFunc{
+		"DELETE /api/collections/team/a b": func(w http.ResponseWriter, r *http.Request) {
+			escaped = r.URL.EscapedPath()
+			w.WriteHeader(http.StatusOK)
+		},
+	}
+	server := createTestServer(t, handlers)
+	defer server.Close()
+
+	client := createTestClient(t, server)
+	if err := client.DeleteCollection("team/a b"); err != nil {
+		t.Fatalf("DeleteCollection failed: %v", err)
+	}
+	if escaped != "/api/collections/team%2Fa%20b" {
+		t.Fatalf("the request path was %q, want /api/collections/team%%2Fa%%20b", escaped)
+	}
+}
+
 func TestCollectionExistsTrue(t *testing.T) {
 	handlers := map[string]http.HandlerFunc{
 		"GET /api/collections": func(w http.ResponseWriter, r *http.Request) {
