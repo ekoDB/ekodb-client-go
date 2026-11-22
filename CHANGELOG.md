@@ -23,6 +23,12 @@ and this project adheres to
 
 ### Fixed
 
+- `DeleteCollection` sends the collection name as one escaped path segment, so a
+  name containing `/` or a space cannot reach another route; it was joined into
+  the path unescaped. An empty name, `.` and `..` are refused with an error
+  before any request, because the escape leaves dots alone and a dot segment
+  would address another route (ekoDB/ekodb-client-go#121).
+
 - A MessagePack error body is read as the server's message: a failed response
   whose `Content-Type` names MessagePack (in any letter case) and that decodes
   as a map is rendered as JSON before the error is built, where before the
