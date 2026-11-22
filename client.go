@@ -1750,7 +1750,9 @@ func (c *Client) ListUserCollections() ([]string, error) {
 
 // DeleteCollection deletes a collection
 func (c *Client) DeleteCollection(collection string) error {
-	_, err := c.makeRequest("DELETE", "/api/collections/"+collection, nil)
+	// The name is one path segment: escaped, a "/" in it cannot reach another
+	// route (ekoDB/ekodb-client-go#121).
+	_, err := c.makeRequest("DELETE", "/api/collections/"+url.PathEscape(collection), nil)
 	return err
 }
 
