@@ -1793,6 +1793,10 @@ func (c *Client) countMatching(collection string, filter interface{}) (int, erro
 	}
 	// Always use JSON for metadata endpoints
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		// In redaction mode an error carries no server text, and a syntax error quotes it.
+		if c.redactErrors {
+			return 0, fmt.Errorf("count response could not be decoded")
+		}
 		return 0, err
 	}
 	if result.Count == nil {
