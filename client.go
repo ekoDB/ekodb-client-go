@@ -68,13 +68,16 @@ func (e *RateLimitError) Error() string {
 
 // HTTPError represents an HTTP error with status code.
 //
-// For a failed transaction call (BeginTransaction, GetTransactionStatus,
-// CommitTransaction, RollbackTransaction and the savepoint calls), Message is
-// the server's error text (the raw body when the body is not the JSON error)
-// and Retryable is the server's retryable flag: true means begin a new
-// transaction and run the work again, since the client never re-sends a
-// transaction call itself. Retryable is false for every other call and
-// whenever the server does not say.
+// For a failed call on an existing transaction (CommitTransaction,
+// RollbackTransaction, CreateSavepoint, RollbackToSavepoint and
+// ReleaseSavepoint), Message is the server's error text (the raw body when the
+// body is not the JSON error) and Retryable is the server's retryable flag:
+// true means begin a new transaction and run the work again, since the client
+// never re-sends those calls itself. On a client that redacts errors (the one
+// behind an AdminClient), Message is "admin request failed" instead of the
+// server's text, and Retryable still carries the flag. Retryable is false for
+// every other call (BeginTransaction and GetTransactionStatus included) and
+// whenever the flag is absent or not a boolean.
 type HTTPError struct {
 	StatusCode int
 	Message    string
@@ -463,9 +466,10 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 		}
 		// Handle network errors with retry, using exponential backoff with full
 		// jitter (instead of a fixed delay) so concurrent clients don't retry in
-		// lockstep and a flapping server isn't hammered. A transaction call is
-		// not re-sent: the failed attempt may have reached the server.
-		if c.shouldRetry && attempt < c.maxRetries && !isTransactionPath(path) {
+		// lockstep and a flapping server isn't hammered. A call on an existing
+		// transaction is not re-sent: the failed attempt may have reached the
+		// server.
+		if c.shouldRetry && attempt < c.maxRetries && !actsOnExistingTransaction(method, path) {
 			retryDelay := retryBackoff(attempt)
 			log.Printf("Network error, retrying after %v...", retryDelay)
 			time.Sleep(retryDelay)
@@ -494,13 +498,14 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 		return responseBody, nil
 	}
 
-	// A transaction call is never re-sent, whatever the status or flag: a
-	// failed commit has already discarded its transaction when the server
-	// answers, so a re-sent call could only come back 404 and hide the real
-	// cause. The error carries the server's retryable flag for the caller, who
-	// begins a new transaction. A 401 still goes to the token refresh below:
-	// the request never reached the transaction.
-	if isTransactionPath(path) && resp.StatusCode != http.StatusUnauthorized {
+	// A call on an existing transaction is never re-sent, whatever the status
+	// or flag: a failed commit has already discarded its transaction when the
+	// server answers, so a re-sent call could only come back 404 and hide the
+	// real cause. The error carries the server's retryable flag for the caller,
+	// who begins a new transaction. A 401 still goes to the token refresh
+	// below: the request never reached the transaction. Begin and status are
+	// not covered and keep the retry policy below.
+	if actsOnExistingTransaction(method, path) && resp.StatusCode != http.StatusUnauthorized {
 		txErr := transactionHTTPError(resp.StatusCode, responseBody)
 		if c.redactErrors {
 			txErr.Message = errorMessage
@@ -561,18 +566,48 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 	}
 }
 
-// transactionsPath is the prefix of every transaction route.
-const transactionsPath = "/api/transactions"
+// transactionRoutePrefix is the prefix of the routes that name an existing
+// transaction.
+const transactionRoutePrefix = "/api/transactions/"
 
-// isTransactionPath reports whether a request path is a transaction call.
-func isTransactionPath(path string) bool {
-	return path == transactionsPath || strings.HasPrefix(path, transactionsPath+"/")
+// actsOnExistingTransaction reports whether a request acts on an existing
+// transaction: commit (POST /api/transactions/{id}/commit), rollback
+// (POST /api/transactions/{id}/rollback), create savepoint
+// (POST /api/transactions/{id}/savepoints), rollback to savepoint
+// (POST /api/transactions/{id}/savepoints/{name}/rollback) and release
+// savepoint (DELETE /api/transactions/{id}/savepoints/{name}). Those calls are
+// never re-sent. Begin (POST /api/transactions) and status
+// (GET /api/transactions/{id}) are not among them: they keep the normal retry
+// policy and error types. The id and name are path-escaped, so "/" always
+// separates segments.
+func actsOnExistingTransaction(method, path string) bool {
+	rest, ok := strings.CutPrefix(path, transactionRoutePrefix)
+	if !ok {
+		return false
+	}
+	segments := strings.Split(rest, "/")
+	for _, segment := range segments {
+		if segment == "" {
+			return false
+		}
+	}
+	switch len(segments) {
+	case 2:
+		action := segments[1]
+		return method == http.MethodPost && (action == "commit" || action == "rollback" || action == "savepoints")
+	case 3:
+		return method == http.MethodDelete && segments[1] == "savepoints"
+	case 4:
+		return method == http.MethodPost && segments[1] == "savepoints" && segments[3] == "rollback"
+	default:
+		return false
+	}
 }
 
-// transactionHTTPError builds the HTTPError for a failed transaction call. The
-// server answers {"error", "transaction_id", "retryable"}; a body that is not
-// that JSON keeps its raw text as the message (the status when it is blank),
-// and an absent or non-boolean flag is false.
+// transactionHTTPError builds the HTTPError for a failed call on an existing
+// transaction. The server answers {"error", "transaction_id", "retryable"}; a
+// body that is not that JSON keeps its raw text as the message (the status
+// when it is blank), and an absent or non-boolean flag is false.
 func transactionHTTPError(statusCode int, body []byte) *HTTPError {
 	var answer struct {
 		Error     any `json:"error"`
