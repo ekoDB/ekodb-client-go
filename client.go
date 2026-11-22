@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -1743,15 +1744,61 @@ func (c *Client) CollectionExists(collection string) (bool, error) {
 	return false, nil
 }
 
-// CountDocuments counts the number of documents in a collection
+// countUnsupportedMessage is the Message of the HTTPError CountDocuments and
+// CountDocumentsWhere return when the server has no POST /api/count route: an
+// ekoDB server older than 0.84.0.
+const countUnsupportedMessage = "count requires ekoDB server 0.84.0 or later (POST /api/count is not available on this server)"
+
+// CountDocuments counts every document in a collection, exactly.
+//
+// It sends POST /api/count/{collection}, so the server counts every record
+// however many there are. It requires ekoDB server 0.84.0 or later: an older
+// server has no count route, and the call returns an *HTTPError with
+// StatusCode 404 and a Message naming the required version. Any other failure
+// is returned as the usual *HTTPError carrying the server's status and text.
 func (c *Client) CountDocuments(collection string) (int, error) {
-	query := NewQueryBuilder().Limit(100000).Build()
-	records, err := c.Find(collection, query)
+	return c.countMatching(collection, nil)
+}
+
+// CountDocumentsWhere counts the documents in a collection that match filter,
+// exactly. filter is a query expression in the same shape as the "filter" of
+// a Find query (for example NewQueryBuilder().Eq("status", "active").Build()["filter"]);
+// a nil filter counts every document. It sends POST /api/count/{collection}
+// with {"filter": filter} and returns errors as CountDocuments does, including
+// 400 for a malformed filter and 403 for a filter on a field the key cannot
+// read.
+func (c *Client) CountDocumentsWhere(collection string, filter interface{}) (int, error) {
+	return c.countMatching(collection, filter)
+}
+
+// countMatching sends POST /api/count/{collection}, with {"filter": filter}
+// when filter is set and {} otherwise, and returns the server's count.
+func (c *Client) countMatching(collection string, filter interface{}) (int, error) {
+	body := struct {
+		Filter interface{} `json:"filter,omitempty"`
+	}{Filter: filter}
+	respBody, err := c.makeRequest("POST", "/api/count/"+url.PathEscape(collection), body)
 	if err != nil {
+		// The count route has no 404 answer of its own, so a 404 means the
+		// server predates it.
+		var httpErr *HTTPError
+		if errors.As(err, &httpErr) && httpErr.IsNotFound() {
+			return 0, &HTTPError{StatusCode: http.StatusNotFound, Message: countUnsupportedMessage}
+		}
 		return 0, err
 	}
 
-	return len(records), nil
+	var result struct {
+		Count *int `json:"count"`
+	}
+	// Always use JSON for metadata endpoints
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return 0, err
+	}
+	if result.Count == nil {
+		return 0, fmt.Errorf("count response has no count field: %s", respBody)
+	}
+	return *result.Count, nil
 }
 
 // RestoreRecordStatus restores a deleted record from trash and reports whether
