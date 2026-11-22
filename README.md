@@ -404,8 +404,11 @@ within the transaction.
 - `DeleteCollection(collection string) error`
 - `CollectionExists(collection string) (bool, error)` - Check if collection
   exists
-- `CountDocuments(collection string) (int, error)` - Count documents in
-  collection
+- `CountDocuments(collection string) (int, error)` - Count every document in a
+  collection exactly (`POST /api/count`; requires ekoDB server 0.84.0 or later)
+- `CountDocumentsWhere(collection string, filter interface{}) (int, error)` -
+  Count the documents matching a filter exactly (requires ekoDB server 0.84.0 or
+  later)
 
 ### Chat Models
 
