@@ -359,6 +359,25 @@ results, err := client.Find("users", query)
 - `RollbackToSavepoint(transactionID, name string) error`
 - `ReleaseSavepoint(transactionID, name string) error`
 
+Every transaction call returns an `*HTTPError` on failure: `StatusCode`, the
+server's error text as `Message` (the raw body when it is not the JSON error)
+and the server's retryable flag as `Retryable` (`false` when absent).
+`Retryable == true` means begin a new transaction and run the work again. The
+client never re-sends a transaction call, whatever the status or flag: a failed
+commit has already discarded its transaction when the server answers, so a
+re-sent commit could only come back 404 and hide the real cause. Only a 401 is
+sent again, once, after refreshing the token. A network error on a transaction
+call is not retried either.
+
+```go
+var httpErr *ekodb.HTTPError
+if err := client.CommitTransaction(txID); errors.As(err, &httpErr) && httpErr.Retryable {
+	// Begin a new transaction and run the work again.
+} else if err != nil {
+	return err
+}
+```
+
 Pass a transaction ID via the `TransactionId` option field on `Insert` /
 `Update` / `Delete` / `Find` / `FindByID` to stage writes / read-your-writes
 within the transaction.

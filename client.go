@@ -66,10 +66,19 @@ func (e *RateLimitError) Error() string {
 	return fmt.Sprintf("rate limit exceeded, retry after %d seconds", e.RetryAfterSecs)
 }
 
-// HTTPError represents an HTTP error with status code
+// HTTPError represents an HTTP error with status code.
+//
+// For a failed transaction call (BeginTransaction, GetTransactionStatus,
+// CommitTransaction, RollbackTransaction and the savepoint calls), Message is
+// the server's error text (the raw body when the body is not the JSON error)
+// and Retryable is the server's retryable flag: true means begin a new
+// transaction and run the work again, since the client never re-sends a
+// transaction call itself. Retryable is false for every other call and
+// whenever the server does not say.
 type HTTPError struct {
 	StatusCode int
 	Message    string
+	Retryable  bool
 }
 
 func (e *HTTPError) Error() string {
@@ -454,8 +463,9 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 		}
 		// Handle network errors with retry, using exponential backoff with full
 		// jitter (instead of a fixed delay) so concurrent clients don't retry in
-		// lockstep and a flapping server isn't hammered.
-		if c.shouldRetry && attempt < c.maxRetries {
+		// lockstep and a flapping server isn't hammered. A transaction call is
+		// not re-sent: the failed attempt may have reached the server.
+		if c.shouldRetry && attempt < c.maxRetries && !isTransactionPath(path) {
 			retryDelay := retryBackoff(attempt)
 			log.Printf("Network error, retrying after %v...", retryDelay)
 			time.Sleep(retryDelay)
@@ -482,6 +492,20 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		c.extractRateLimitInfo(resp)
 		return responseBody, nil
+	}
+
+	// A transaction call is never re-sent, whatever the status or flag: a
+	// failed commit has already discarded its transaction when the server
+	// answers, so a re-sent call could only come back 404 and hide the real
+	// cause. The error carries the server's retryable flag for the caller, who
+	// begins a new transaction. A 401 still goes to the token refresh below:
+	// the request never reached the transaction.
+	if isTransactionPath(path) && resp.StatusCode != http.StatusUnauthorized {
+		txErr := transactionHTTPError(resp.StatusCode, responseBody)
+		if c.redactErrors {
+			txErr.Message = errorMessage
+		}
+		return nil, txErr
 	}
 
 	// Handle rate limiting (429)
@@ -535,6 +559,38 @@ func (c *Client) makeRequestWithRetry(method, path string, data interface{}, att
 		StatusCode: resp.StatusCode,
 		Message:    errorMessage,
 	}
+}
+
+// transactionsPath is the prefix of every transaction route.
+const transactionsPath = "/api/transactions"
+
+// isTransactionPath reports whether a request path is a transaction call.
+func isTransactionPath(path string) bool {
+	return path == transactionsPath || strings.HasPrefix(path, transactionsPath+"/")
+}
+
+// transactionHTTPError builds the HTTPError for a failed transaction call. The
+// server answers {"error", "transaction_id", "retryable"}; a body that is not
+// that JSON keeps its raw text as the message (the status when it is blank),
+// and an absent or non-boolean flag is false.
+func transactionHTTPError(statusCode int, body []byte) *HTTPError {
+	var answer struct {
+		Error     any `json:"error"`
+		Retryable any `json:"retryable"`
+	}
+	message := strings.TrimSpace(string(body))
+	retryable := false
+	if err := json.Unmarshal(body, &answer); err == nil {
+		if serverMessage, ok := answer.Error.(string); ok {
+			message = serverMessage
+		}
+		flag, ok := answer.Retryable.(bool)
+		retryable = ok && flag
+	}
+	if strings.TrimSpace(message) == "" {
+		message = fmt.Sprintf("%d %s", statusCode, http.StatusText(statusCode))
+	}
+	return &HTTPError{StatusCode: statusCode, Message: message, Retryable: retryable}
 }
 
 // unmarshal deserializes data based on the client's format and path
