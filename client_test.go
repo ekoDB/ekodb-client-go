@@ -4099,3 +4099,43 @@ func TestCountDocumentsInRedactionModeHidesAnUndecodableBody(t *testing.T) {
 		t.Fatalf("the redacted error is %q, want the fixed message", got)
 	}
 }
+
+// TestMessagePackErrorBodyIsDecoded pins the error a MessagePack error body
+// yields: the server's message as JSON text, not undecodable bytes
+// (ekoDB/ekodb-client-go#122). Control: a JSON error body is kept as it is.
+func TestMessagePackErrorBodyIsDecoded(t *testing.T) {
+	packed, err := msgpack.Marshal(map[string]interface{}{"error": "Field 'age' must be an Integer"})
+	if err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	for _, tc := range []struct {
+		name        string
+		contentType string
+		body        []byte
+		want        string
+	}{
+		{"MessagePack", "application/msgpack", packed, `{"error":"Field 'age' must be an Integer"}`},
+		{"JSON", "application/json", []byte(`{"error":"bad filter"}`), `{"error":"bad filter"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := createTestServer(t, map[string]http.HandlerFunc{
+				"POST /api/insert/users": func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", tc.contentType)
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write(tc.body)
+				},
+			})
+			defer server.Close()
+			client := createTestClient(t, server)
+
+			_, err := client.Insert("users", Record{"name": "Alice"})
+			var httpErr *HTTPError
+			if !errors.As(err, &httpErr) {
+				t.Fatalf("expected an *HTTPError, got %T: %v", err, err)
+			}
+			if httpErr.StatusCode != http.StatusBadRequest || httpErr.Message != tc.want {
+				t.Fatalf("got %d %q, want 400 %q", httpErr.StatusCode, httpErr.Message, tc.want)
+			}
+		})
+	}
+}
