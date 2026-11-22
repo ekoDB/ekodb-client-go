@@ -23,6 +23,11 @@ and this project adheres to
 
 ### Fixed
 
+- A MessagePack error body is read as the server's message: a failed response
+  whose `Content-Type` names MessagePack (in any letter case) and that decodes
+  as a map is rendered as JSON before the error is built, where before the
+  caller got undecodable bytes (ekoDB/ekodb-client-go#122).
+
 - A WebSocket `TextSearch` sends its field list as `search_fields`, the name the
   server reads; it sent `fields`. It also sends `"language": "english"`, the
   server's default, with its options: the server's options require `language`,
