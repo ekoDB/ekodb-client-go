@@ -4108,6 +4108,10 @@ func TestMessagePackErrorBodyIsDecoded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fixture: %v", err)
 	}
+	notAMap, err := msgpack.Marshal("just a string")
+	if err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
 	for _, tc := range []struct {
 		name        string
 		contentType string
@@ -4115,7 +4119,11 @@ func TestMessagePackErrorBodyIsDecoded(t *testing.T) {
 		want        string
 	}{
 		{"MessagePack", "application/msgpack", packed, `{"error":"Field 'age' must be an Integer"}`},
+		{"MessagePack with a charset", "application/msgpack; charset=binary", packed, `{"error":"Field 'age' must be an Integer"}`},
+		{"MessagePack in another letter case", "Application/X-MsgPack", packed, `{"error":"Field 'age' must be an Integer"}`},
 		{"JSON", "application/json", []byte(`{"error":"bad filter"}`), `{"error":"bad filter"}`},
+		{"malformed MessagePack", "application/msgpack", []byte{0xc1, 0xff}, "\xc1\xff"},
+		{"MessagePack that is not a map", "application/msgpack", notAMap, string(notAMap)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := createTestServer(t, map[string]http.HandlerFunc{
@@ -4137,5 +4145,33 @@ func TestMessagePackErrorBodyIsDecoded(t *testing.T) {
 				t.Fatalf("got %d %q, want 400 %q", httpErr.StatusCode, httpErr.Message, tc.want)
 			}
 		})
+	}
+}
+
+// A client that redacts remote errors still answers with its fixed message when the failed
+// response is MessagePack: the body is decoded first, and nothing of it reaches the error.
+func TestMessagePackErrorBodyIsRedactedInRedactedMode(t *testing.T) {
+	packed, err := msgpack.Marshal(map[string]interface{}{"error": "secret detail"})
+	if err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/insert/users": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/msgpack")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write(packed)
+		},
+	})
+	defer server.Close()
+	client := createTestClient(t, server)
+	client.redactErrors = true
+
+	_, err = client.Insert("users", Record{"name": "Alice"})
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("expected an *HTTPError, got %T: %v", err, err)
+	}
+	if httpErr.Message != "admin request failed" {
+		t.Fatalf("Message = %q, want the redacted message", httpErr.Message)
 	}
 }
