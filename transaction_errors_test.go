@@ -8,8 +8,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/vmihailenco/msgpack/v5"
 )
 
 // A call on an existing transaction (commit, rollback, or a savepoint call)
@@ -126,21 +124,37 @@ func TestCommitConflictIsRetryableAndSentOnce(t *testing.T) {
 	}
 }
 
-// A transaction failure answered as MessagePack carries the server's message and retryable
-// flag the way the JSON answer does (ekoDB/ekodb-client-go#122): the body is decoded before
-// the transaction error is built.
-func TestCommitConflictAnsweredAsMessagePackIsRetryable(t *testing.T) {
-	packed, err := msgpack.Marshal(map[string]interface{}{
-		"error":          "write conflict on users/1",
-		"transaction_id": "tx-1",
-		"retryable":      true,
+// A transaction route is JSON-only, even for a client whose format is MessagePack: shouldUseJSON
+// sends the request, and asks for the answer, as JSON, so a commit conflict arrives as JSON and
+// carries the server's message and retryable flag (ekoDB/ekodb-client-go#122).
+func TestMessagePackClientCommitConflictIsAskedForAndReadAsJSON(t *testing.T) {
+	var mu sync.Mutex
+	var accepts, contentTypes []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/token" {
+			mockTokenHandler(t)(w, r)
+			return
+		}
+		mu.Lock()
+		accepts = append(accepts, r.Header.Get("Accept"))
+		contentTypes = append(contentTypes, r.Header.Get("Content-Type"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":"write conflict on users/1","transaction_id":"tx-1","retryable":true}`))
+	}))
+	defer server.Close()
+	client, err := NewClientWithConfig(ClientConfig{
+		BaseURL:     server.URL,
+		APIKey:      "test-api-key",
+		ShouldRetry: true,
+		MaxRetries:  3,
+		Timeout:     5 * time.Second,
+		Format:      MessagePack,
 	})
 	if err != nil {
-		t.Fatalf("fixture: %v", err)
+		t.Fatalf("Failed to create test client: %v", err)
 	}
-	server, paths := transactionFailureServer(t, http.StatusConflict, "application/msgpack", string(packed))
-	defer server.Close()
-	client := retryingTestClient(t, server)
 
 	httpErr := requireHTTPError(t, client.CommitTransaction("tx-1"))
 	if httpErr.StatusCode != http.StatusConflict {
@@ -152,8 +166,10 @@ func TestCommitConflictAnsweredAsMessagePackIsRetryable(t *testing.T) {
 	if !httpErr.Retryable {
 		t.Error("Retryable = false, want true")
 	}
-	if got := paths(); len(got) != 1 {
-		t.Errorf("transaction requests = %v, want exactly one commit", got)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(accepts) != 1 || accepts[0] != "application/json" || contentTypes[0] != "application/json" {
+		t.Errorf("commit sent Accept %v and Content-Type %v, want one request asking for application/json", accepts, contentTypes)
 	}
 }
 
