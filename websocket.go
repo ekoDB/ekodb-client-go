@@ -1532,7 +1532,9 @@ func (ws *WebSocketClient) BatchDelete(collection string, ids []string, bypassRi
 }
 
 // textSearchLanguage is the language a WebSocket TextSearch sends with its
-// options: the server requires the field and uses this value when it is unset.
+// options. The server requires the field in the options, so a search that
+// sends options always names one, and english is the server's default
+// language. The caller cannot choose another yet (ekoDB/ekodb-client-go#130).
 const textSearchLanguage = "english"
 
 // TextSearch performs full-text search via WebSocket.
