@@ -23,6 +23,13 @@ and this project adheres to
 
 ### Fixed
 
+- A WebSocket `TextSearch` sends its field list as `search_fields`, the name the
+  server reads; it sent `fields`. It also sends `"language": "english"`, the
+  server's default, with its options: the server's options require `language`,
+  so a search with fields or a limit was refused. A WebSocket `CreateCollection`
+  with no schema sends `{"fields": {}}`; it sent `{}`, which the server refuses
+  because a schema needs `fields` (ekoDB/ekodb-client-go#125).
+
 - **Document counts are exact past one page (ekoDB/ekodb-client#405).**
   `CountDocuments` now sends `POST /api/count/{collection}`, new in ekoDB server
   0.84.0, and returns the server's `count`, instead of the length of a
