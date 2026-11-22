@@ -4072,3 +4072,30 @@ func TestCountDocumentsUsesJSONForAMessagePackClient(t *testing.T) {
 		t.Fatalf("got %d, %v; want 3", count, err)
 	}
 }
+
+// TestCountDocumentsInRedactionModeHidesAnUndecodableBody pins that a count answer that is not
+// JSON is reported without the decoder's message, which quotes the offending byte, when errors
+// are redacted. Control: an unredacted client still returns the decoding error.
+func TestCountDocumentsInRedactionModeHidesAnUndecodableBody(t *testing.T) {
+	var paths []string
+	var bodies []map[string]interface{}
+	server := createTestServer(t, map[string]http.HandlerFunc{
+		"POST /api/count/users": countHandler(t, http.StatusOK, `<secret_marker>`, &paths, &bodies),
+	})
+	defer server.Close()
+	client := createTestClient(t, server)
+
+	_, err := client.CountDocuments("users")
+	if err == nil || !strings.Contains(err.Error(), "invalid character") {
+		t.Fatalf("control: an unredacted client returned %v, want the decoding error", err)
+	}
+
+	client.redactErrors = true
+	_, err = client.CountDocuments("users")
+	if err == nil {
+		t.Fatal("a response that is not JSON was accepted")
+	}
+	if got := err.Error(); got != "count response could not be decoded" {
+		t.Fatalf("the redacted error is %q, want the fixed message", got)
+	}
+}
