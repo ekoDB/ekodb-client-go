@@ -1537,9 +1537,10 @@ func (ws *WebSocketClient) TextSearch(collection, query string, fields []string,
 		"collection": collection,
 		"query":      query,
 	}
+	// The server names the field list search_fields (ekoDB/ekodb-client-go#125).
 	opts := map[string]interface{}{}
 	if len(fields) > 0 {
-		opts["fields"] = fields
+		opts["search_fields"] = fields
 	}
 	if limit > 0 {
 		opts["limit"] = limit
@@ -1596,7 +1597,9 @@ func (ws *WebSocketClient) CreateCollection(name string, schema ...interface{}) 
 	if len(schema) > 0 && schema[0] != nil {
 		payload["schema"] = schema[0]
 	} else {
-		payload["schema"] = map[string]interface{}{}
+		// With no schema, an empty one: a schema always has a fields object
+		// (ekoDB/ekodb-client-go#125).
+		payload["schema"] = map[string]interface{}{"fields": map[string]interface{}{}}
 	}
 	_, err := ws.sendCRUD("CreateCollection", payload)
 	return err
