@@ -526,7 +526,11 @@ func TestActsOnExistingTransaction(t *testing.T) {
 		{http.MethodGet, "/api/transactions/tx-1", false},
 		{http.MethodGet, "/api/transactions/tx-1/commit", false},
 		{http.MethodPost, "/api/transactions/tx-1/savepoints/sp1", false},
-		{http.MethodPost, "/api/transactions//commit", false},
+		// An empty id or savepoint name still names an existing-transaction route, which is
+		// sent once like any other.
+		{http.MethodPost, "/api/transactions//commit", true},
+		{http.MethodPost, "/api/transactions/tx-1/savepoints//rollback", true},
+		{http.MethodDelete, "/api/transactions/tx-1/savepoints/", true},
 		{http.MethodPost, "/api/transactionsx/tx-1/commit", false},
 		{http.MethodPost, "/api/insert/transactions", false},
 	} {
