@@ -60,16 +60,19 @@ and this project adheres to
   `AdminClient`) and whose new `Retryable` field is the server's `retryable`
   flag (`false` when absent or not a boolean). `Retryable == true` means begin a
   new transaction and run the work again. The client no longer re-sends those
-  five calls, whatever the status, the flag or a network error. Before, it
-  re-sent every 503 and 429 and every network error; a failed commit has already
-  discarded its transaction when the server answers, so the re-send came back as
-  a 404 that hid the original cause. A `401` still refreshes the token and is
-  sent again once, and a `500` whose body mentions an invalid token is no longer
-  taken as a reason to refresh and re-send one of those calls.
-  `BeginTransaction` and `GetTransactionStatus` are unchanged: a refused begin
-  started no transaction and a status read changes nothing, so both keep the
-  normal retry policy and error types (a begin still throttled after its retries
-  returns `*RateLimitError`).
+  five calls on any status but `401`, whatever the flag, or on a network error
+  (an empty id or savepoint name is still one of those calls, sent once).
+  Before, it re-sent every 503 and 429 and every network error; a failed commit
+  has already discarded its transaction when the server answers, so the re-send
+  came back as a 404 that hid the original cause. A `401` still refreshes the
+  token and is sent again once; a `401` that persists after the refresh returns
+  the plain `authentication failed after token refresh` error every other call
+  returns, not an `*HTTPError`, so it carries no `Retryable` flag. A `500` whose
+  body mentions an invalid token is no longer taken as a reason to refresh and
+  re-send one of those calls. `BeginTransaction` and `GetTransactionStatus` are
+  unchanged: a refused begin started no transaction and a status read changes
+  nothing, so both keep the normal retry policy and error types (a begin still
+  throttled after its retries returns `*RateLimitError`).
 
 - Docs: `UpdateSchemaConstraints`, the `SchemaConstraintUpdate` comment and the
   README now say what current servers do with an update. They replace a named
