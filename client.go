@@ -612,12 +612,9 @@ func actsOnExistingTransaction(method, path string) bool {
 	if !ok {
 		return false
 	}
+	// An empty id or name is still an existing-transaction call: the position of the segments
+	// decides, so a call that names nothing is sent once like any other and never re-sent.
 	segments := strings.Split(rest, "/")
-	for _, segment := range segments {
-		if segment == "" {
-			return false
-		}
-	}
 	switch len(segments) {
 	case 2:
 		action := segments[1]
